@@ -22,6 +22,7 @@ using FileReadCallback = std::function<void(FileResultOr<FileReadResult>)>;
 using FileReclaimCallback = std::function<void(FileResultOr<std::uint64_t>)>;
 using FileRemoveCallback = std::function<void(FileResult)>;
 using FileStreamContinueCallback = std::function<void(std::uint64_t)>;
+using FileStreamDataCallback = std::function<void(FileResultOr<FileStreamResult>)>;
 using FileTouchCallback = std::function<void(FileResult)>;
 using FileTruncateCallback = std::function<void(FileResult)>;
 using FileWriteCallback = std::function<void(FileResultOr<FileWriteResult>)>;
