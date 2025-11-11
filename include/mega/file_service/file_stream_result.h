@@ -11,7 +11,7 @@ namespace file_service
 struct FileStreamResult
 {
     // Call to continue streaming data from the file.
-    FileStreamContinueCallback mContinue;
+    FileStreamContinueCallback mContinue = [](std::uint64_t) {};
 
     // The data most recently streamed from the file.
     const void* mBuffer = nullptr;
