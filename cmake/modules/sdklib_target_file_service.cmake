@@ -56,6 +56,8 @@ target_sources(SDKlib PRIVATE
                       include/mega/file_service/file_service_result_forward.h
                       include/mega/file_service/file_service_result_or.h
                       include/mega/file_service/file_service_result_or_forward.h
+                      include/mega/file_service/file_stream_result.h
+                      include/mega/file_service/file_stream_result_forward.h
                       include/mega/file_service/file_touch_event.h
                       include/mega/file_service/file_touch_event_forward.h
                       include/mega/file_service/file_truncate_event.h
