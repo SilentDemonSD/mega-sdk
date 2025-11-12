@@ -32,17 +32,17 @@ using StreamContextPtr = std::shared_ptr<StreamContext>;
 
 class StreamContext
 {
-    // Called when we've received file data.
-    void onData(StreamContextPtr& context,
-                std::uint64_t length,
-                std::uint64_t offset,
-                FileResultOr<FileReadResult> result);
-
     // Called when the user wants to stream more file data.
     void onContinue(StreamContextPtr& context,
                     std::uint64_t consumed,
                     std::uint64_t length,
                     std::uint64_t offset);
+
+    // Called when we've received file data.
+    void onData(StreamContextPtr& context,
+                std::uint64_t length,
+                std::uint64_t offset,
+                FileResultOr<FileReadResult> result);
 
     // Where we will temporarily store file data.
     std::vector<char> mBuffer;
@@ -241,6 +241,21 @@ void File::write(const void* buffer, FileWriteCallback callback, const FileRange
     mContext->write(FileWriteRequest{buffer, std::move(callback), range});
 }
 
+void StreamContext::onContinue(StreamContextPtr& context,
+                               std::uint64_t consumed,
+                               std::uint64_t length,
+                               std::uint64_t offset)
+{
+    // Sanity.
+    assert(context.get() == this);
+
+    // Make sure consumed is sane.
+    consumed = std::min(consumed, length);
+
+    // Try and stream some more file data.
+    stream(std::move(context), offset + consumed, length - consumed);
+}
+
 void StreamContext::onData(StreamContextPtr& context,
                            std::uint64_t length,
                            std::uint64_t offset,
@@ -276,21 +291,6 @@ void StreamContext::onData(StreamContextPtr& context,
                                          offset),
                                mBuffer.data(),
                                count});
-}
-
-void StreamContext::onContinue(StreamContextPtr& context,
-                               std::uint64_t consumed,
-                               std::uint64_t length,
-                               std::uint64_t offset)
-{
-    // Sanity.
-    assert(context.get() == this);
-
-    // Make sure consumed is sane.
-    consumed = std::min(consumed, length);
-
-    // Try and stream some more file data.
-    stream(std::move(context), offset + consumed, length - consumed);
 }
 
 StreamContext::StreamContext(FileStreamDataCallback callback, File file):
