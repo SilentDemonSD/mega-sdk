@@ -36,6 +36,7 @@
 #include <mega/file_service/testing/integration/client.h>
 #include <mega/file_service/testing/integration/real_client.h>
 #include <mega/file_service/testing/integration/scoped_file_event_observer.h>
+#include <mega/file_service/utility.h>
 
 #include <chrono>
 #include <cinttypes>
@@ -2986,7 +2987,7 @@ TEST_F(FileServiceTests, stream_succeeds)
         auto notifier = makeSharedPromise<FileResultOr<std::string>>();
 
         // Try and stream all of the file's data.
-        file->stream(
+        stream(
             [=](auto result)
             {
                 // For a stronger test, process result on the client's thread.
@@ -3013,6 +3014,7 @@ TEST_F(FileServiceTests, stream_succeeds)
                         result->mContinue(result->mLength);
                     });
             },
+            std::move(*file),
             0,
             mFileContent.size());
 

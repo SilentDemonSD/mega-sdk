@@ -89,9 +89,6 @@ public:
     // Remove a previously added observer.
     void removeObserver(FileEventObserverID id);
 
-    // Stream data from this file.
-    void stream(FileStreamDataCallback callback, std::uint64_t offset, std::uint64_t length);
-
     // Update the file's modification time.
     void touch(FileTouchCallback callback, std::int64_t modified);
 

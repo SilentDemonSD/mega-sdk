@@ -69,6 +69,7 @@ target_sources(SDKlib PRIVATE
                       include/mega/file_service/sink_forward.h
                       include/mega/file_service/source.h
                       include/mega/file_service/source_forward.h
+                      include/mega/file_service/utility.h
 )
 
 target_sources(SDKlib PRIVATE
@@ -169,4 +170,5 @@ target_sources(SDKlib PRIVATE
                       src/file_service/logger.cpp
                       src/file_service/memory_buffer.cpp
                       src/file_service/sparse_file_buffer.cpp
+                      src/file_service/utility.cpp
 )
