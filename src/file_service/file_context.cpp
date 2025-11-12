@@ -2110,9 +2110,12 @@ void FileContext::ReclaimContext::completed(ReclaimContextPtr context,
     // Release reclaim context lock.
     lock.unlock();
 
+    // Convenience.
+    auto& service = mContext.mService;
+
     // Execute queued callbacks.
     for (auto& callback: callbacks)
-        callback(result);
+        service.execute(std::bind(std::move(callback), result));
 }
 
 FileContext::ReclaimContext::ReclaimContext(FileContext& context):
