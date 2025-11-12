@@ -3003,7 +3003,7 @@ TEST_F(FileServiceTests, stream_succeeds)
         auto notifier = makeSharedPromise<FileResultOr<std::string>>();
 
         // Try and stream all of the file's data.
-        file->stream(
+        stream(
             [=](auto result)
             {
                 // For a stronger test, process result on the client's thread.
@@ -3030,6 +3030,7 @@ TEST_F(FileServiceTests, stream_succeeds)
                         result->mContinue(result->mLength);
                     });
             },
+            std::move(*file),
             0,
             mFileContent.size());
 
