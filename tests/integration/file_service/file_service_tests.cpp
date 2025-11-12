@@ -12,6 +12,7 @@
 #include <mega/common/utility.h>
 #include <mega/file_service/file.h>
 #include <mega/file_service/file_event.h>
+#include <mega/file_service/file_event_observer_result.h>
 #include <mega/file_service/file_event_vector.h>
 #include <mega/file_service/file_flush_event.h>
 #include <mega/file_service/file_id.h>
@@ -2817,6 +2818,342 @@ TEST_F(FileServiceTests, reclaim_single_succeeds)
 
     // And that the data we read was correct.
     ASSERT_TRUE(*computed == expected);
+}
+
+TEST_F(FileServiceTests, release_file_within_append_callback_succeeds)
+{
+    // Create a file we can modify.
+    auto file = mClient->fileCreate(mRootHandle, randomName());
+    ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+
+    // Try and append some data to the end of the file.
+    auto waiter = [file = std::move(*file), this]() mutable
+    {
+        // The data we want to append to the file.
+        auto data = randomBytes(16);
+
+        // So we can wait for the append to complete.
+        auto notifier = makeSharedPromise<FileResult>();
+
+        // Try and append to the file.
+        file.append(
+            data.data(),
+            [file, notifier](auto result)
+            {
+                notifier->set_value(result);
+            },
+            data.size());
+
+        // Return waiter to our caller.
+        return notifier->get_future();
+    }();
+
+    // Wait for the append to complete.
+    ASSERT_NE(waiter.wait_for(mDefaultTimeout), timeout);
+
+    // Make sure the append completed successfully.
+    ASSERT_EQ(waiter.get(), FILE_SUCCESS);
+}
+
+TEST_F(FileServiceTests, release_within_event_callback_succeeds)
+{
+    // Create a file we can safely remove.
+    auto handle = mClient->upload(randomBytes(256), randomName(), mRootHandle);
+    ASSERT_EQ(handle.errorOr(API_OK), API_OK);
+
+    // Open the file.
+    auto file = mClient->fileOpen(*handle);
+    ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+
+    // Try and remove the file.
+    auto waiter = [file = std::move(*file), this]() mutable
+    {
+        // So we know when the file's been removed.
+        auto notifier = makeSharedPromise<void>();
+
+        // Add an observer.
+        file.addObserver(
+            [file, notifier](auto)
+            {
+                // Let waiters know we received an event.
+                notifier->set_value();
+
+                // Make sure this observer is removed.
+                return FILE_EVENT_OBSERVER_REMOVE;
+            });
+
+        // Try and remove the file.
+        file.remove([](auto) {}, false);
+
+        // Return the waiter to our caller.
+        return notifier->get_future();
+    }();
+
+    // Wait for an event to be generated.
+    ASSERT_NE(waiter.wait_for(mDefaultTimeout), timeout);
+}
+
+TEST_F(FileServiceTests, release_file_within_fetch_callback_succeeds)
+{
+    // Open a file for us to fetch.
+    auto file = mClient->fileOpen(mFileHandle);
+    ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+
+    // Try and fetch the file's data.
+    auto waiter = [file = std::move(*file), this]() mutable
+    {
+        // So we can wait for the fetch to complete.
+        auto notifier = makeSharedPromise<FileResult>();
+
+        // Try and fetch the file's data.
+        file.fetch(
+            [file, notifier](auto result)
+            {
+                notifier->set_value(result);
+            });
+
+        // Return waiter to our caller.
+        return notifier->get_future();
+    }(); // waiter
+
+    // Wait for the fetch to complete.
+    ASSERT_NE(waiter.wait_for(mDefaultTimeout), timeout);
+
+    // Make sure the fetch completed successfully.
+    ASSERT_EQ(waiter.get(), FILE_SUCCESS);
+}
+
+TEST_F(FileServiceTests, release_file_within_fetch_barrier_callback_succeeds)
+{
+    // Open a file for us to fetch.
+    auto file = mClient->fileOpen(mFileHandle);
+    ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+
+    // Initiate a fetch for all of the file's data.
+    file->fetch([](auto) {});
+
+    // Signal when the fetch completes.
+    auto waiter = [file = std::move(*file)]() mutable
+    {
+        auto notifier = makeSharedPromise<void>();
+
+        file.fetchBarrier(
+            [file, notifier]()
+            {
+                notifier->set_value();
+            });
+
+        return notifier->get_future();
+    }();
+
+    // Wait for the fetch to complete.
+    ASSERT_NE(waiter.wait_for(mDefaultTimeout), timeout);
+}
+
+TEST_F(FileServiceTests, release_file_within_flush_callback_succeeds)
+{
+    // Open a file for us to fetch.
+    auto file = mClient->fileCreate(mRootHandle, randomName());
+    ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+
+    // Try and flush the file.
+    auto waiter = [file = std::move(*file), this]() mutable
+    {
+        // So we can wait for the fetch to complete.
+        auto notifier = makeSharedPromise<FileResult>();
+
+        // Try and fetch the file's data.
+        file.flush(
+            [file, notifier](auto result)
+            {
+                notifier->set_value(result);
+            });
+
+        // Return waiter to our caller.
+        return notifier->get_future();
+    }(); // waiter
+
+    // Wait for the flush to complete.
+    ASSERT_NE(waiter.wait_for(mDefaultTimeout), timeout);
+
+    // Make sure the fetch completed successfully.
+    ASSERT_EQ(waiter.get(), FILE_SUCCESS);
+}
+
+TEST_F(FileServiceTests, release_file_within_purge_callback_succeeds)
+{
+    // Create a file we can purge.
+    auto file = mClient->fileCreate(mRootHandle, randomName());
+    ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+
+    // Try and purge the file.
+    auto waiter = [file = std::move(*file)]() mutable
+    {
+        auto notifier = makeSharedPromise<FileResult>();
+
+        file.purge(
+            [file, notifier](auto result)
+            {
+                notifier->set_value(result);
+            });
+
+        return notifier->get_future();
+    }();
+
+    // Wait for the purge to complete.
+    ASSERT_NE(waiter.wait_for(mDefaultTimeout), timeout);
+
+    // Make sure purge completed successfully.
+    ASSERT_EQ(waiter.get(), FILE_SUCCESS);
+}
+
+TEST_F(FileServiceTests, release_file_within_reclaim_callback_succeeds)
+{
+    // Open a file for us to reclaim.
+    auto file = mClient->fileOpen(mFileHandle);
+    ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+
+    // Try and reclaim the file.
+    auto waiter = [file = std::move(*file), this]() mutable
+    {
+        // So we can wait for the reclamation to complete.
+        auto notifier = makeSharedPromise<FileResult>();
+
+        // Try and reclaim the file.
+        file.reclaim(
+            [file, notifier](auto result)
+            {
+                notifier->set_value(result.errorOr(FILE_SUCCESS));
+            });
+
+        // Return waiter to our caller.
+        return notifier->get_future();
+    }(); // waiter
+
+    // Wait for the file to be reclaimed.
+    ASSERT_NE(waiter.wait_for(mDefaultTimeout), timeout);
+
+    // Make sure reclamation completed successfully.
+    ASSERT_EQ(waiter.get(), FILE_SUCCESS);
+}
+
+TEST_F(FileServiceTests, release_file_within_remove_callback_succeeds)
+{
+    // Create a cloud file that we can safely remove.
+    auto handle = mClient->upload(randomBytes(256), randomName(), mRootHandle);
+    ASSERT_EQ(handle.errorOr(API_OK), API_OK);
+
+    // Open the file.
+    auto file = mClient->fileOpen(*handle);
+    ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+
+    // Try and remove the file.
+    auto waiter = [file = std::move(*file), this]() mutable
+    {
+        auto notifier = makeSharedPromise<FileResult>();
+
+        file.remove(
+            [file, notifier](auto result)
+            {
+                notifier->set_value(result);
+            },
+            false);
+
+        return notifier->get_future();
+    }();
+
+    // Wait for the file to be removed.
+    ASSERT_NE(waiter.wait_for(mDefaultTimeout), timeout);
+
+    // Make sure the file was removed successfully.
+    ASSERT_EQ(waiter.get(), FILE_SUCCESS);
+}
+
+TEST_F(FileServiceTests, release_file_within_touch_callback_succeeds)
+{
+    // Create a file we can safely modify.
+    auto file = mClient->fileCreate(mRootHandle, randomName());
+    ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+
+    // Try and alter the file's modification time.
+    auto waiter = [file = std::move(*file), this]() mutable
+    {
+        auto notifier = makeSharedPromise<FileResult>();
+
+        file.touch(
+            [file, notifier](auto result)
+            {
+                notifier->set_value(result);
+            },
+            0);
+
+        return notifier->get_future();
+    }();
+
+    // Wait for the file's modification time to be updated.
+    ASSERT_NE(waiter.wait_for(mDefaultTimeout), timeout);
+
+    // Make sure the file's modification time was updated successfully.
+    ASSERT_EQ(waiter.get(), FILE_SUCCESS);
+}
+
+TEST_F(FileServiceTests, release_file_within_truncate_callback_succeeds)
+{
+    // Create a file we can safely modify.
+    auto file = mClient->fileCreate(mRootHandle, randomName());
+    ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+
+    // Try and truncate the file.
+    auto waiter = [file = std::move(*file), this]() mutable
+    {
+        auto notifier = makeSharedPromise<FileResult>();
+
+        file.truncate(
+            [file, notifier](auto result)
+            {
+                notifier->set_value(result);
+            },
+            0);
+
+        return notifier->get_future();
+    }();
+
+    // Wait for the file to be truncated.
+    ASSERT_NE(waiter.wait_for(mDefaultTimeout), timeout);
+
+    // Make sure we could truncate the file.
+    ASSERT_EQ(waiter.get(), FILE_SUCCESS);
+}
+
+TEST_F(FileServiceTests, release_file_within_write_callback_succeeds)
+{
+    // Create a file we can safely modify.
+    auto file = mClient->fileCreate(mRootHandle, randomName());
+    ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+
+    // Try and write the file.
+    auto waiter = [file = std::move(*file), this]() mutable
+    {
+        auto data = randomBytes(32);
+        auto notifier = makeSharedPromise<FileResult>();
+
+        file.write(
+            data.data(),
+            [file, notifier](auto result)
+            {
+                notifier->set_value(result.errorOr(FILE_SUCCESS));
+            },
+            0,
+            data.size());
+
+        return notifier->get_future();
+    }();
+
+    // Wait for the file to be truncated.
+    ASSERT_NE(waiter.wait_for(mDefaultTimeout), timeout);
+
+    // Make sure we could truncate the file.
+    ASSERT_EQ(waiter.get(), FILE_SUCCESS);
 }
 
 TEST_F(FileServiceTests, remove_local_succeeds)
