@@ -33,15 +33,6 @@ void FileInfoContext::set(T FileInfoContext::*property, U&& value)
     this->*property = std::forward<U>(value);
 }
 
-void FileInfoContext::notify(const FileEvent& event)
-{
-    // Notify observers interested in this particular file.
-    FileEventEmitter::notify(event);
-
-    // Notify observers interested in all files.
-    mService.notify(event);
-}
-
 FileInfoContext::FileInfoContext(std::int64_t accessed,
                                  Activity activity,
                                  std::uint64_t allocatedSize,
@@ -53,7 +44,7 @@ FileInfoContext::FileInfoContext(std::int64_t accessed,
                                  std::uint64_t reportedSize,
                                  FileServiceContext& service,
                                  std::uint64_t size):
-    FileEventEmitter(),
+    FileSizeInfo(),
     mInstanceLogger("FileInfoContext", *this, logger()),
     mAccessed(accessed),
     mActivity(std::move(activity)),
@@ -87,6 +78,11 @@ std::int64_t FileInfoContext::accessed() const
     return get(&FileInfoContext::mAccessed);
 }
 
+FileEventObserverID FileInfoContext::addObserver(FileEventObserver observer)
+{
+    return mService.addObserver(mID, std::move(observer));
+}
+
 void FileInfoContext::allocatedSize(std::uint64_t allocatedSize)
 {
     set(&FileInfoContext::mAllocatedSize, allocatedSize);
@@ -108,7 +104,7 @@ void FileInfoContext::flushed(NodeHandle handle)
     assert(!handle.isUndef());
 
     // Let observers know the file's been flushed.
-    notify(
+    mService.notify(
         [=]()
         {
             // Make sure no one else is changing our information.
@@ -136,7 +132,7 @@ FileID FileInfoContext::id() const
 
 void FileInfoContext::location(const FileLocation& to)
 {
-    notify(
+    mService.notify(
         [&]()
         {
             // Make sure no one else is modifying the location.
@@ -164,7 +160,7 @@ std::optional<FileLocation> FileInfoContext::location() const
 void FileInfoContext::modified(std::int64_t accessed, std::int64_t modified)
 {
     // Update the file's modification time and return a new event.
-    notify(
+    mService.notify(
         [accessed, modified, this]()
         {
             // Make sure no one else is changing this file's information.
@@ -193,7 +189,12 @@ void FileInfoContext::removed(bool replaced)
 {
     set(&FileInfoContext::mRemoved, true);
 
-    notify(FileRemoveEvent{mID, replaced});
+    mService.notify(FileRemoveEvent{mID, replaced});
+}
+
+void FileInfoContext::removeObserver(FileEventObserverID id)
+{
+    mService.removeObserver(mID, id);
 }
 
 bool FileInfoContext::removed() const
@@ -219,7 +220,7 @@ std::uint64_t FileInfoContext::size() const
 void FileInfoContext::truncated(std::int64_t modified, std::uint64_t size)
 {
     // Update the file's information and return an event for notification.
-    notify(
+    mService.notify(
         [modified, size, this]() mutable
         {
             // Convenience.
@@ -255,7 +256,7 @@ void FileInfoContext::truncated(std::int64_t modified, std::uint64_t size)
 void FileInfoContext::written(std::int64_t modified, const FileRange& range)
 {
     // Update the file's information and return an event for notification.
-    notify(
+    mService.notify(
         [modified, &range, this]()
         {
             // Make sure we have exclusive access to our information.

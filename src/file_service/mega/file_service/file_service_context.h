@@ -11,7 +11,7 @@
 #include <mega/common/task_queue.h>
 #include <mega/file_service/file_context_badge_forward.h>
 #include <mega/file_service/file_context_pointer.h>
-#include <mega/file_service/file_event_emitter.h>
+#include <mega/file_service/file_event_notifier.h>
 #include <mega/file_service/file_forward.h>
 #include <mega/file_service/file_id_forward.h>
 #include <mega/file_service/file_id_vector.h>
@@ -41,7 +41,7 @@ class LocalPath;
 namespace file_service
 {
 
-class FileServiceContext: common::NodeEventObserver, public FileEventEmitter
+class FileServiceContext: common::NodeEventObserver
 {
     // Processes client node events.
     class EventProcessor;
@@ -159,6 +159,9 @@ class FileServiceContext: common::NodeEventObserver, public FileEventEmitter
     // Serializes access to mReclaimTask.
     std::recursive_mutex mReclaimTaskLock;
 
+    // Responsible for event notification.
+    FileEventNotifier mEventNotifier;
+
     // This member will ensure the context isn't destroyed until any related
     // activities have been completed.
     //
@@ -180,6 +183,12 @@ public:
     auto add(NodeHandle handle, const common::NodeKeyData& keyData, std::size_t size)
         -> FileServiceResultOr<FileID>;
 
+    // Notify observer when a file changes.
+    FileEventObserverID addObserver(FileEventObserver observer);
+
+    // Notify observer when a specific file changes.
+    FileEventObserverID addObserver(FileID id, FileEventObserver observer);
+
     // Retrieve a reference to this service's client.
     common::Client& client();
 
@@ -194,6 +203,9 @@ public:
 
     // Retrieve information about a file managed by this service.
     auto info(FileID id) -> FileServiceResultOr<FileInfo>;
+
+    // Emit a file event.
+    void notify(const FileEvent& event);
 
     // Open a file for reading or writing.
     auto open(NodeHandle parent, const std::string& name) -> FileServiceResultOr<File>;
@@ -216,6 +228,12 @@ public:
 
     // Reclaim storage space.
     void reclaim(ReclaimCallback callback);
+
+    // Remove an observer.
+    void removeObserver(FileEventObserverID id);
+
+    // Remove an observer from a specific file.
+    void removeObserver(FileID id, FileEventObserverID observerID);
 
     // Remove a file context from our index.
     void removeFromIndex(FileContextBadge badge, FileID id);

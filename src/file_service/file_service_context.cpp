@@ -879,7 +879,6 @@ void FileServiceContext::updated(NodeEventQueue& events)
 
 FileServiceContext::FileServiceContext(Client& client, const FileServiceOptions& options):
     NodeEventObserver(),
-    FileEventEmitter(),
     mInstanceLogger("FileServiceContext", *this, logger()),
     mClient(client),
     mStorage(mClient),
@@ -895,6 +894,7 @@ FileServiceContext::FileServiceContext(Client& client, const FileServiceOptions&
     mReclaimContextLock(),
     mReclaimTask(),
     mReclaimTaskLock(),
+    mEventNotifier(),
     mActivities(),
     mExecutor(TaskExecutorFlags(), logger())
 {
@@ -1012,6 +1012,16 @@ catch (std::runtime_error& exception)
     FSErrorF("Unable to add foreign file to service: %s", exception.what());
 
     return unexpected(FILE_SERVICE_UNEXPECTED);
+}
+
+FileEventObserverID FileServiceContext::addObserver(FileEventObserver observer)
+{
+    return mEventNotifier.addObserver(std::move(observer));
+}
+
+FileEventObserverID FileServiceContext::addObserver(FileID id, FileEventObserver observer)
+{
+    return mEventNotifier.addObserver(id, std::move(observer));
 }
 
 Client& FileServiceContext::client()
@@ -1177,6 +1187,11 @@ catch (std::runtime_error& exception)
     FSErrorF("Unable to get file information: %s: %s", toString(id).c_str(), exception.what());
 
     return unexpected(FILE_SERVICE_UNEXPECTED);
+}
+
+void FileServiceContext::notify(const FileEvent& event)
+{
+    mEventNotifier.notify(event);
 }
 
 auto FileServiceContext::open(NodeHandle parent, const std::string& name)
@@ -1440,6 +1455,16 @@ void FileServiceContext::reclaim(ReclaimCallback callback)
     mReclaimContext->reclaim(mReclaimContext);
 }
 
+void FileServiceContext::removeObserver(FileEventObserverID id)
+{
+    mEventNotifier.removeObserver(id);
+}
+
+void FileServiceContext::removeObserver(FileID id, FileEventObserverID observerID)
+{
+    mEventNotifier.removeObserver(id, observerID);
+}
+
 void FileServiceContext::removeFromIndex(FileContextBadge, FileID id)
 {
     removeFromIndex(id, mFileContexts);
@@ -1457,6 +1482,9 @@ try
     // mInfoContexts contains a distinct info instance for this file.
     if (!removeFromIndex(id, lockContexts, mInfoContexts))
         return;
+
+    // Remove all observers who were watching this file.
+    mEventNotifier.removeObservers(id);
 
     // Make sure we have exclusive access to mDatabase.
     UniqueLock lockDatabase(mDatabase);

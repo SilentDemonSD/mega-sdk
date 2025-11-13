@@ -1,7 +1,6 @@
 #include <mega/common/activity_monitor.h>
 #include <mega/common/instance_logger.h>
 #include <mega/common/shared_mutex.h>
-#include <mega/file_service/file_event_emitter.h>
 #include <mega/file_service/file_event_observer.h>
 #include <mega/file_service/file_event_observer_id.h>
 #include <mega/file_service/file_id.h>
@@ -21,11 +20,8 @@ namespace mega
 namespace file_service
 {
 
-class FileInfoContext: FileEventEmitter, public FileSizeInfo
+class FileInfoContext: public FileSizeInfo
 {
-    // Maps observer IDs to observer callbacks.
-    using FileEventObserverMap = std::map<FileEventObserverID, FileEventObserver>;
-
     // Retrieve one of our properties in a thread-safe manner.
     template<typename T>
     auto get(T FileInfoContext::* const property) const;
@@ -33,9 +29,6 @@ class FileInfoContext: FileEventEmitter, public FileSizeInfo
     // Set one of our properties in a thread-safe manner.
     template<typename T, typename U>
     void set(T FileInfoContext::*property, U&& value);
-
-    // Transmit an event to all registered observers.
-    void notify(const FileEvent& event);
 
     // Logs instance lifetime.
     common::InstanceLogger<FileInfoContext> mInstanceLogger;
@@ -100,8 +93,8 @@ public:
     // When was this file last accessed?
     std::int64_t accessed() const;
 
-    // Add an observer.
-    using FileEventEmitter::addObserver;
+    // Notify observer when a file changes.
+    FileEventObserverID addObserver(FileEventObserver observer);
 
     // Update this file's allocated size.
     void allocatedSize(std::uint64_t allocatedSize) override;
@@ -133,14 +126,14 @@ public:
     // When was this file last modified?
     auto modified() const -> std::int64_t;
 
-    // Remove an observer.
-    using FileEventEmitter::removeObserver;
-
     // Specify whether this file has been removed.
     void removed(bool replaced);
 
     // Has this file been removed?
     bool removed() const;
+
+    // Remove a previously added observer.
+    void removeObserver(FileEventObserverID id);
 
     // Update this file's reported size.
     void reportedSize(std::uint64_t reportedSize) override;
