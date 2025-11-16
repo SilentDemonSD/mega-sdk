@@ -8,7 +8,7 @@
 
 #include <atomic>
 #include <condition_variable>
-#include <deque>
+#include <list>
 #include <map>
 #include <mutex>
 #include <thread>
@@ -57,7 +57,7 @@ class FileEventEmitter
     std::recursive_mutex mObserversLock;
 
     // Tracks events waiting to be notified.
-    std::deque<FileEvent> mPendingEvents;
+    std::list<FileEvent> mPendingEvents;
 
     // Serializes access to mPendingEvents.
     std::mutex mPendingEventsLock;
