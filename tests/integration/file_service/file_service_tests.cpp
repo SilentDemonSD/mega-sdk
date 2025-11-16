@@ -2827,7 +2827,7 @@ TEST_F(FileServiceTests, release_file_within_append_callback_succeeds)
     ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
 
     // Try and append some data to the end of the file.
-    auto waiter = [file = std::move(*file), this]() mutable
+    auto waiter = [file = std::move(*file)]() mutable
     {
         // The data we want to append to the file.
         auto data = randomBytes(16);
@@ -2866,7 +2866,7 @@ TEST_F(FileServiceTests, release_within_event_callback_succeeds)
     ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
 
     // Try and remove the file.
-    auto waiter = [file = std::move(*file), this]() mutable
+    auto waiter = [file = std::move(*file)]() mutable
     {
         // So we know when the file's been removed.
         auto notifier = makeSharedPromise<void>();
@@ -2900,7 +2900,7 @@ TEST_F(FileServiceTests, release_file_within_fetch_callback_succeeds)
     ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
 
     // Try and fetch the file's data.
-    auto waiter = [file = std::move(*file), this]() mutable
+    auto waiter = [file = std::move(*file)]() mutable
     {
         // So we can wait for the fetch to complete.
         auto notifier = makeSharedPromise<FileResult>();
@@ -2957,7 +2957,7 @@ TEST_F(FileServiceTests, release_file_within_flush_callback_succeeds)
     ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
 
     // Try and flush the file.
-    auto waiter = [file = std::move(*file), this]() mutable
+    auto waiter = [file = std::move(*file)]() mutable
     {
         // So we can wait for the fetch to complete.
         auto notifier = makeSharedPromise<FileResult>();
@@ -3014,7 +3014,7 @@ TEST_F(FileServiceTests, release_file_within_reclaim_callback_succeeds)
     ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
 
     // Try and reclaim the file.
-    auto waiter = [file = std::move(*file), this]() mutable
+    auto waiter = [file = std::move(*file)]() mutable
     {
         // So we can wait for the reclamation to complete.
         auto notifier = makeSharedPromise<FileResult>();
@@ -3048,7 +3048,7 @@ TEST_F(FileServiceTests, release_file_within_remove_callback_succeeds)
     ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
 
     // Try and remove the file.
-    auto waiter = [file = std::move(*file), this]() mutable
+    auto waiter = [file = std::move(*file)]() mutable
     {
         auto notifier = makeSharedPromise<FileResult>();
 
@@ -3076,7 +3076,7 @@ TEST_F(FileServiceTests, release_file_within_touch_callback_succeeds)
     ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
 
     // Try and alter the file's modification time.
-    auto waiter = [file = std::move(*file), this]() mutable
+    auto waiter = [file = std::move(*file)]() mutable
     {
         auto notifier = makeSharedPromise<FileResult>();
 
@@ -3104,7 +3104,7 @@ TEST_F(FileServiceTests, release_file_within_truncate_callback_succeeds)
     ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
 
     // Try and truncate the file.
-    auto waiter = [file = std::move(*file), this]() mutable
+    auto waiter = [file = std::move(*file)]() mutable
     {
         auto notifier = makeSharedPromise<FileResult>();
 
@@ -3132,7 +3132,7 @@ TEST_F(FileServiceTests, release_file_within_write_callback_succeeds)
     ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
 
     // Try and write the file.
-    auto waiter = [file = std::move(*file), this]() mutable
+    auto waiter = [file = std::move(*file)]() mutable
     {
         auto data = randomBytes(32);
         auto notifier = makeSharedPromise<FileResult>();
