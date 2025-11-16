@@ -59,9 +59,7 @@ FileEventObserverID FileEventNotifier::addObserver(FileEventObserver observer,
     assert(observer);
 
     // Add the observer to our map.
-    auto result = observers.emplace(std::piecewise_construct,
-                                    std::forward_as_tuple(nullptr, nextID++),
-                                    std::forward_as_tuple(std::move(observer)));
+    auto result = observers.emplace(FileEventObserverID{nextID++}, std::move(observer));
 
     // Sanity.
     assert(result.second);
