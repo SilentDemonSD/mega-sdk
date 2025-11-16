@@ -894,7 +894,7 @@ FileServiceContext::FileServiceContext(Client& client, const FileServiceOptions&
     mReclaimContextLock(),
     mReclaimTask(),
     mReclaimTaskLock(),
-    mEventNotifier(),
+    mEventEmitter(),
     mActivities(),
     mExecutor(TaskExecutorFlags(), logger())
 {
@@ -1016,12 +1016,12 @@ catch (std::runtime_error& exception)
 
 FileEventObserverID FileServiceContext::addObserver(FileEventObserver observer)
 {
-    return mEventNotifier.addObserver(std::move(observer));
+    return mEventEmitter.addObserver(std::move(observer));
 }
 
 FileEventObserverID FileServiceContext::addObserver(FileID id, FileEventObserver observer)
 {
-    return mEventNotifier.addObserver(id, std::move(observer));
+    return mEventEmitter.addObserver(id, std::move(observer));
 }
 
 Client& FileServiceContext::client()
@@ -1191,7 +1191,7 @@ catch (std::runtime_error& exception)
 
 void FileServiceContext::notify(const FileEvent& event)
 {
-    mEventNotifier.notify(event);
+    mEventEmitter.notify(event);
 }
 
 auto FileServiceContext::open(NodeHandle parent, const std::string& name)
@@ -1457,12 +1457,12 @@ void FileServiceContext::reclaim(ReclaimCallback callback)
 
 void FileServiceContext::removeObserver(FileEventObserverID id)
 {
-    mEventNotifier.removeObserver(id);
+    mEventEmitter.removeObserver(id);
 }
 
 void FileServiceContext::removeObserver(FileID id, FileEventObserverID observerID)
 {
-    mEventNotifier.removeObserver(id, observerID);
+    mEventEmitter.removeObserver(id, observerID);
 }
 
 void FileServiceContext::removeFromIndex(FileContextBadge, FileID id)
@@ -1484,7 +1484,7 @@ try
         return;
 
     // Remove all observers who were watching this file.
-    mEventNotifier.removeObservers(id);
+    mEventEmitter.removeObservers(id);
 
     // Make sure we have exclusive access to mDatabase.
     UniqueLock lockDatabase(mDatabase);

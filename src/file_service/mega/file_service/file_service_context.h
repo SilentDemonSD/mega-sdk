@@ -11,7 +11,7 @@
 #include <mega/common/task_queue.h>
 #include <mega/file_service/file_context_badge_forward.h>
 #include <mega/file_service/file_context_pointer.h>
-#include <mega/file_service/file_event_notifier.h>
+#include <mega/file_service/file_event_emitter.h>
 #include <mega/file_service/file_forward.h>
 #include <mega/file_service/file_id_forward.h>
 #include <mega/file_service/file_id_vector.h>
@@ -160,7 +160,7 @@ class FileServiceContext: common::NodeEventObserver
     std::recursive_mutex mReclaimTaskLock;
 
     // Responsible for event notification.
-    FileEventNotifier mEventNotifier;
+    FileEventEmitter mEventEmitter;
 
     // This member will ensure the context isn't destroyed until any related
     // activities have been completed.

@@ -1,5 +1,5 @@
 #include <mega/file_service/file_event.h>
-#include <mega/file_service/file_event_notifier.h>
+#include <mega/file_service/file_event_emitter.h>
 #include <mega/file_service/file_event_observer_result.h>
 #include <mega/file_service/file_id.h>
 #include <mega/file_service/logger.h>
@@ -12,23 +12,23 @@ namespace mega
 namespace file_service
 {
 
-struct FileEventNotifier::TransmitContext
+struct FileEventEmitter::TransmitContext
 {
     TransmitContext(FileEventObserverID currentObserverID,
                     FileEventObserverMap& currentObserverMap,
-                    FileEventNotifier& notifier):
+                    FileEventEmitter& emitter):
         mCurrentObserverID(currentObserverID),
         mCurrentObserverMap(&currentObserverMap),
-        mNotifier(notifier),
+        mEmitter(emitter),
         mHasDeferredRemove(false),
         mHasDeferredRemoveAll(false)
     {
-        mNotifier.mTransmitContext = this;
+        mEmitter.mTransmitContext = this;
     }
 
     ~TransmitContext()
     {
-        mNotifier.mTransmitContext = nullptr;
+        mEmitter.mTransmitContext = nullptr;
     }
 
     // What observer are we currently executing?
@@ -37,8 +37,8 @@ struct FileEventNotifier::TransmitContext
     // What map are we currently processing?
     FileEventObserverMap* mCurrentObserverMap;
 
-    // What notifier owns this context?
-    FileEventNotifier& mNotifier;
+    // What emitter owns this context?
+    FileEventEmitter& mEmitter;
 
     // True if we should remove the current observer.
     bool mHasDeferredRemove;
@@ -47,10 +47,10 @@ struct FileEventNotifier::TransmitContext
     bool mHasDeferredRemoveAll;
 }; // TransmitContext
 
-thread_local FileEventNotifier::TransmitContext* FileEventNotifier::mTransmitContext = nullptr;
+thread_local FileEventEmitter::TransmitContext* FileEventEmitter::mTransmitContext = nullptr;
 
-FileEventObserverID FileEventNotifier::addObserver(FileEventObserver observer,
-                                                   FileEventObserverMap& observers)
+FileEventObserverID FileEventEmitter::addObserver(FileEventObserver observer,
+                                                  FileEventObserverMap& observers)
 {
     // Used to generate unique observer IDs.
     static std::uint64_t nextID = 0;
@@ -68,7 +68,7 @@ FileEventObserverID FileEventNotifier::addObserver(FileEventObserver observer,
     return result.first->first;
 }
 
-void FileEventNotifier::loop()
+void FileEventEmitter::loop()
 {
     // Wake the worker if we have events or have been told to terminate.
     auto shouldWake = [&]()
@@ -101,7 +101,7 @@ void FileEventNotifier::loop()
     }
 }
 
-bool FileEventNotifier::shouldDeferRemove(FileEventObserverID id)
+bool FileEventEmitter::shouldDeferRemove(FileEventObserverID id)
 {
     // We aren't executing within an observer callback.
     if (!mTransmitContext)
@@ -118,7 +118,7 @@ bool FileEventNotifier::shouldDeferRemove(FileEventObserverID id)
     return true;
 }
 
-bool FileEventNotifier::shouldDeferRemoveAll(FileEventObserverMap& map)
+bool FileEventEmitter::shouldDeferRemoveAll(FileEventObserverMap& map)
 {
     // We aren't executing within an observer callback.
     if (!mTransmitContext)
@@ -135,7 +135,7 @@ bool FileEventNotifier::shouldDeferRemoveAll(FileEventObserverMap& map)
     return true;
 }
 
-void FileEventNotifier::transmit(const FileEvent& event, FileEventObserverMap& map)
+void FileEventEmitter::transmit(const FileEvent& event, FileEventObserverMap& map)
 {
     // Transmit event to each observer in map.
     for (auto i = map.begin(); i != map.end();)
@@ -169,7 +169,7 @@ void FileEventNotifier::transmit(const FileEvent& event, FileEventObserverMap& m
     }
 }
 
-void FileEventNotifier::transmit(const FileEvent& event)
+void FileEventEmitter::transmit(const FileEvent& event)
 {
     // Retrieve the ID of the file that has changed.
     auto id = std::visit(
@@ -200,8 +200,8 @@ void FileEventNotifier::transmit(const FileEvent& event)
         mFileObservers.erase(iterator);
 }
 
-FileEventNotifier::FileEventNotifier():
-    mInstanceLogger("FileEventNotifier", *this, logger()),
+FileEventEmitter::FileEventEmitter():
+    mInstanceLogger("FileEventEmitter", *this, logger()),
     mCV(),
     mFileObservers(),
     mObserversLock(),
@@ -209,10 +209,10 @@ FileEventNotifier::FileEventNotifier():
     mPendingEventsLock(),
     mServiceObservers(),
     mTerminate{false},
-    mWorker(std::bind(&FileEventNotifier::loop, this))
+    mWorker(std::bind(&FileEventEmitter::loop, this))
 {}
 
-FileEventNotifier::~FileEventNotifier()
+FileEventEmitter::~FileEventEmitter()
 {
     // Let our worker know it's time to terminate.
     mTerminate = true;
@@ -224,7 +224,7 @@ FileEventNotifier::~FileEventNotifier()
     mWorker.join();
 }
 
-FileEventObserverID FileEventNotifier::addObserver(FileID id, FileEventObserver observer)
+FileEventObserverID FileEventEmitter::addObserver(FileID id, FileEventObserver observer)
 {
     // Make sure no one else is messing with our observer maps.
     std::lock_guard guard(mObserversLock);
@@ -233,7 +233,7 @@ FileEventObserverID FileEventNotifier::addObserver(FileID id, FileEventObserver 
     return addObserver(std::move(observer), mFileObservers[id]);
 }
 
-FileEventObserverID FileEventNotifier::addObserver(FileEventObserver observer)
+FileEventObserverID FileEventEmitter::addObserver(FileEventObserver observer)
 {
     // Make sure no one else is messing with our observer maps.
     std::lock_guard guard(mObserversLock);
@@ -242,7 +242,7 @@ FileEventObserverID FileEventNotifier::addObserver(FileEventObserver observer)
     return addObserver(std::move(observer), mServiceObservers);
 }
 
-void FileEventNotifier::notify(FileEvent event)
+void FileEventEmitter::notify(FileEvent event)
 {
     // Make sure no one is manipulating our event queue.
     std::lock_guard guard(mPendingEventsLock);
@@ -254,7 +254,7 @@ void FileEventNotifier::notify(FileEvent event)
     mCV.notify_one();
 }
 
-void FileEventNotifier::removeObserver(FileID id, FileEventObserverID observerID)
+void FileEventEmitter::removeObserver(FileID id, FileEventObserverID observerID)
 {
     // Make sure no one else is changing our observer maps.
     std::lock_guard guard(mObserversLock);
@@ -281,7 +281,7 @@ void FileEventNotifier::removeObserver(FileID id, FileEventObserverID observerID
         mFileObservers.erase(iterator);
 }
 
-void FileEventNotifier::removeObserver(FileEventObserverID id)
+void FileEventEmitter::removeObserver(FileEventObserverID id)
 {
     // Make sure no one is changing our observer maps.
     std::lock_guard guard(mObserversLock);
@@ -297,7 +297,7 @@ void FileEventNotifier::removeObserver(FileEventObserverID id)
     mServiceObservers.erase(id);
 }
 
-void FileEventNotifier::removeObservers(FileID id)
+void FileEventEmitter::removeObservers(FileID id)
 {
     // Make sure no one is changing our observer maps.
     std::lock_guard guard(mObserversLock);
@@ -320,7 +320,7 @@ void FileEventNotifier::removeObservers(FileID id)
     mFileObservers.erase(iterator);
 }
 
-void FileEventNotifier::removeObservers()
+void FileEventEmitter::removeObservers()
 {
     // Make sure no one is changing our observer maps.
     std::lock_guard guard(mObserversLock);

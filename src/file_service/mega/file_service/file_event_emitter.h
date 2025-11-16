@@ -19,7 +19,7 @@ namespace mega
 namespace file_service
 {
 
-class FileEventNotifier
+class FileEventEmitter
 {
     // Convenience.
     using FileEventObserverMap = std::map<FileEventObserverID, FileEventObserver>;
@@ -45,7 +45,7 @@ class FileEventNotifier
     void transmit(const FileEvent& event);
 
     // Logs instance lifetime.
-    common::InstanceLogger<FileEventNotifier> mInstanceLogger;
+    common::InstanceLogger<FileEventEmitter> mInstanceLogger;
 
     // Signalled when we want to wake up our worker.
     std::condition_variable mCV;
@@ -75,13 +75,13 @@ class FileEventNotifier
     std::thread mWorker;
 
 public:
-    FileEventNotifier();
+    FileEventEmitter();
 
-    FileEventNotifier(const FileEventNotifier& other) = delete;
+    FileEventEmitter(const FileEventEmitter& other) = delete;
 
-    ~FileEventNotifier();
+    ~FileEventEmitter();
 
-    FileEventNotifier& operator=(const FileEventNotifier& rhs) = delete;
+    FileEventEmitter& operator=(const FileEventEmitter& rhs) = delete;
 
     // Add a file-specific observer.
     FileEventObserverID addObserver(FileID id, FileEventObserver observer);
@@ -103,7 +103,7 @@ public:
 
     // Remove all service-wide observers.
     void removeObservers();
-}; // FileEventNotifier
+}; // FileEventEmitter
 
 } // file_service
 } // mega
