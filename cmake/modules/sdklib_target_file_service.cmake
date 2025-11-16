@@ -14,7 +14,6 @@ target_sources(SDKlib PRIVATE
                       include/mega/file_service/file_context_forward.h
                       include/mega/file_service/file_context_pointer.h
                       include/mega/file_service/file_event.h
-                      include/mega/file_service/file_event_emitter_forward.h
                       include/mega/file_service/file_event_forward.h
                       include/mega/file_service/file_event_observer.h
                       include/mega/file_service/file_event_observer_id.h
@@ -93,7 +92,6 @@ target_sources(SDKlib PRIVATE
                       src/file_service/mega/file_service/file_buffer_pointer.h
                       src/file_service/mega/file_service/file_context.h
                       src/file_service/mega/file_service/file_context_badge.h
-                      src/file_service/mega/file_service/file_event_emitter.h
                       src/file_service/mega/file_service/file_event_notifier.h
                       src/file_service/mega/file_service/file_event_vector.h
                       src/file_service/mega/file_service/file_fetch_request.h
@@ -154,7 +152,6 @@ target_sources(SDKlib PRIVATE
                       src/file_service/file_access.cpp
                       src/file_service/file_buffer.cpp
                       src/file_service/file_context.cpp
-                      src/file_service/file_event_emitter.cpp
                       src/file_service/file_event_notifier.cpp
                       src/file_service/file_id.cpp
                       src/file_service/file_info.cpp

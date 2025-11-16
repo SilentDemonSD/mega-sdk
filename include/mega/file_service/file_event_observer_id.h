@@ -1,7 +1,5 @@
 #pragma once
 
-#include <mega/file_service/file_event_emitter_forward.h>
-
 #include <cstdint>
 #include <utility>
 
