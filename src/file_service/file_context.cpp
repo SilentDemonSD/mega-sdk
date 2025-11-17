@@ -471,7 +471,7 @@ auto FileContext::completed(Request&& request, Result result, Captures&&... capt
     static_assert(std::is_rvalue_reference_v<decltype(request)>);
 
     // Called to complete the user's request.
-    auto callback = [=](auto& callback, auto& cookie, auto&, auto& tag, auto&&...)
+    auto callback = [=](auto& callback, auto& cookie, auto&, auto& tag, auto&&...) mutable
     {
         // Are we passing a file result?
         if constexpr (std::is_same_v<FileResult, Result>)
@@ -490,6 +490,14 @@ auto FileContext::completed(Request&& request, Result result, Captures&&... capt
             // Pass the result as is.
             callback(result);
         }
+
+        // Ensure callback is deallocated.
+        //
+        // This is necessary as it might contain a reference to this file.
+        //
+        // If we don't deallocate the callback here, we could encounter a
+        // deadlock below when the context variable goes out of scope.
+        callback = nullptr;
 
         // Check if our context is still alive.
         auto context = cookie.lock();
