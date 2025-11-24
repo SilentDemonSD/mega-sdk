@@ -558,9 +558,11 @@ TEST_F(FileServiceTests, append_succeeds)
     auto size = info.size();
 
     // Try and append the data to the end of the file.
-    ASSERT_EQ(execute(append, computed.data(), *file, computed.size()), FILE_SUCCESS);
+    expect(FileWriteEvent{FileRange(size, size + computed.size()), info.id()},
+           fileObserver,
+           serviceObserver);
 
-    expected.emplace_back(FileWriteEvent{FileRange(size, size + computed.size()), info.id()});
+    ASSERT_EQ(execute(append, computed.data(), *file, computed.size()), FILE_SUCCESS);
 
     // The file should now have two ranges.
     ASSERT_THAT(file->ranges(), ElementsAre(range, FileRange(size, size + computed.size())));
@@ -576,9 +578,11 @@ TEST_F(FileServiceTests, append_succeeds)
     size = info.size();
 
     // Append again to make sure contigous ranges are extended.
-    ASSERT_EQ(execute(append, computed.data(), *file, computed.size()), FILE_SUCCESS);
+    expect(FileWriteEvent{FileRange(size, size + computed.size()), info.id()},
+           fileObserver,
+           serviceObserver);
 
-    expected.emplace_back(FileWriteEvent{FileRange(size, size + computed.size()), info.id()});
+    ASSERT_EQ(execute(append, computed.data(), *file, computed.size()), FILE_SUCCESS);
 
     ASSERT_GE(info.modified(), modified);
     ASSERT_EQ(info.size(), size + computed.size());
@@ -587,8 +591,7 @@ TEST_F(FileServiceTests, append_succeeds)
                 ElementsAre(range, FileRange(size - computed.size(), size + computed.size())));
 
     // Make sure we received the events we expected.
-    ASSERT_TRUE(fileObserver.match(expected, mDefaultTimeout));
-    ASSERT_TRUE(serviceObserver.match(expected, mDefaultTimeout));
+    ASSERT_TRUE(satisfied(mDefaultTimeout, fileObserver, serviceObserver));
 }
 
 TEST_F(FileServiceTests, cloud_file_removed_when_parent_removed)
@@ -606,14 +609,6 @@ TEST_F(FileServiceTests, cloud_file_removed_when_parent_removed)
     auto d1f = mClient->upload(randomBytes(512), randomName(), *d1);
     ASSERT_EQ(d1f.errorOr(API_OK), API_OK);
 
-    // What events do we expect to receive?
-    struct
-    {
-        FileEventVector file0;
-        FileEventVector file1;
-        FileEventVector service;
-    } expected;
-
     // Open d0f and d1f.
     auto file0 = mClient->fileOpen(*d0f);
     ASSERT_EQ(file0.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
@@ -627,12 +622,11 @@ TEST_F(FileServiceTests, cloud_file_removed_when_parent_removed)
     auto serviceObserver = observe(mClient->fileService());
 
     // Remove d0 and by proxy, d0f, d1 and d1f.
-    ASSERT_EQ(mClient->remove(*d0), API_OK);
+    expect(FileRemoveEvent{file0->info().id(), false}, fileObserver0, serviceObserver);
 
-    expected.file0.emplace_back(FileRemoveEvent{file0->info().id(), false});
-    expected.file1.emplace_back(FileRemoveEvent{file1->info().id(), false});
-    expected.service.emplace_back(expected.file0.back());
-    expected.service.emplace_back(expected.file1.back());
+    expect(FileRemoveEvent{file1->info().id(), false}, fileObserver1, serviceObserver);
+
+    ASSERT_EQ(mClient->remove(*d0), API_OK);
 
     // Make sure our files are marked as removed.
     EXPECT_TRUE(waitFor(
@@ -646,18 +640,11 @@ TEST_F(FileServiceTests, cloud_file_removed_when_parent_removed)
     EXPECT_TRUE(file1->info().removed());
 
     // Make sure we received remove events.
-    EXPECT_TRUE(fileObserver0.match(expected.file0, mDefaultTimeout));
-    EXPECT_TRUE(fileObserver1.match(expected.file1, mDefaultTimeout));
-
-    // UnorderedElementsAreArray(...) necessary as order is unpredictable.
-    EXPECT_THAT(expected.service, UnorderedElementsAreArray(serviceObserver.events()));
+    EXPECT_TRUE(satisfied(mDefaultTimeout, fileObserver0, fileObserver1, serviceObserver));
 }
 
 TEST_F(FileServiceTests, cloud_file_removed_when_removed_in_cloud)
 {
-    // What events do we expect to receive?
-    FileEventVector expected;
-
     // Create a test file in the cloud.
     auto handle = mClient->upload(randomBytes(512), randomName(), mRootHandle);
     ASSERT_EQ(handle.errorOr(API_OK), API_OK);
@@ -671,9 +658,9 @@ TEST_F(FileServiceTests, cloud_file_removed_when_removed_in_cloud)
     auto serviceObserver = observe(mClient->fileService());
 
     // Remove the file from the cloud.
-    ASSERT_EQ(mClient->remove(*handle), API_OK);
+    expect(FileRemoveEvent{file->info().id(), false}, fileObserver, serviceObserver);
 
-    expected.emplace_back(FileRemoveEvent{file->info().id(), false});
+    ASSERT_EQ(mClient->remove(*handle), API_OK);
 
     // Make sure our file's been marked as removed.
     EXPECT_TRUE(waitFor(
@@ -686,8 +673,7 @@ TEST_F(FileServiceTests, cloud_file_removed_when_removed_in_cloud)
     EXPECT_TRUE(file->info().removed());
 
     // And that we received a remove event.
-    EXPECT_TRUE(fileObserver.match(expected, mDefaultTimeout));
-    EXPECT_TRUE(serviceObserver.match(expected, mDefaultTimeout));
+    EXPECT_TRUE(satisfied(mDefaultTimeout, fileObserver, serviceObserver));
 }
 
 TEST_F(FileServiceTests, cloud_file_removed_when_replaced_by_cloud_add)
@@ -708,6 +694,8 @@ TEST_F(FileServiceTests, cloud_file_removed_when_replaced_by_cloud_add)
     auto serviceObserver = observe(mClient->fileService());
 
     // Add a directory with the same name and parent as our file.
+    expect(FileRemoveEvent{file->info().id(), true}, fileObserver, serviceObserver);
+
     auto directory = mClient->makeDirectory(name, mRootHandle);
     ASSERT_EQ(directory.errorOr(API_OK), API_OK);
 
@@ -722,12 +710,7 @@ TEST_F(FileServiceTests, cloud_file_removed_when_replaced_by_cloud_add)
     EXPECT_TRUE(file->info().removed());
 
     // And that we received a remove event.
-    FileEventVector expected;
-
-    expected.emplace_back(FileRemoveEvent{file->info().id(), true});
-
-    EXPECT_TRUE(fileObserver.match(expected, mDefaultTimeout));
-    EXPECT_TRUE(serviceObserver.match(expected, mDefaultTimeout));
+    EXPECT_TRUE(satisfied(mDefaultTimeout, fileObserver, serviceObserver));
 }
 
 TEST_F(FileServiceTests, cloud_file_removed_when_replaced_by_new_version)
@@ -748,6 +731,8 @@ TEST_F(FileServiceTests, cloud_file_removed_when_replaced_by_new_version)
     auto serviceObserver = observe(mClient->fileService());
 
     // Upload a new version of our file.
+    expect(FileRemoveEvent{file->info().id(), true}, fileObserver, serviceObserver);
+
     auto handle1 = mClient->upload(randomBytes(512), name, mRootHandle);
     ASSERT_EQ(handle1.errorOr(API_OK), API_OK);
 
@@ -776,12 +761,7 @@ TEST_F(FileServiceTests, cloud_file_removed_when_replaced_by_new_version)
     EXPECT_TRUE(file->info().removed());
 
     // And that we received a remove event.
-    FileEventVector expected;
-
-    expected.emplace_back(FileRemoveEvent{file->info().id(), true});
-
-    EXPECT_TRUE(fileObserver.match(expected, mDefaultTimeout));
-    EXPECT_TRUE(serviceObserver.match(expected, mDefaultTimeout));
+    EXPECT_TRUE(satisfied(mDefaultTimeout, fileObserver, serviceObserver));
 }
 
 TEST_F(FileServiceTests, create_fails_when_file_already_exists)
@@ -843,9 +823,6 @@ TEST_F(FileServiceTests, create_flush_succeeds)
     // Try and flush the file to the cloud.
     auto handle = [file = std::move(file)]() mutable -> FileResultOr<NodeHandle>
     {
-        // What events do we expect to receive?
-        FileEventVector wanted;
-
         // So we can receive file events.
         auto fileObserver = observe(*file);
         auto serviceObserver = observe(mClient->fileService());
@@ -871,10 +848,9 @@ TEST_F(FileServiceTests, create_flush_succeeds)
         EXPECT_EQ(info.modified(), modified);
 
         // Make sure we received the events we expected.
-        wanted.emplace_back(FileFlushEvent{info.handle(), info.id()});
+        expect(FileFlushEvent{info.handle(), info.id()}, fileObserver, serviceObserver);
 
-        EXPECT_TRUE(fileObserver.match(wanted, mDefaultTimeout));
-        EXPECT_TRUE(serviceObserver.match(wanted, mDefaultTimeout));
+        EXPECT_TRUE(satisfied(mDefaultTimeout, fileObserver, serviceObserver));
 
         // One or more of our expectations failed.
         if (HasFailure())
@@ -970,9 +946,6 @@ TEST_F(FileServiceTests, create_write_succeeds)
     // Make sure the file was created.
     ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
 
-    // Events we expect to receive.
-    FileEventVector expected;
-
     // So we can track what events were emitted for our file.
     auto fileObserver = observe(*file);
     auto serviceObserver = observe(mClient->fileService());
@@ -981,9 +954,11 @@ TEST_F(FileServiceTests, create_write_succeeds)
     auto data = randomBytes(64_KiB);
 
     // Try and write data to the file.
-    ASSERT_EQ(execute(write, data.data(), *file, 128_KiB, 64_KiB), FILE_SUCCESS);
+    expect(FileWriteEvent{FileRange(128_KiB, 192_KiB), file->info().id()},
+           fileObserver,
+           serviceObserver);
 
-    expected.emplace_back(FileWriteEvent{FileRange(128_KiB, 192_KiB), file->info().id()});
+    ASSERT_EQ(execute(write, data.data(), *file, 128_KiB, 64_KiB), FILE_SUCCESS);
 
     // Make sure the file's size is correct.
     ASSERT_EQ(file->info().size(), 192_KiB);
@@ -1007,9 +982,11 @@ TEST_F(FileServiceTests, create_write_succeeds)
     ASSERT_EQ(data, *computed);
 
     // Write more data to the file.
-    ASSERT_EQ(execute(write, data.data(), *file, 320_KiB, 64_KiB), FILE_SUCCESS);
+    expect(FileWriteEvent{FileRange(320_KiB, 384_KiB), file->info().id()},
+           fileObserver,
+           serviceObserver);
 
-    expected.emplace_back(FileWriteEvent{FileRange(320_KiB, 384_KiB), file->info().id()});
+    ASSERT_EQ(execute(write, data.data(), *file, 320_KiB, 64_KiB), FILE_SUCCESS);
 
     // Make sure the file's size is correct.
     ASSERT_EQ(file->info().size(), 384_KiB);
@@ -1024,8 +1001,7 @@ TEST_F(FileServiceTests, create_write_succeeds)
     ASSERT_EQ(data, *computed);
 
     // Make sure we received the events we were expecting.
-    ASSERT_TRUE(fileObserver.match(expected, mDefaultTimeout));
-    ASSERT_TRUE(serviceObserver.match(expected, mDefaultTimeout));
+    ASSERT_TRUE(satisfied(mDefaultTimeout, fileObserver, serviceObserver));
 }
 
 TEST_F(FileServiceTests, fetch_succeeds)
@@ -1258,9 +1234,6 @@ TEST_F(FileServiceTests, flush_succeeds)
         auto fileObserver = observe(*oldFile);
         auto serviceObserver = observe(mClient->fileService());
 
-        // The file events we expect to receive.
-        FileEventVector wanted;
-
         // Latch the file's ID.
         auto id = oldFile->info().id();
 
@@ -1274,10 +1247,9 @@ TEST_F(FileServiceTests, flush_succeeds)
         ASSERT_FALSE(oldFile->info().dirty());
 
         // Make sure we received a flush event.
-        wanted.emplace_back(FileFlushEvent{oldFile->info().handle(), id});
+        expect(FileFlushEvent{oldFile->info().handle(), id}, fileObserver, serviceObserver);
 
-        EXPECT_TRUE(fileObserver.match(wanted, mDefaultTimeout));
-        EXPECT_TRUE(serviceObserver.match(wanted, mDefaultTimeout));
+        EXPECT_TRUE(satisfied(mDefaultTimeout, fileObserver, serviceObserver));
     }
 
     // Latch the file's new handle.
@@ -1343,9 +1315,6 @@ TEST_F(FileServiceTests, flush_succeeds)
     // the node event logic properly handles this situation.
     mClient->useVersioning(false);
 
-    // What events do we expect to receive?
-    FileEventVector wanted;
-
     // So we can receive file events.
     auto fileObserver = observe(*newFile);
     auto serviceObserver = observe(mClient->fileService());
@@ -1360,10 +1329,9 @@ TEST_F(FileServiceTests, flush_succeeds)
     ASSERT_NE(oldHandle, newHandle);
 
     // Make sure we received a flush event.
-    wanted.emplace_back(FileFlushEvent{newHandle, newFile->info().id()});
+    expect(FileFlushEvent{newHandle, newFile->info().id()}, fileObserver, serviceObserver);
 
-    EXPECT_TRUE(fileObserver.match(wanted, mDefaultTimeout));
-    EXPECT_TRUE(serviceObserver.match(wanted, mDefaultTimeout));
+    EXPECT_TRUE(satisfied(mDefaultTimeout, fileObserver, serviceObserver));
 
     // Make sure our updated file is in the cloud.
     EXPECT_TRUE(waitFor(
@@ -1461,6 +1429,10 @@ TEST_F(FileServiceTests, inactive_file_moved)
     auto name1 = randomName();
 
     // Move the file in the cloud.
+    observer.expect(FileMoveEvent{FileLocation{name0, mRootHandle},
+                                  FileLocation{name1, mRootHandle},
+                                  FileID::from(*handle)});
+
     ASSERT_EQ(mClient->move(name1, *handle, mRootHandle), API_OK);
 
     // Wait for the client to recognize the move.
@@ -1489,13 +1461,7 @@ TEST_F(FileServiceTests, inactive_file_moved)
     EXPECT_EQ(location->mParentHandle, mRootHandle);
 
     // And that we received a move event.
-    FileEventVector expected;
-
-    expected.emplace_back(FileMoveEvent{FileLocation{name0, mRootHandle},
-                                        FileLocation{name1, mRootHandle},
-                                        FileID::from(*handle)});
-
-    EXPECT_TRUE(observer.match(expected, mDefaultTimeout));
+    EXPECT_TRUE(observer.satisfied(mDefaultTimeout));
 }
 
 TEST_F(FileServiceTests, inactive_file_removed)
@@ -1511,6 +1477,8 @@ TEST_F(FileServiceTests, inactive_file_removed)
     auto observer = observe(mClient->fileService());
 
     // Remove the file from the cloud.
+    observer.expect(FileRemoveEvent{FileID::from(*handle), false});
+
     ASSERT_EQ(mClient->remove(*handle), API_OK);
 
     // Wait for the client to realize the file's been removed.
@@ -1527,11 +1495,7 @@ TEST_F(FileServiceTests, inactive_file_removed)
         return;
 
     // Make sure we received a removed event.
-    FileEventVector expected;
-
-    expected.emplace_back(FileRemoveEvent{FileID::from(*handle), false});
-
-    EXPECT_TRUE(observer.match(expected, mDefaultTimeout));
+    EXPECT_TRUE(observer.satisfied(mDefaultTimeout));
 }
 
 TEST_F(FileServiceTests, inactive_file_replaced)
@@ -1560,6 +1524,8 @@ TEST_F(FileServiceTests, inactive_file_replaced)
     auto observer = observe(mClient->fileService());
 
     // Move our cloud file such that it replaces our inactive local file.
+    observer.expect(FileRemoveEvent{id, true});
+
     ASSERT_EQ(mClient->move(name1, *handle, mRootHandle), API_OK);
 
     // Wait for the client to recognize the move.
@@ -1574,11 +1540,7 @@ TEST_F(FileServiceTests, inactive_file_replaced)
     EXPECT_EQ(mClient->get(mRootHandle, name1).errorOr(API_OK), API_OK);
 
     // Make sure we received a remove event for our inactive file.
-    FileEventVector expected;
-
-    expected.emplace_back(FileRemoveEvent{id, true});
-
-    EXPECT_TRUE(observer.match(expected, mDefaultTimeout));
+    EXPECT_TRUE(observer.satisfied(mDefaultTimeout));
 }
 
 TEST_F(FileServiceTests, info_directory_fails)
@@ -1658,6 +1620,10 @@ TEST_F(FileServiceTests, local_file_removed_when_parent_removed)
     auto serviceObserver = observe(mClient->fileService());
 
     // Remove d0 and by proxy, d0f, d1 and d1f.
+    expect(FileRemoveEvent{d0f->info().id(), false}, fileObserver0, serviceObserver);
+
+    expect(FileRemoveEvent{d1f->info().id(), false}, fileObserver1, serviceObserver);
+
     ASSERT_EQ(mClient->remove(*d0), API_OK);
 
     // Make sure the directories are no longer visible to our client.
@@ -1680,18 +1646,7 @@ TEST_F(FileServiceTests, local_file_removed_when_parent_removed)
     EXPECT_TRUE(d1f->info().removed());
 
     // And that we received remove events.
-    FileEventVector expected;
-
-    expected.emplace_back(FileRemoveEvent{d0f->info().id(), false});
-    EXPECT_TRUE(fileObserver0.match(expected, mDefaultTimeout));
-
-    expected.emplace_back(FileRemoveEvent{d1f->info().id(), false});
-
-    // UnorderedElementsAreArray(...) necessary as order is unpredictable.
-    EXPECT_THAT(expected, UnorderedElementsAreArray(serviceObserver.events()));
-
-    expected.erase(expected.begin());
-    EXPECT_TRUE(fileObserver1.match(expected, mDefaultTimeout));
+    EXPECT_TRUE(satisfied(mDefaultTimeout, fileObserver0, fileObserver1, serviceObserver));
 }
 
 TEST_F(FileServiceTests, local_file_removed_when_replaced_by_cloud_add)
@@ -1708,6 +1663,8 @@ TEST_F(FileServiceTests, local_file_removed_when_replaced_by_cloud_add)
     auto serviceObserver = observe(mClient->fileService());
 
     // Add a directory with the same name and parent as our file.
+    expect(FileRemoveEvent{file->info().id(), true}, fileObserver, serviceObserver);
+
     auto directory = mClient->makeDirectory(name, mRootHandle);
     ASSERT_EQ(directory.errorOr(API_OK), API_OK);
 
@@ -1729,12 +1686,7 @@ TEST_F(FileServiceTests, local_file_removed_when_replaced_by_cloud_add)
     ASSERT_TRUE(file->info().removed());
 
     // And that we received a remove event.
-    FileEventVector expected;
-
-    expected.emplace_back(FileRemoveEvent{file->info().id(), true});
-
-    EXPECT_TRUE(fileObserver.match(expected, mDefaultTimeout));
-    EXPECT_TRUE(serviceObserver.match(expected, mDefaultTimeout));
+    EXPECT_TRUE(satisfied(mDefaultTimeout, fileObserver, serviceObserver));
 }
 
 TEST_F(FileServiceTests, local_file_removed_when_replaced_by_cloud_move)
@@ -1763,6 +1715,14 @@ TEST_F(FileServiceTests, local_file_removed_when_replaced_by_cloud_move)
     auto serviceObserver = observe(mClient->fileService());
 
     // Move file1 so it replaces file0.
+    expect(FileRemoveEvent{file0->info().id(), true}, fileObserver0, serviceObserver);
+
+    expect(FileMoveEvent{FileLocation{fileName1, mRootHandle},
+                         FileLocation{fileName0, mRootHandle},
+                         file1->info().id()},
+           fileObserver1,
+           serviceObserver);
+
     ASSERT_EQ(mClient->move(fileName0, *handle0, mRootHandle), API_OK);
 
     // Make sure the client recognizes the move.
@@ -1783,25 +1743,7 @@ TEST_F(FileServiceTests, local_file_removed_when_replaced_by_cloud_move)
     EXPECT_TRUE(file0->info().removed());
 
     // And that we received a remove event.
-    struct
-    {
-        FileEventVector file0;
-        FileEventVector file1;
-        FileEventVector service;
-    } expected;
-
-    expected.file0.emplace_back(FileRemoveEvent{file0->info().id(), true});
-
-    expected.file1.emplace_back(FileMoveEvent{FileLocation{fileName1, mRootHandle},
-                                              FileLocation{fileName0, mRootHandle},
-                                              file1->info().id()});
-
-    expected.service.emplace_back(expected.file0.back());
-    expected.service.emplace_back(expected.file1.back());
-
-    EXPECT_TRUE(fileObserver0.match(expected.file0, mDefaultTimeout));
-    EXPECT_TRUE(fileObserver1.match(expected.file1, mDefaultTimeout));
-    EXPECT_TRUE(serviceObserver.match(expected.service, mDefaultTimeout));
+    EXPECT_TRUE(satisfied(mDefaultTimeout, fileObserver0, fileObserver1, serviceObserver));
 }
 
 TEST_F(FileServiceTests, location_updated_when_moved_in_cloud)
@@ -1840,6 +1782,8 @@ TEST_F(FileServiceTests, location_updated_when_moved_in_cloud)
     ASSERT_NE(location, newLocation);
 
     // Move the file in the cloud.
+    expect(FileMoveEvent{*location, newLocation, file->info().id()}, fileObserver, serviceObserver);
+
     ASSERT_EQ(mClient->move(newLocation.mName, *handle, mRootHandle), API_OK);
 
     // Our file's location should change.
@@ -1851,16 +1795,7 @@ TEST_F(FileServiceTests, location_updated_when_moved_in_cloud)
         mDefaultTimeout));
 
     // Make sure the file's location has updated.
-    EXPECT_EQ(file->info().location(), newLocation);
-
-    // And that we received a move event.
-    FileEventVector expected;
-
-    expected.emplace_back(
-        FileMoveEvent{std::move(*location), std::move(newLocation), file->info().id()});
-
-    EXPECT_TRUE(fileObserver.match(expected, mDefaultTimeout));
-    EXPECT_TRUE(serviceObserver.match(expected, mDefaultTimeout));
+    EXPECT_TRUE(satisfied(mDefaultTimeout, fileObserver, serviceObserver));
 }
 
 TEST_F(FileServiceTests, open_by_path_fails_when_file_is_a_directory)
@@ -3175,6 +3110,10 @@ TEST_F(FileServiceTests, remove_local_succeeds)
         // Make sure we could create the file.
         ASSERT_EQ(file0.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
 
+        // So we can receive file events.
+        auto fileObserver = observe(*file0);
+        auto serviceObserver = observe(mClient->fileService());
+
         // Latch the file's ID.
         id = file0->info().id();
 
@@ -3182,6 +3121,8 @@ TEST_F(FileServiceTests, remove_local_succeeds)
         auto data = randomBytes(512_KiB);
 
         // Write some data to the file.
+        expect(FileWriteEvent{FileRange{0, data.size()}, id}, fileObserver, serviceObserver);
+
         ASSERT_EQ(execute(write, data.data(), *file0, 0, data.size()), FILE_SUCCESS);
 
         // Figure out how much space our file's using.
@@ -3190,24 +3131,16 @@ TEST_F(FileServiceTests, remove_local_succeeds)
         // Make sure we could determine how much space our file was using.
         ASSERT_EQ(usedBefore.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
 
-        // What events do we expect to receive?
-        FileEventVector expected;
-
-        // So we can receive file events.
-        auto fileObserver = observe(*file0);
-        auto serviceObserver = observe(mClient->fileService());
-
         // Remove the file.
-        ASSERT_EQ(execute(remove, *file0), FILE_SUCCESS);
+        expect(FileRemoveEvent{id, false}, fileObserver, serviceObserver);
 
-        expected.emplace_back(FileRemoveEvent{id, false});
+        ASSERT_EQ(execute(remove, *file0), FILE_SUCCESS);
 
         // Make sure the file's been marked as removed.
         ASSERT_TRUE(file0->info().removed());
 
         // Make sure we received a remove event.
-        EXPECT_TRUE(fileObserver.match(expected, mDefaultTimeout));
-        EXPECT_TRUE(serviceObserver.match(expected, mDefaultTimeout));
+        EXPECT_TRUE(satisfied(mDefaultTimeout, fileObserver, serviceObserver));
 
         // Make sure we can't get a new reference to a removed file.
         ASSERT_EQ(mClient->fileInfo(id).errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_UNKNOWN_FILE);
@@ -3268,17 +3201,14 @@ TEST_F(FileServiceTests, remove_cloud_succeeds)
         usedBefore = mClient->fileService().storageUsed();
         ASSERT_EQ(usedBefore.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
 
-        // What events do we expect to receive?
-        FileEventVector expected;
-
         // So we can receive file events.
         auto fileObserver = observe(*file0);
         auto serviceObserver = observe(mClient->fileService());
 
         // Remove the file.
-        ASSERT_EQ(execute(remove, *file0), FILE_SUCCESS);
+        expect(FileRemoveEvent{id, false}, fileObserver, serviceObserver);
 
-        expected.emplace_back(FileRemoveEvent{id, false});
+        ASSERT_EQ(execute(remove, *file0), FILE_SUCCESS);
 
         // Make sure the file's been removed.
         ASSERT_TRUE(waitFor(
@@ -3290,8 +3220,7 @@ TEST_F(FileServiceTests, remove_cloud_succeeds)
             mDefaultTimeout));
 
         // Make sure we received a remove event.
-        EXPECT_TRUE(fileObserver.match(expected, mDefaultTimeout));
-        EXPECT_TRUE(serviceObserver.match(expected, mDefaultTimeout));
+        EXPECT_TRUE(satisfied(mDefaultTimeout, fileObserver, serviceObserver));
 
         EXPECT_EQ(mClient->get(*handle).errorOr(API_OK), API_ENOENT);
         EXPECT_TRUE(file0->info().removed());
@@ -3477,9 +3406,6 @@ TEST_F(FileServiceTests, touch_succeeds)
     // Make sure the file was opened okay.
     ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
 
-    // Events we expect to receive.
-    FileEventVector expected;
-
     // So we can keep track of our file's events.
     auto fileObserver = observe(*file);
     auto serviceObserver = observe(mClient->fileService());
@@ -3495,9 +3421,9 @@ TEST_F(FileServiceTests, touch_succeeds)
     auto modified = info.modified();
 
     // Try and update the file's modification time.
-    ASSERT_EQ(execute(touch, *file, modified - 1), FILE_SUCCESS);
+    expect(FileTouchEvent{file->info().id(), modified - 1}, fileObserver, serviceObserver);
 
-    expected.emplace_back(FileTouchEvent{file->info().id(), modified - 1});
+    ASSERT_EQ(execute(touch, *file, modified - 1), FILE_SUCCESS);
 
     // Make sure the file's now considered dirty.
     EXPECT_TRUE(info.dirty());
@@ -3510,8 +3436,7 @@ TEST_F(FileServiceTests, touch_succeeds)
     EXPECT_EQ(info.modified(), modified - 1);
 
     // Make sure we received an event.
-    ASSERT_TRUE(fileObserver.match(expected, mDefaultTimeout));
-    ASSERT_TRUE(serviceObserver.match(expected, mDefaultTimeout));
+    ASSERT_TRUE(satisfied(mDefaultTimeout, fileObserver, serviceObserver));
 }
 
 TEST_F(FileServiceTests, truncate_with_ranges_succeeds)
@@ -3562,13 +3487,6 @@ TEST_F(FileServiceTests, truncate_with_ranges_succeeds)
         // Latch the file's current modification time.
         auto modified = info.modified();
 
-        // Initiate the truncate request.
-        auto result = execute(testing::truncate, *file, newSize);
-
-        // Truncate failed.
-        if (result != FILE_SUCCESS)
-            return result;
-
         // We should only receive events if the file's size changed.
         if (dirty)
         {
@@ -3579,8 +3497,15 @@ TEST_F(FileServiceTests, truncate_with_ranges_succeeds)
             if (newSize < size)
                 event.mRange.emplace(newSize, size);
 
-            expected.emplace_back(event);
+            expect(event, fileObserver, serviceObserver);
         }
+
+        // Initiate the truncate request.
+        auto result = execute(testing::truncate, *file, newSize);
+
+        // Truncate failed.
+        if (result != FILE_SUCCESS)
+            return result;
 
         // Make sure the file's attributes have been updated.
         EXPECT_EQ(info.dirty(), dirty);
@@ -3589,8 +3514,7 @@ TEST_F(FileServiceTests, truncate_with_ranges_succeeds)
         EXPECT_EQ(info.size(), newSize);
 
         // Make sure we received our expected events.
-        EXPECT_TRUE(fileObserver.match(expected, mDefaultTimeout));
-        EXPECT_TRUE(serviceObserver.match(expected, mDefaultTimeout));
+        EXPECT_TRUE(satisfied(mDefaultTimeout, fileObserver, serviceObserver));
 
         // One of the above expectations wasn't met.
         if (HasFailure())
@@ -3647,9 +3571,6 @@ TEST_F(FileServiceTests, truncate_without_ranges_succeeds)
     // Make sure the file was opened.
     ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
 
-    // The events we expect to receive.
-    FileEventVector expected;
-
     // So we can receive file events.
     auto fileObserver = observe(*file);
     auto serviceObserver = observe(mClient->fileService());
@@ -3668,9 +3589,11 @@ TEST_F(FileServiceTests, truncate_without_ranges_succeeds)
     auto size = info.size();
 
     // We should be able to reduce the file's size.
-    ASSERT_EQ(execute(truncate, *file, size / 2), FILE_SUCCESS);
+    expect(FileTruncateEvent{FileRange(size / 2, size), info.id(), size / 2},
+           fileObserver,
+           serviceObserver);
 
-    expected.emplace_back(FileTruncateEvent{FileRange(size / 2, size), info.id(), size / 2});
+    ASSERT_EQ(execute(truncate, *file, size / 2), FILE_SUCCESS);
 
     // Mak sure the file's become dirty.
     EXPECT_TRUE(info.dirty());
@@ -3686,9 +3609,9 @@ TEST_F(FileServiceTests, truncate_without_ranges_succeeds)
     modified = info.modified();
 
     // We should be able to grow the file's size.
-    ASSERT_EQ(execute(truncate, *file, size), FILE_SUCCESS);
+    expect(FileTruncateEvent{std::nullopt, info.id(), size}, fileObserver, serviceObserver);
 
-    expected.emplace_back(FileTruncateEvent{std::nullopt, info.id(), size});
+    ASSERT_EQ(execute(truncate, *file, size), FILE_SUCCESS);
 
     // Make sure the file's attributes were updated.
     EXPECT_GE(info.modified(), modified);
@@ -3713,8 +3636,7 @@ TEST_F(FileServiceTests, truncate_without_ranges_succeeds)
     EXPECT_EQ(result->find_first_not_of('\0', length), npos);
 
     // Make sure we received the events we expected.
-    ASSERT_TRUE(fileObserver.match(expected, mDefaultTimeout));
-    ASSERT_TRUE(serviceObserver.match(expected, mDefaultTimeout));
+    ASSERT_TRUE(satisfied(mDefaultTimeout, fileObserver, serviceObserver));
 }
 
 TEST_F(FileServiceTests, write_cancels_orphan_reads)
@@ -3786,9 +3708,6 @@ TEST_F(FileServiceTests, write_succeeds)
     // Write content to our file.
     auto write = [&](const void* content, std::uint64_t offset, std::uint64_t length)
     {
-        // Events we want to receive.
-        FileEventVector wanted;
-
         // So we can receive events.
         auto fileObserver = observe(*file);
         auto serviceObserver = observe(mClient->fileService());
@@ -3803,13 +3722,15 @@ TEST_F(FileServiceTests, write_succeeds)
         auto modified = info.modified();
 
         // Try and write content to our file.
+        expect(FileWriteEvent{FileRange(offset, offset + length), info.id()},
+               fileObserver,
+               serviceObserver);
+
         auto result = execute(testing::write, content, *file, offset, length);
 
         // Write failed.
         if (result != FILE_SUCCESS)
             return result;
-
-        wanted.emplace_back(FileWriteEvent{FileRange(offset, offset + length), info.id()});
 
         // Compute size of local file content.
         auto size = std::max<std::uint64_t>(expected.size(), offset + length);
@@ -3833,8 +3754,7 @@ TEST_F(FileServiceTests, write_succeeds)
         EXPECT_EQ(info.size(), size);
 
         // Make sure we received the events we wanted.
-        EXPECT_TRUE(fileObserver.match(wanted, mDefaultTimeout));
-        EXPECT_TRUE(serviceObserver.match(wanted, mDefaultTimeout));
+        EXPECT_TRUE(satisfied(mDefaultTimeout, fileObserver, serviceObserver));
 
         // One or more of our expectations weren't satisfied.
         if (HasFailure())
