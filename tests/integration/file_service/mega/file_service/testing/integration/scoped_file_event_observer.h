@@ -178,19 +178,6 @@ public:
             mExpected.emplace_back(event);
     }
 
-    // Wait until we've received a specific set of events.
-    template<typename Rep, typename Period>
-    bool match(const FileEventVector& expected, std::chrono::duration<Rep, Period> period) const
-    {
-        return waitFor(
-            [&]()
-            {
-                std::lock_guard guard(mLock);
-                return expected == mEvents;
-            },
-            period);
-    }
-
     // Wait for all of our expectations to be satisfied.
     template<typename Rep, typename Period>
     bool satisfied(std::chrono::duration<Rep, Period> period) const
