@@ -20,6 +20,7 @@
 #include <mutex>
 #include <optional>
 #include <queue>
+#include <sstream>
 #include <type_traits>
 #include <vector>
 
@@ -539,18 +540,26 @@ bool benchmark(Client& client,
         // Adjust total bytes downloaded.
         totalBytes += bytesRead;
 
+        // So we have more control over formatting.
+        std::ostringstream ostream;
+
+        ostream.precision(2);
+        ostream.setf(std::ios::fixed);
+
         // Log statistics about this request.
-        LOG_verbose << "Request #" << index << " (" << toString(range) << "):\n"
-                    << "  Average read length: " << result.mAverageReadLength << " byte(s)\n"
-                    << "  Average read time: " << result.mAverageReadTime << "ms\n"
-                    << "  Bytes read: " << bytesRead << "\n"
-                    << "  Maximum read length: " << result.mMaximumReadLength << " byte(s)\n"
-                    << "  Maximum read time: " << result.mMaximumReadTime.count() << "ms\n"
-                    << "  Minimum read length: " << result.mMinimumReadLength << " byte(s)\n"
-                    << "  Minimum read time: " << result.mMinimumReadTime.count() << "ms\n"
-                    << "  Number of reads: " << result.mNumReads << "\n"
-                    << "  Time to first byte: " << result.mTimeToFirstByte.count() << "ms\n"
-                    << "  Time to completion: " << result.mTimeToCompletion.count() << "ms\n";
+        ostream << "Request #" << index << " (" << toString(range) << "):\n"
+                << "  Average read length: " << result.mAverageReadLength << " byte(s)\n"
+                << "  Average read time: " << result.mAverageReadTime << "ms\n"
+                << "  Bytes read: " << bytesRead << "\n"
+                << "  Maximum read length: " << result.mMaximumReadLength << " byte(s)\n"
+                << "  Maximum read time: " << result.mMaximumReadTime.count() << "ms\n"
+                << "  Minimum read length: " << result.mMinimumReadLength << " byte(s)\n"
+                << "  Minimum read time: " << result.mMinimumReadTime.count() << "ms\n"
+                << "  Number of reads: " << result.mNumReads << "\n"
+                << "  Time to first byte: " << result.mTimeToFirstByte.count() << "ms\n"
+                << "  Time to completion: " << result.mTimeToCompletion.count() << "ms\n";
+
+        LOG_verbose << ostream.str();
     }
 
     // Log total number of bytes downloaded.
