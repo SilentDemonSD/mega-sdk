@@ -307,14 +307,55 @@ using common::testing::randomName;
 using common::testing::SingleClientTest;
 
 // Fixture for individual benchmarks.
-struct FileServiceBenchmark: SingleClientTest<FileServiceBenchmarkTraits>
-{}; // FileServiceBenchmark
+struct FileServiceBenchmarks: SingleClientTest<FileServiceBenchmarkTraits>
+{}; // FileServiceBenchmarks
 
 // Perform a benchmark.
 template<typename Rep, typename Period>
 static bool benchmark(Client& client,
                       const BenchmarkReadRequestVector& requests,
                       std::chrono::duration<Rep, Period>);
+
+// Convenience.
+using namespace std::literals::chrono_literals;
+
+TEST_F(FileServiceBenchmarks, benchmark_sequential_nonoverlapping)
+{
+    BenchmarkReadRequestVector requests;
+
+    // Populate requests.
+    for (auto i = 0ul; i < 8; ++i)
+    {
+        BenchmarkReadRequest request;
+
+        request.mRange.mBegin = 5120ul * 1024 * i;
+        request.mRange.mEnd = request.mRange.mBegin + 4096 * 1024;
+
+        requests.emplace_back(request);
+    }
+
+    // Execute the benchmark.
+    ASSERT_TRUE(benchmark(*mClient, requests, 15min));
+}
+
+TEST_F(FileServiceBenchmarks, benchmark_sequential_overlapping)
+{
+    BenchmarkReadRequestVector requests;
+
+    // Populate requests.
+    for (auto i = 0ul; i < 8; ++i)
+    {
+        BenchmarkReadRequest request;
+
+        request.mRange.mBegin = i * 2048 * 1024;
+        request.mRange.mEnd = request.mRange.mBegin + 4096 * 1024;
+
+        requests.emplace_back(request);
+    }
+
+    // Execute the benchmark.
+    ASSERT_TRUE(benchmark(*mClient, requests, 15min));
+}
 
 template<typename Rep, typename Period>
 bool benchmark(Client& client,
