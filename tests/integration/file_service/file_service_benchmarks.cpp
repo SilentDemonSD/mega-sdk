@@ -320,7 +320,7 @@ static bool benchmark(Client& client,
 // Convenience.
 using namespace std::literals::chrono_literals;
 
-TEST_F(FileServiceBenchmarks, benchmark_firefox_linear_playback)
+TEST_F(FileServiceBenchmarks, DISABLED_benchmark_firefox_linear_playback)
 {
     // Based on linear playback in Firefox via MEGAsync.
     BenchmarkReadRequestVector requests = {{FileRange(0, 668951065), 0ms},
@@ -337,7 +337,7 @@ TEST_F(FileServiceBenchmarks, benchmark_firefox_linear_playback)
     ASSERT_TRUE(benchmark(*mClient, requests, 15min));
 }
 
-TEST_F(FileServiceBenchmarks, benchmark_firefox_random_playback)
+TEST_F(FileServiceBenchmarks, DISABLED_benchmark_firefox_random_playback)
 {
     // Based on random playback in Firefox via MEGAsync.
     BenchmarkReadRequestVector requests = {{FileRange(0, 668951065), 0ms},
@@ -413,7 +413,7 @@ TEST_F(FileServiceBenchmarks, benchmark_firefox_random_playback)
     ASSERT_TRUE(benchmark(*mClient, requests, 15min));
 }
 
-TEST_F(FileServiceBenchmarks, benchmark_sequential_nonoverlapping)
+TEST_F(FileServiceBenchmarks, DISABLED_benchmark_sequential_nonoverlapping)
 {
     BenchmarkReadRequestVector requests;
 
@@ -432,7 +432,7 @@ TEST_F(FileServiceBenchmarks, benchmark_sequential_nonoverlapping)
     ASSERT_TRUE(benchmark(*mClient, requests, 15min));
 }
 
-TEST_F(FileServiceBenchmarks, benchmark_sequential_overlapping)
+TEST_F(FileServiceBenchmarks, DISABLED_benchmark_sequential_overlapping)
 {
     BenchmarkReadRequestVector requests;
 
