@@ -320,6 +320,99 @@ static bool benchmark(Client& client,
 // Convenience.
 using namespace std::literals::chrono_literals;
 
+TEST_F(FileServiceBenchmarks, benchmark_firefox_linear_playback)
+{
+    // Based on linear playback in Firefox via MEGAsync.
+    BenchmarkReadRequestVector requests = {{FileRange(0, 668951065), 0ms},
+                                           {FileRange(668729344, 668951065), 185ms},
+                                           {FileRange(1409024, 668951065), 206ms},
+                                           {FileRange(105218048, 668951065), 360ms},
+                                           {FileRange(209027072, 668951065), 579ms},
+                                           {FileRange(312836096, 668951065), 718ms},
+                                           {FileRange(416645120, 668951065), 839ms},
+                                           {FileRange(520454144, 668951065), 965ms},
+                                           {FileRange(589660160, 668951065), 30123ms}}; // requests
+
+    // Execute the benchmark.
+    ASSERT_TRUE(benchmark(*mClient, requests, 15min));
+}
+
+TEST_F(FileServiceBenchmarks, benchmark_firefox_random_playback)
+{
+    // Based on random playback in Firefox via MEGAsync.
+    BenchmarkReadRequestVector requests = {{FileRange(0, 668951065), 0ms},
+                                           {FileRange(668729344, 668951065), 50ms},
+                                           {FileRange(1572864, 668951065), 71ms},
+                                           {FileRange(174587904, 668951065), 229ms},
+                                           {FileRange(209190912, 668951065), 261ms},
+                                           {FileRange(243793920, 668951065), 298ms},
+                                           {FileRange(278396928, 668951065), 328ms},
+                                           {FileRange(312999936, 668951065), 357ms},
+                                           {FileRange(347602944, 668951065), 385ms},
+                                           {FileRange(615710720, 668951065), 3588ms},
+                                           {FileRange(620953600, 668951065), 3598ms},
+                                           {FileRange(616366080, 668951065), 3652ms},
+                                           {FileRange(501481472, 668951065), 5585ms},
+                                           {FileRange(131530752, 668951065), 9301ms},
+                                           {FileRange(138051584, 668951065), 9327ms},
+                                           {FileRange(218923008, 668951065), 9458ms},
+                                           {FileRange(246317056, 668951065), 9567ms},
+                                           {FileRange(280920064, 668951065), 9656ms},
+                                           {FileRange(311066624, 668951065), 9747ms},
+                                           {FileRange(345669632, 668951065), 9837ms},
+                                           {FileRange(380272640, 668951065), 9915ms},
+                                           {FileRange(414875648, 668951065), 9985ms},
+                                           {FileRange(449478656, 668951065), 10052ms},
+                                           {FileRange(484081664, 668951065), 10108ms},
+                                           {FileRange(518684672, 668951065), 10157ms},
+                                           {FileRange(553287680, 668951065), 10197ms},
+                                           {FileRange(587890688, 668951065), 10230ms},
+                                           {FileRange(622493696, 668951065), 10256ms},
+                                           {FileRange(133857280, 668951065), 10258ms},
+                                           {FileRange(213811200, 668951065), 10391ms},
+                                           {FileRange(248152064, 668951065), 10501ms},
+                                           {FileRange(282755072, 668951065), 10570ms},
+                                           {FileRange(306872320, 668951065), 10665ms},
+                                           {FileRange(341475328, 668951065), 10755ms},
+                                           {FileRange(376078336, 668951065), 10835ms},
+                                           {FileRange(410681344, 668951065), 10909ms},
+                                           {FileRange(445284352, 668951065), 10974ms},
+                                           {FileRange(655392768, 668951065), 11005ms},
+                                           {FileRange(40894464, 668951065), 19387ms},
+                                           {FileRange(48267264, 668951065), 19415ms},
+                                           {FileRange(127172608, 668951065), 19560ms},
+                                           {FileRange(161775616, 668951065), 19668ms},
+                                           {FileRange(196378624, 668951065), 19736ms},
+                                           {FileRange(221282304, 668951065), 19830ms},
+                                           {FileRange(255885312, 668951065), 19918ms},
+                                           {FileRange(290488320, 668951065), 19998ms},
+                                           {FileRange(325091328, 668951065), 20070ms},
+                                           {FileRange(359694336, 668951065), 20134ms},
+                                           {FileRange(394297344, 668951065), 20191ms},
+                                           {FileRange(428900352, 668951065), 20242ms},
+                                           {FileRange(463503360, 668951065), 20283ms},
+                                           {FileRange(498106368, 668951065), 20317ms},
+                                           {FileRange(43089920, 668951065), 20330ms},
+                                           {FileRange(117932032, 668951065), 20374ms},
+                                           {FileRange(129073152, 668951065), 20488ms},
+                                           {FileRange(163676160, 668951065), 20594ms},
+                                           {FileRange(198279168, 668951065), 20646ms},
+                                           {FileRange(216104960, 668951065), 20743ms},
+                                           {FileRange(250707968, 668951065), 20829ms},
+                                           {FileRange(285310976, 668951065), 20906ms},
+                                           {FileRange(319913984, 668951065), 20976ms},
+                                           {FileRange(354516992, 668951065), 21040ms},
+                                           {FileRange(389120000, 668951065), 21097ms},
+                                           {FileRange(423723008, 668951065), 21145ms},
+                                           {FileRange(458326016, 668951065), 21185ms},
+                                           {FileRange(492929024, 668951065), 21221ms},
+                                           {FileRange(527532032, 668951065), 21247ms},
+                                           {FileRange(564756480, 668951065), 21256ms}}; // requests
+
+    // Execute the benchmark.
+    ASSERT_TRUE(benchmark(*mClient, requests, 15min));
+}
+
 TEST_F(FileServiceBenchmarks, benchmark_sequential_nonoverlapping)
 {
     BenchmarkReadRequestVector requests;
