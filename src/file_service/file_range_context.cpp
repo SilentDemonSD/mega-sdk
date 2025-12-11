@@ -85,8 +85,10 @@ void FileRangeContext::completed(Error result)
     completed(mManager.lock(), result);
 }
 
-auto FileRangeContext::data(const void* buffer, std::uint64_t, std::uint64_t length)
-    -> std::variant<Abort, Continue>
+auto FileRangeContext::data(const void* buffer,
+                            std::uint64_t,
+                            std::uint64_t length,
+                            const Speeds&) -> std::variant<Abort, Continue>
 {
     // Convenience.
     auto offset = mEnd - mIterator->first.mBegin;

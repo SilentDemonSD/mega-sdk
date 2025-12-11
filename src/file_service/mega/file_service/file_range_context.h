@@ -37,8 +37,10 @@ class FileRangeContext: private common::PartialDownloadCallback
     void completed(Error result) override;
 
     // Called repeatedly as data is donwloaded from the cloud.
-    auto data(const void* buffer, std::uint64_t offset, std::uint64_t length)
-        -> std::variant<Abort, Continue> override;
+    auto data(const void* buffer,
+              std::uint64_t offset,
+              std::uint64_t length,
+              const Speeds&) -> std::variant<Abort, Continue> override;
 
     // Dispatch zero or more read requests.
     void dispatch(BufferPtr buffer, std::uint64_t begin, std::uint64_t minimumLength);

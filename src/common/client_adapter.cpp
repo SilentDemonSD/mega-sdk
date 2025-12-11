@@ -1589,12 +1589,14 @@ void ClientPartialDownload::data(Data& data)
     auto buffer = reinterpret_cast<const void*>(data.buffer);
     auto offset = static_cast<std::uint64_t>(data.offset);
     auto length = static_cast<std::uint64_t>(data.len);
+    auto meanSpeed = static_cast<std::uint64_t>(data.meanSpeed);
+    auto overallSpeed = static_cast<std::uint64_t>(data.speed);
 
     // Clamp length.
     length = std::min(length, mRemaining);
 
     // Pass data to the user callback.
-    auto result = mCallback.data(buffer, offset, length);
+    auto result = mCallback.data(buffer, offset, length, {meanSpeed, overallSpeed});
 
     // Figure out how many bytes we still have to download.
     mRemaining -= length;

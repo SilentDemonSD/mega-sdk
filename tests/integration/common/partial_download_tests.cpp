@@ -67,8 +67,10 @@ class PartialDownloadCallback: public common::PartialDownloadCallback
     }
 
     // Called when we've received some content.
-    auto data(const void* buffer, std::uint64_t, std::uint64_t length)
-        -> std::variant<Abort, Continue> override
+    auto data(const void* buffer,
+              std::uint64_t,
+              std::uint64_t length,
+              const Speeds&) -> std::variant<Abort, Continue> override
     {
         // Convenience.
         auto* buffer_ = static_cast<const char*>(buffer);
@@ -161,8 +163,10 @@ TEST_F(PartialDownloadTests, DISABLED_measure_average_fetch_times)
         }
 
         // Called when we've received some content.
-        auto data(const void*, std::uint64_t, std::uint64_t)
-            -> std::variant<Abort, Continue> override
+        auto data(const void*,
+                  std::uint64_t,
+                  std::uint64_t,
+                  const Speeds&) -> std::variant<Abort, Continue> override
         {
             return Continue();
         }
