@@ -36422,9 +36422,11 @@ int MegaHTTPServer::streamNode(MegaHTTPContext *httpctx)
     m_off_t totalSize = node->getSize();
     m_off_t start = 0;
     m_off_t end = totalSize - 1;
+    bool rangeRequested = false;
     if (httpctx->rangeStart >= 0)
     {
         start = httpctx->rangeStart;
+        rangeRequested = true;
     }
     httpctx->rangeStart = start;
 
@@ -36433,8 +36435,6 @@ int MegaHTTPServer::streamNode(MegaHTTPContext *httpctx)
         end = std::min(totalSize - 1, httpctx->rangeEnd);
     }
     httpctx->rangeEnd = end + 1;
-
-    bool rangeRequested = (httpctx->rangeEnd - httpctx->rangeStart) != totalSize;
 
     m_off_t len = end - start + 1;
     if (totalSize && (start < 0 || start >= totalSize || end < 0 || end >= totalSize || len <= 0 || len > totalSize) )
