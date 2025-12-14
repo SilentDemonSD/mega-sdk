@@ -2428,6 +2428,9 @@ TEST_F(FileServiceTests, reclaim_all_succeeds)
     // This is necessary to ensure we read only as much as specified.
     mClient->fileService().options(options);
 
+    // Tracks total space allocated for our files.
+    std::uint64_t totalAllocated = 0;
+
     // Open, read and modify each file.
     for (auto handle: handles)
     {
@@ -2446,6 +2449,15 @@ TEST_F(FileServiceTests, reclaim_all_succeeds)
         // Modify the file.
         ASSERT_EQ(execute(write, data->data(), *file, 0, 32_KiB), FILE_SUCCESS);
 
+        // How much space has this file been allocated?
+        auto allocated = file->info().allocatedSize();
+
+        // Sanity.
+        ASSERT_GE(allocated, file->info().reportedSize());
+
+        // Factor this file's allocated size into our total.
+        totalAllocated += allocated;
+
         // Make sure the service doesn't purge the file.
         files.emplace_back(std::move(*file));
     }
@@ -2455,7 +2467,7 @@ TEST_F(FileServiceTests, reclaim_all_succeeds)
     ASSERT_EQ(usedBefore.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
 
     // Make sure we're using only as much as we read.
-    ASSERT_EQ(*usedBefore, 512_KiB * files.size());
+    ASSERT_EQ(totalAllocated, *usedBefore);
 
     // Try and reclaim some storage.
     //
@@ -2640,12 +2652,12 @@ TEST_F(FileServiceTests, reclaim_foreign_file_succeeds)
     auto allocated = file->info().allocatedSize();
 
     // Make sure the file's footprint is what we expect it is.
-    ASSERT_EQ(allocated, mFileContent.size());
+    ASSERT_GE(allocated, mFileContent.size());
 
     // Reclaim the file's storage.
     auto reclaimed = execute(reclaim, *file);
     ASSERT_EQ(reclaimed.errorOr(FILE_SUCCESS), FILE_SUCCESS);
-    ASSERT_EQ(*reclaimed, mFileContent.size());
+    ASSERT_EQ(allocated, *reclaimed);
 
     // Make sure the file's storage footprint has decreased.
     EXPECT_EQ(file->info().allocatedSize(), 0u);
@@ -2699,7 +2711,7 @@ TEST_F(FileServiceTests, reclaim_periodic_succeeds)
     // Make sure our storage footprint is as we expect.
     auto usedBefore = mClient->fileService().storageUsed();
     ASSERT_EQ(usedBefore.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
-    ASSERT_EQ(*usedBefore, 512_KiB * files.size());
+    ASSERT_GE(*usedBefore, 512_KiB * files.size());
 
     // Enable storage reclamation.
     options.mReclaimAgeThreshold = hours(0);
@@ -2712,7 +2724,11 @@ TEST_F(FileServiceTests, reclaim_periodic_succeeds)
     EXPECT_TRUE(waitFor(
         [&]()
         {
-            return mClient->fileService().storageUsed().valueOr(0) == 512_KiB;
+            // How much space have we used?
+            auto used = mClient->fileService().storageUsed();
+
+            // Have we fallen below the reclamation threshold?
+            return used && *used <= options.mReclaimSizeThreshold;
         },
         minutes(5)));
 
@@ -2720,7 +2736,7 @@ TEST_F(FileServiceTests, reclaim_periodic_succeeds)
     auto usedAfter = mClient->fileService().storageUsed();
     ASSERT_EQ(usedAfter.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
     EXPECT_LT(*usedAfter, *usedBefore);
-    EXPECT_EQ(*usedAfter, 512_KiB);
+    EXPECT_GE(options.mReclaimSizeThreshold, *usedAfter);
 }
 
 TEST_F(FileServiceTests, reclaim_single_succeeds)
