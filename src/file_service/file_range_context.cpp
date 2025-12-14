@@ -236,23 +236,12 @@ auto FileRangeContext::download(Client& client,
     auto offset = mIterator->first.mBegin;
     auto length = mIterator->first.mEnd - offset;
 
-    // Create a suitable buffer for this range.
-    mBuffer = [&]() -> BufferPtr
-    {
-        // How much data can we store directly in memory?
-        constexpr std::uint64_t memoryThreshold = 1u << 22;
+    // Assume the range isn't displaced.
+    mBuffer = std::move(buffer);
 
-        // Range is small enough that it can fit entirely in memory.
-        if (length <= memoryThreshold)
-            return std::make_shared<MemoryBuffer>(length);
-
-        // Range is displaced.
-        if (offset)
-            return std::make_shared<DisplacedBuffer>(std::move(buffer), offset);
-
-        // Range isn't displaced.
-        return std::move(buffer);
-    }();
+    // Range is displaced.
+    if (offset)
+        mBuffer = std::make_shared<DisplacedBuffer>(std::move(mBuffer), offset);
 
     // Try and create a partial download.
     auto download = keyData ? client.partialDownload(*this, handle, *keyData, length, offset) :
