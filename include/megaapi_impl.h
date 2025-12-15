@@ -32,6 +32,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <map>
 #include <memory>
 
 #define CRON_USE_LOCAL_TIME 1
@@ -5523,6 +5524,7 @@ public:
 };
 
 #ifdef HAVE_LIBUV
+
 class StreamingBuffer
 {
 public:
@@ -5627,6 +5629,8 @@ public:
     std::list<char*> writePointers;
 };
 
+using MegaTCPContextPtr = shared_ptr<MegaTCPContext>;
+
 class MegaTCPServer
 {
 protected:
@@ -5637,7 +5641,8 @@ protected:
 
     set<handle> allowedHandles;
     handle lastHandle;
-    list<MegaTCPContext*> connections;
+    std::map<MegaTCPContext*, MegaTCPContextPtr> connections;
+    std::map<MegaTCPContext*, MegaTCPContextPtr> closingConnections;
     uv_async_t exit_handle;
     MegaApiImpl *megaApi;
     bool semaphoresdestroyed;
@@ -5740,7 +5745,7 @@ protected:
      * @note The returned context will be managed by the TCP server
      * @note Caller is responsible for proper initialization of the context
      */
-    virtual MegaTCPContext* initializeContext(uv_stream_t* server_handle) = 0;
+    virtual MegaTCPContextPtr initializeContext(uv_stream_t* server_handle) = 0;
 
     /**
      * @brief Handle completion of a write operation.
@@ -5914,7 +5919,7 @@ protected:
     //virtual methods:
     virtual void processReceivedData(MegaTCPContext *ftpctx, ssize_t nread, const uv_buf_t * buf);
     virtual void processAsyncEvent(MegaTCPContext *ftpctx);
-    virtual MegaTCPContext * initializeContext(uv_stream_t *server_handle);
+    virtual MegaTCPContextPtr initializeContext(uv_stream_t* server_handle);
     virtual void processWriteFinished(MegaTCPContext* tcpctx, int status);
     virtual void processOnAsyncEventClose(MegaTCPContext* tcpctx);
     virtual bool respondNewConnection(MegaTCPContext* tcpctx);
@@ -6071,7 +6076,7 @@ protected:
     //virtual methods:
     virtual void processReceivedData(MegaTCPContext *tcpctx, ssize_t nread, const uv_buf_t * buf);
     virtual void processAsyncEvent(MegaTCPContext *tcpctx);
-    virtual MegaTCPContext * initializeContext(uv_stream_t *server_handle);
+    virtual MegaTCPContextPtr initializeContext(uv_stream_t* server_handle);
     virtual void processWriteFinished(MegaTCPContext* tcpctx, int status);
     virtual void processOnAsyncEventClose(MegaTCPContext* tcpctx);
     virtual bool respondNewConnection(MegaTCPContext* tcpctx);
@@ -6105,7 +6110,7 @@ protected:
     //virtual methods:
     virtual void processReceivedData(MegaTCPContext *tcpctx, ssize_t nread, const uv_buf_t * buf);
     virtual void processAsyncEvent(MegaTCPContext *tcpctx);
-    virtual MegaTCPContext * initializeContext(uv_stream_t *server_handle);
+    virtual MegaTCPContextPtr initializeContext(uv_stream_t* server_handle);
     virtual void processWriteFinished(MegaTCPContext* tcpctx, int status);
     virtual void processOnAsyncEventClose(MegaTCPContext* tcpctx);
     virtual bool respondNewConnection(MegaTCPContext* tcpctx);

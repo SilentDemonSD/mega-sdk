@@ -34295,12 +34295,9 @@ void MegaTCPServer::onNewClient_tls(uv_stream_t *server_handle, int status)
     }
 
     // Create an object to save context information
-    MegaTCPContext* tcpctx = ((MegaTCPServer *)server_handle->data)->initializeContext(server_handle);
+    auto tcpctx = ((MegaTCPServer*)server_handle->data)->initializeContext(server_handle);
 
     LOG_debug << "Connection received at port " << tcpctx->server->port << " ! " << tcpctx->server->connections.size();
-
-    // Mutex to protect the data buffer
-    uv_mutex_init(&tcpctx->mutex);
 
     // Async handle to perform writes
     uv_async_init(&tcpctx->server->uv_loop, &tcpctx->asynchandle, onAsyncEvent);
@@ -34316,7 +34313,7 @@ void MegaTCPServer::onNewClient_tls(uv_stream_t *server_handle, int status)
 
     tcpctx->evt_tls = evt_ctx_get_tls(&tcpctx->server->evtctx);
     assert(tcpctx->evt_tls != NULL);
-    tcpctx->evt_tls->data = tcpctx;
+    tcpctx->evt_tls->data = tcpctx.get();
     if (evt_tls_accept(tcpctx->evt_tls, on_hd_complete))
     {
         LOG_err << "evt_tls_accept failed";
@@ -34324,9 +34321,9 @@ void MegaTCPServer::onNewClient_tls(uv_stream_t *server_handle, int status)
         return;
     }
 
-    tcpctx->server->connections.push_back(tcpctx);
+    tcpctx->server->connections[tcpctx.get()] = tcpctx;
 
-    tcpctx->server->readData(tcpctx);
+    tcpctx->server->readData(tcpctx.get());
 }
 #endif
 
@@ -34354,12 +34351,10 @@ void MegaTCPServer::onNewClient(uv_stream_t* server_handle, int status)
     }
 
     // Create an object to save context information
-    MegaTCPContext* tcpctx = ((MegaTCPServer *)server_handle->data)->initializeContext(server_handle);
+    auto tcpctx = ((MegaTCPServer*)server_handle->data)->initializeContext(server_handle);
 
-    LOG_debug << "Connection received at port " << tcpctx->server->port << "! " << tcpctx->server->connections.size() << " tcpctx = " << tcpctx;
-
-    // Mutex to protect the data buffer
-    uv_mutex_init(&tcpctx->mutex);
+    LOG_debug << "Connection received at port " << tcpctx->server->port << "! "
+              << tcpctx->server->connections.size() << " tcpctx = " << tcpctx.get();
 
     // Async handle to perform writes
     uv_async_init(&tcpctx->server->uv_loop, &tcpctx->asynchandle, onAsyncEvent);
@@ -34373,11 +34368,11 @@ void MegaTCPServer::onNewClient(uv_stream_t* server_handle, int status)
         return;
     }
 
-    tcpctx->server->connections.push_back(tcpctx);
-    if (tcpctx->server->respondNewConnection(tcpctx))
+    tcpctx->server->connections[tcpctx.get()] = tcpctx;
+    if (tcpctx->server->respondNewConnection(tcpctx.get()))
     {
         // Start reading
-        tcpctx->server->readData(tcpctx);
+        tcpctx->server->readData(tcpctx.get());
     }
 }
 
@@ -34436,7 +34431,14 @@ void MegaTCPServer::onClose(uv_handle_t* handle)
     tcpctx->megaApi->removeTransferListener(tcpctx);
     tcpctx->megaApi->removeRequestListener(tcpctx);
 
-    tcpctx->server->connections.remove(tcpctx);
+    // Move from connections to closingConnections to keep tcpctx alive until onAsyncEventClose
+    auto it = tcpctx->server->connections.find(tcpctx);
+    if (it != tcpctx->server->connections.end())
+    {
+        tcpctx->server->closingConnections[tcpctx] = std::move(it->second);
+        tcpctx->server->connections.erase(it);
+    }
+
     LOG_debug << "Connection closed: " << tcpctx->server->connections.size() << " port = " << tcpctx->server->port << " closing async handle";
     uv_close((uv_handle_t *)&tcpctx->asynchandle, onAsyncEventClose);
 }
@@ -34459,9 +34461,10 @@ void MegaTCPServer::onAsyncEventClose(uv_handle_t *handle)
         uv_sem_post(&tcpctx->server->semaphoreEnd);
     }
 
-    uv_mutex_destroy(&tcpctx->mutex);
-    delete tcpctx;
-    LOG_debug << "Connection deleted, port = " << port;
+    // Now it's safe to release the shared_ptr - this will destroy tcpctx if it's the last reference
+    tcpctx->server->closingConnections.erase(tcpctx);
+
+    LOG_debug << "Connection cleanup completed, port = " << port;
 }
 
 #ifdef ENABLE_EVT_TLS
@@ -34549,10 +34552,15 @@ MegaTCPContext::MegaTCPContext()
 #endif
     server = NULL;
     megaApi = NULL;
+
+    // Mutex to protect the data buffer
+    uv_mutex_init(&mutex);
 }
 
 MegaTCPContext::~MegaTCPContext()
 {
+    uv_mutex_destroy(&mutex);
+
 #ifdef ENABLE_EVT_TLS
     if (evt_tls)
     {
@@ -34560,7 +34568,7 @@ MegaTCPContext::~MegaTCPContext()
     }
 #endif
 
-    if(!finished) // Set listener pointers to NULL upon premature destruction
+    if (!finished && megaApi) // Set listener pointers to NULL upon premature destruction
     {
         megaApi->removeTransferListener(this);
         megaApi->removeRequestListener(this);
@@ -34606,10 +34614,14 @@ void MegaTCPServer::onCloseRequested(uv_async_t *handle)
 
     tcpServer->closing = true;
 
-    for (list<MegaTCPContext*>::iterator it = tcpServer->connections.begin(); it != tcpServer->connections.end(); it++)
+    // closeTCPConnection results in erasing the element in next uv loop.
+    // It should be ok to use for range loop. For preventive action, we don't use range loop just
+    // in case the invariant will be changed.
+    const auto& conns = tcpServer->connections;
+    for (auto it = conns.begin(), nextIt = it; it != conns.end(); it = nextIt)
     {
-        MegaTCPContext *tcpctx = (*it);
-        closeTCPConnection(tcpctx);
+        ++nextIt;
+        closeTCPConnection(it->first);
     }
 
     tcpServer->remainingcloseevents++;
@@ -34691,9 +34703,9 @@ MegaHTTPServer::MegaHTTPServer(MegaApiImpl *megaApi, string basePath, bool useTL
     this->subtitlesSupportEnabled = false;
 }
 
-MegaTCPContext * MegaHTTPServer::initializeContext(uv_stream_t *server_handle)
+MegaTCPContextPtr MegaHTTPServer::initializeContext(uv_stream_t* server_handle)
 {
-    MegaHTTPContext* httpctx = new MegaHTTPContext();
+    shared_ptr<MegaHTTPContext> httpctx = std::make_shared<MegaHTTPContext>();
 
     // Initialize the parser
     http_parser_init(&httpctx->parser, HTTP_REQUEST);
@@ -34703,9 +34715,9 @@ MegaTCPContext * MegaHTTPServer::initializeContext(uv_stream_t *server_handle)
 
     httpctx->server = httpServer;
     httpctx->megaApi = httpServer->megaApi;
-    httpctx->parser.data = httpctx;
-    httpctx->tcphandle.data = httpctx;
-    httpctx->asynchandle.data = httpctx;
+    httpctx->parser.data = httpctx.get();
+    httpctx->tcphandle.data = httpctx.get();
+    httpctx->asynchandle.data = httpctx.get();
 
     return httpctx;
 }
@@ -36962,16 +36974,16 @@ MegaFTPServer::~MegaFTPServer()
     stop();
 }
 
-MegaTCPContext* MegaFTPServer::initializeContext(uv_stream_t *server_handle)
+MegaTCPContextPtr MegaFTPServer::initializeContext(uv_stream_t* server_handle)
 {
-    MegaFTPContext* ftpctx = new MegaFTPContext();
+    shared_ptr<MegaFTPContext> ftpctx = std::make_shared<MegaFTPContext>();
 
     // Set connection data
     MegaFTPServer* ftpServer = (MegaFTPServer*)(server_handle->data);
     ftpctx->server = ftpServer;
     ftpctx->megaApi = ftpServer->megaApi;
-    ftpctx->tcphandle.data = ftpctx;
-    ftpctx->asynchandle.data = ftpctx;
+    ftpctx->tcphandle.data = ftpctx.get();
+    ftpctx->asynchandle.data = ftpctx.get();
 
     return ftpctx;
 }
@@ -38748,16 +38760,16 @@ MegaFTPDataServer::~MegaFTPDataServer()
     LOG_verbose << "MegaFTPDataServer::~MegaFTPDataServer. end";
 }
 
-MegaTCPContext* MegaFTPDataServer::initializeContext(uv_stream_t *server_handle)
+MegaTCPContextPtr MegaFTPDataServer::initializeContext(uv_stream_t* server_handle)
 {
-    MegaFTPDataContext* ftpctx = new MegaFTPDataContext();
+    shared_ptr<MegaFTPDataContext> ftpctx = std::make_shared<MegaFTPDataContext>();
 
     // Set connection data
     MegaFTPDataServer* ftpDataServer = (MegaFTPDataServer*)(server_handle->data);
     ftpctx->server = ftpDataServer;
     ftpctx->megaApi = ftpDataServer->megaApi;
-    ftpctx->tcphandle.data = ftpctx;
-    ftpctx->asynchandle.data = ftpctx;
+    ftpctx->tcphandle.data = ftpctx.get();
+    ftpctx->asynchandle.data = ftpctx.get();
 
     return ftpctx;
 }
@@ -38846,13 +38858,14 @@ void MegaFTPDataServer::processWriteFinished(MegaTCPContext *tcpctx, int status)
 
 void MegaFTPDataServer::sendData()
 {
-    MegaTCPContext * tcpctx = NULL;
-
     this->notifyNewConnectionRequired = true;
 
-    if (connections.size())
+    MegaTCPContext* tcpctx = NULL;
+    if (!connections.empty())
     {
-        tcpctx = connections.back(); //only interested in the last connection received (the one that needs response)
+        // only interested in the last connection received (the one that needs response)
+        const auto it = connections.rbegin();
+        tcpctx = it->first;
     }
     //Some client might create connections before receiving a 150 in the control channel (e.g: ftp linux command)
     // This could cause never answered / never closed connections.
