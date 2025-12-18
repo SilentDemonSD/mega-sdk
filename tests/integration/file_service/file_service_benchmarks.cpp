@@ -320,6 +320,9 @@ static bool benchmark(Client& client,
 // Convenience.
 using namespace std::literals::chrono_literals;
 
+// This test is not intented to be run on Jenkins every time we push a commit for an MR.
+// Instead, it's intended to be run manually when optimizing to gauge whether our optimizations are
+// having a positive effect.
 TEST_F(FileServiceBenchmarks, DISABLED_benchmark_firefox_linear_playback)
 {
     // Based on linear playback in Firefox via MEGAsync.
@@ -337,6 +340,9 @@ TEST_F(FileServiceBenchmarks, DISABLED_benchmark_firefox_linear_playback)
     ASSERT_TRUE(benchmark(*mClient, requests, 15min));
 }
 
+// This test is not intented to be run on Jenkins every time we push a commit for an MR.
+// Instead, it's intended to be run manually when optimizing to gauge whether our optimizations are
+// having a positive effect.
 TEST_F(FileServiceBenchmarks, DISABLED_benchmark_firefox_random_playback)
 {
     // Based on random playback in Firefox via MEGAsync.
@@ -413,6 +419,9 @@ TEST_F(FileServiceBenchmarks, DISABLED_benchmark_firefox_random_playback)
     ASSERT_TRUE(benchmark(*mClient, requests, 15min));
 }
 
+// This test is not intented to be run on Jenkins every time we push a commit for an MR.
+// Instead, it's intended to be run manually when optimizing to gauge whether our optimizations are
+// having a positive effect.
 TEST_F(FileServiceBenchmarks, DISABLED_benchmark_sequential_nonoverlapping)
 {
     BenchmarkReadRequestVector requests;
@@ -432,6 +441,9 @@ TEST_F(FileServiceBenchmarks, DISABLED_benchmark_sequential_nonoverlapping)
     ASSERT_TRUE(benchmark(*mClient, requests, 15min));
 }
 
+// This test is not intented to be run on Jenkins every time we push a commit for an MR.
+// Instead, it's intended to be run manually when optimizing to gauge whether our optimizations are
+// having a positive effect.
 TEST_F(FileServiceBenchmarks, DISABLED_benchmark_sequential_overlapping)
 {
     BenchmarkReadRequestVector requests;
