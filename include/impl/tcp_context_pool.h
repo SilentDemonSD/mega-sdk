@@ -3,6 +3,7 @@
 #include <list>
 #include <map>
 #include <memory>
+#include <vector>
 
 namespace mega
 {
