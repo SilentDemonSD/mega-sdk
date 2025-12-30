@@ -33769,14 +33769,22 @@ std::string StreamingBuffer::bufferStatus() const
 // http_parser settings
 http_parser_settings MegaTCPServer::parsercfg;
 
-void TcpContextPool::add(MegaTCPContextPtr p)
+bool TcpContextPool::add(MegaTCPContextPtr p)
 {
-    // Already here
-    if (mContextLookup.find(p.get()) != mContextLookup.end())
-        return;
+    if (!p)
+        return false;
 
     auto it = mContextList.emplace(mContextList.end(), std::move(p));
-    mContextLookup.emplace(it->get(), it);
+
+    [[maybe_unused]] auto [_, success] = mContextLookup.emplace(it->get(), it);
+
+    // Already exists, restore the list
+    if (!success)
+    {
+        mContextList.erase(it);
+    }
+
+    return success;
 }
 
 MegaTCPContextPtr TcpContextPool::release(MegaTCPContext* p)
@@ -34410,7 +34418,14 @@ void MegaTCPServer::onNewClient(uv_stream_t* server_handle, int status)
         return;
     }
 
-    tcpctx->server->connections.add(tcpctx);
+    if (!tcpctx->server->connections.add(tcpctx))
+    {
+        assert(false); // Shouldn't happen. It is usually a bug.
+        LOG_err << "Adding tcpctx to connections failed";
+        onClose((uv_handle_t*)&tcpctx->tcphandle);
+        return;
+    }
+
     if (tcpctx->server->respondNewConnection(tcpctx.get()))
     {
         // Start reading

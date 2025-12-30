@@ -48,7 +48,7 @@ TEST_F(TcpContextPoolTest, AddSingleContext)
     auto context = std::make_shared<MockMegaTCPContext>();
     auto rawPtr = context.get();
 
-    pool->add(context);
+    EXPECT_TRUE(pool->add(context));
 
     EXPECT_EQ(pool->size(), 1);
     EXPECT_EQ(pool->back(), rawPtr);
@@ -68,9 +68,9 @@ TEST_F(TcpContextPoolTest, AddMultipleContexts)
     auto rawPtr2 = context2.get();
     auto rawPtr3 = context3.get();
 
-    pool->add(context1);
-    pool->add(context2);
-    pool->add(context3);
+    EXPECT_TRUE(pool->add(context1));
+    EXPECT_TRUE(pool->add(context2));
+    EXPECT_TRUE(pool->add(context3));
 
     EXPECT_EQ(pool->size(), 3);
     EXPECT_EQ(pool->back(), rawPtr3); // Last added should be at back
@@ -88,12 +88,25 @@ TEST_F(TcpContextPoolTest, AddDuplicateContext)
     auto rawPtr = context.get();
 
     // Add the same context multiple times
-    pool->add(context);
-    pool->add(context);
+    EXPECT_TRUE(pool->add(context));
+    EXPECT_FALSE(pool->add(context)); // Should fail on duplicate
 
     // Should still only have one entry
     EXPECT_EQ(pool->size(), 1);
     EXPECT_EQ(pool->back(), rawPtr);
+}
+
+TEST_F(TcpContextPoolTest, AddNullptrShouldFail)
+{
+    // Try to add nullptr
+    EXPECT_FALSE(pool->add(nullptr));
+
+    // Pool should remain empty
+    EXPECT_EQ(pool->size(), 0);
+    EXPECT_EQ(pool->back(), nullptr);
+
+    auto copyResult = pool->copy();
+    EXPECT_TRUE(copyResult.empty());
 }
 
 TEST_F(TcpContextPoolTest, ReleaseExistingContext)
@@ -104,8 +117,8 @@ TEST_F(TcpContextPoolTest, ReleaseExistingContext)
     auto rawPtr1 = context1.get();
     auto rawPtr2 = context2.get();
 
-    pool->add(context1);
-    pool->add(context2);
+    EXPECT_TRUE(pool->add(context1));
+    EXPECT_TRUE(pool->add(context2));
 
     EXPECT_EQ(pool->size(), 2);
 
@@ -130,8 +143,8 @@ TEST_F(TcpContextPoolTest, ReleaseNonExistentContext)
 
     auto rawPtr3 = context3.get(); // This one won't be added to pool
 
-    pool->add(context1);
-    pool->add(context2);
+    EXPECT_TRUE(pool->add(context1));
+    EXPECT_TRUE(pool->add(context2));
 
     EXPECT_EQ(pool->size(), 2);
 
@@ -164,9 +177,9 @@ TEST_F(TcpContextPoolTest, ReleaseAllContexts)
     auto rawPtr2 = context2.get();
     auto rawPtr3 = context3.get();
 
-    pool->add(context1);
-    pool->add(context2);
-    pool->add(context3);
+    EXPECT_TRUE(pool->add(context1));
+    EXPECT_TRUE(pool->add(context2));
+    EXPECT_TRUE(pool->add(context3));
 
     EXPECT_EQ(pool->size(), 3);
 
@@ -200,9 +213,9 @@ TEST_F(TcpContextPoolTest, CopyReturnsCorrectOrder)
     auto rawPtr2 = context2.get();
     auto rawPtr3 = context3.get();
 
-    pool->add(context1);
-    pool->add(context2);
-    pool->add(context3);
+    EXPECT_TRUE(pool->add(context1));
+    EXPECT_TRUE(pool->add(context2));
+    EXPECT_TRUE(pool->add(context3));
 
     auto copyResult = pool->copy();
 
@@ -224,13 +237,13 @@ TEST_F(TcpContextPoolTest, BackReturnsLastAdded)
     auto rawPtr2 = context2.get();
     auto rawPtr3 = context3.get();
 
-    pool->add(context1);
+    EXPECT_TRUE(pool->add(context1));
     EXPECT_EQ(pool->back(), rawPtr1);
 
-    pool->add(context2);
+    EXPECT_TRUE(pool->add(context2));
     EXPECT_EQ(pool->back(), rawPtr2);
 
-    pool->add(context3);
+    EXPECT_TRUE(pool->add(context3));
     EXPECT_EQ(pool->back(), rawPtr3);
 }
 
@@ -243,7 +256,7 @@ TEST_F(TcpContextPoolTest, AddReleaseAddSequence)
     auto rawPtr2 = context2.get();
 
     // Add first context
-    pool->add(context1);
+    EXPECT_TRUE(pool->add(context1));
     EXPECT_EQ(pool->size(), 1);
     EXPECT_EQ(pool->back(), rawPtr1);
 
@@ -254,7 +267,7 @@ TEST_F(TcpContextPoolTest, AddReleaseAddSequence)
     EXPECT_EQ(pool->back(), nullptr);
 
     // Add second context
-    pool->add(context2);
+    EXPECT_TRUE(pool->add(context2));
     EXPECT_EQ(pool->size(), 1);
     EXPECT_EQ(pool->back(), rawPtr2);
 
@@ -275,7 +288,7 @@ TEST_F(TcpContextPoolTest, MemoryManagement)
         weak_ref = context;
         rawPtr = context.get();
 
-        pool->add(context);
+        EXPECT_TRUE(pool->add(context));
 
         // Context should still be alive (held by pool)
         EXPECT_FALSE(weak_ref.expired());

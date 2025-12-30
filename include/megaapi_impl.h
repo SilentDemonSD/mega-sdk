@@ -5665,11 +5665,11 @@ public:
      * to ensure proper lifetime management.
      *
      * @param p Shared pointer to the TCP context to add. Must not be null.
-     *
+     * @return True if the context was added, false otherwise (e.g. already exists or on error)
      * @note The same context pointer couldn't be added multiple times
      * @note The context is added to the back of the list (most recently added).
      */
-    void add(MegaTCPContextPtr p);
+    bool add(MegaTCPContextPtr p);
 
     /**
      * @brief Remove and return a TCP context from the pool.
