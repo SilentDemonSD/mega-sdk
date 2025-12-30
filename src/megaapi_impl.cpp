@@ -34410,7 +34410,7 @@ void MegaTCPServer::onNewClient(uv_stream_t* server_handle, int status)
         return;
     }
 
-    tcpctx->server->connections[tcpctx.get()] = tcpctx;
+    tcpctx->server->connections.add(tcpctx);
     if (tcpctx->server->respondNewConnection(tcpctx.get()))
     {
         // Start reading
@@ -34474,11 +34474,9 @@ void MegaTCPServer::onClose(uv_handle_t* handle)
     tcpctx->megaApi->removeRequestListener(tcpctx);
 
     // Move from connections to closingConnections to keep tcpctx alive until onAsyncEventClose
-    auto it = tcpctx->server->connections.find(tcpctx);
-    if (it != tcpctx->server->connections.end())
+    if (auto tcpCtxPtr = tcpctx->server->connections.release(tcpctx); tcpCtxPtr)
     {
-        tcpctx->server->closingConnections[tcpctx] = std::move(it->second);
-        tcpctx->server->connections.erase(it);
+        tcpctx->server->closingConnections[tcpctx] = std::move(tcpCtxPtr);
     }
 
     LOG_debug << "Connection closed: " << tcpctx->server->connections.size() << " port = " << tcpctx->server->port << " closing async handle";
@@ -34656,14 +34654,9 @@ void MegaTCPServer::onCloseRequested(uv_async_t *handle)
 
     tcpServer->closing = true;
 
-    // closeTCPConnection results in erasing the element in next uv loop.
-    // It should be ok to use for range loop. For preventive action, we don't use range loop just
-    // in case the invariant will be changed.
-    const auto& conns = tcpServer->connections;
-    for (auto it = conns.begin(), nextIt = it; it != conns.end(); it = nextIt)
+    for (auto& tcpctx: tcpServer->connections.copy())
     {
-        ++nextIt;
-        closeTCPConnection(it->first);
+        closeTCPConnection(tcpctx);
     }
 
     tcpServer->remainingcloseevents++;
@@ -38902,16 +38895,12 @@ void MegaFTPDataServer::sendData()
 {
     this->notifyNewConnectionRequired = true;
 
-    MegaTCPContext* tcpctx = NULL;
-    if (!connections.empty())
-    {
-        // only interested in the last connection received (the one that needs response)
-        const auto it = connections.rbegin();
-        tcpctx = it->first;
-    }
-    //Some client might create connections before receiving a 150 in the control channel (e.g: ftp linux command)
+    // only interested in the last connection received (the one that needs response)
+    // Some client might create connections before receiving a 150 in the control channel (e.g: ftp
+    // linux command)
     // This could cause never answered / never closed connections.
-    //assert(connections.size() <= 1); //This might not be true due to that
+    // assert(connections.size() <= 1); //This might not be true due to that
+    MegaTCPContext* tcpctx = connections.back();
 
     if (tcpctx)
     {

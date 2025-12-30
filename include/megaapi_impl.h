@@ -5722,7 +5722,7 @@ protected:
 
     set<handle> allowedHandles;
     handle lastHandle;
-    std::map<MegaTCPContext*, MegaTCPContextPtr> connections;
+    TcpContextPool connections;
     std::map<MegaTCPContext*, MegaTCPContextPtr> closingConnections;
     uv_async_t exit_handle;
     MegaApiImpl *megaApi;
