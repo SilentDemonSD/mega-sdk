@@ -33769,56 +33769,6 @@ std::string StreamingBuffer::bufferStatus() const
 // http_parser settings
 http_parser_settings MegaTCPServer::parsercfg;
 
-bool TcpContextPool::add(MegaTCPContextPtr p)
-{
-    if (!p)
-        return false;
-
-    auto it = mContextList.emplace(mContextList.end(), std::move(p));
-
-    [[maybe_unused]] auto [_, success] = mContextLookup.emplace(it->get(), it);
-
-    // Already exists, restore the list
-    if (!success)
-    {
-        mContextList.erase(it);
-    }
-
-    return success;
-}
-
-MegaTCPContextPtr TcpContextPool::release(MegaTCPContext* p)
-{
-    const auto it = mContextLookup.find(p);
-    if (it == mContextLookup.end())
-        return nullptr;
-
-    auto ptr = *(it->second);
-
-    mContextList.erase(it->second);
-    mContextLookup.erase(it);
-
-    return ptr;
-}
-
-std::vector<MegaTCPContext*> TcpContextPool::copy() const
-{
-    std::vector<MegaTCPContext*> result;
-    std::transform(std::begin(mContextList),
-                   std::end(mContextList),
-                   std::back_inserter(result),
-                   [](const MegaTCPContextPtr& p)
-                   {
-                       return p.get();
-                   });
-    return result;
-}
-
-MegaTCPContext* TcpContextPool::back() const
-{
-    return mContextList.empty() ? nullptr : mContextList.back().get();
-}
-
 MegaTCPServer::MegaTCPServer(MegaApiImpl* megaApi,
                              string basePath,
                              [[maybe_unused]] bool tls,
