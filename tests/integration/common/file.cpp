@@ -35,7 +35,7 @@ File::File(const std::string& content, const std::string& name):
 {}
 
 File::File(std::uint64_t length, const std::string& name, const Path& parentPath):
-    mPath(parentPath.path() / fs::u8path(name))
+    mPath(parentPath.path() / u8path_compat(name))
 {
     // So we can create a new file on disk.
     std::ofstream ostream;
