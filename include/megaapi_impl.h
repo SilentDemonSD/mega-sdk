@@ -5680,7 +5680,7 @@ public:
      * @param p Raw pointer to the TCP context to remove
      * @return Shared pointer to the removed context, or nullptr if not found
      *
-     * @note This operation is O(1) due to the lookup map
+     * @note This operation is O(log n) due to the lookup map
      * @note The returned shared_ptr maintains a reference to prevent immediate destruction
      */
     MegaTCPContextPtr release(MegaTCPContext* p);
