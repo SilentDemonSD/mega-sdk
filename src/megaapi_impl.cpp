@@ -34363,7 +34363,7 @@ void MegaTCPServer::onNewClient_tls(uv_stream_t *server_handle, int status)
         return;
     }
 
-    tcpctx->server->connections[tcpctx.get()] = tcpctx;
+    tcpctx->server->connections.add(tcpctx);
 
     tcpctx->server->readData(tcpctx.get());
 }
