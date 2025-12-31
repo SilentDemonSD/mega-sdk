@@ -1,6 +1,7 @@
 #include "impl/tcp_context_pool.h"
 
 #include <algorithm>
+#include <iterator>
 
 namespace mega
 {
