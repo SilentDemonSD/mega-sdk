@@ -756,7 +756,7 @@ TEST_F(SdkHttpServerTest, ValidRangeRequests)
 
     // Full file range (0 to last byte)
     auto fullRange = HttpClient::get(url, "0-" + std::to_string(fileSize - 1));
-    EXPECT_EQ(200, fullRange.statusCode); // BUG: HTTP protocol expects 206 Partial Content
+    EXPECT_EQ(206, fullRange.statusCode);
     EXPECT_EQ(testFileContent, fullRange.body);
 
     // Range starting at 1
@@ -796,7 +796,7 @@ TEST_F(SdkHttpServerTest, VeryLargeRangeRequests)
     // Full file range
     auto fileSize = testFileContent.size();
     auto largeRange = HttpClient::get(url, "0-" + std::to_string(fileSize - 1));
-    EXPECT_EQ(200, largeRange.statusCode); // BUG: HTTP protocol expects 206 Partial Content
+    EXPECT_EQ(206, largeRange.statusCode);
     EXPECT_TRUE(testFileContent == largeRange.body);
 
     // Middle range: from 25% to 50%, end is inclusive
@@ -919,11 +919,11 @@ TEST_F(SdkHttpServerTest, EmptyFile)
 
     // Range requests for empty file
     auto rangeResponse1 = HttpClient::get(url, "0-0");
-    EXPECT_EQ(200,
+    EXPECT_EQ(206,
               rangeResponse1.statusCode); // BUG: HTTP protocol expects 416 Range Not Satisfiable
 
     auto rangeResponse2 = HttpClient::get(url, "0-10");
-    EXPECT_EQ(200,
+    EXPECT_EQ(206,
               rangeResponse2.statusCode); // BUG: HTTP protocol expects 416 Range Not Satisfiable
 
     auto suffixRange = HttpClient::get(url, "-10");
@@ -1317,7 +1317,7 @@ TEST_F(SdkHttpServerTest, DifferentFileSizes)
 
     // Range request for single byte
     auto rangeResponse = HttpClient::get(url1, "0-0");
-    EXPECT_EQ(200, rangeResponse.statusCode); // BUG: HTTP protocol expects 206 Partial Content
+    EXPECT_EQ(206, rangeResponse.statusCode);
     EXPECT_EQ("A", rangeResponse.body);
 
     // Range request beyond file
@@ -1341,7 +1341,7 @@ TEST_F(SdkHttpServerTest, DifferentFileSizes)
 
     // Range: both bytes
     auto range3 = HttpClient::get(url2, "0-1");
-    EXPECT_EQ(200, range3.statusCode); // BUG: HTTP protocol expects 206 Partial Content
+    EXPECT_EQ(206, range3.statusCode);
     EXPECT_EQ("AB", range3.body);
 }
 
