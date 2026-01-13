@@ -24,6 +24,8 @@
 
 #include "mega.h"
 #include "mega/command.h"
+#include "mega/file_service/file_callbacks.h"
+#include "mega/file_service/file_stream_result.h"
 #include "mega/filesystem.h"
 #include "mega/gfx/external.h"
 #include "mega/heartbeats.h"
@@ -5618,9 +5620,11 @@ public:
     uv_async_t asynchandle;
     uv_mutex_t mutex;
     MegaApiImpl *megaApi;
+    // Bytes has been written so far
     m_off_t bytesWritten;
+    // All bytes going to be written
     m_off_t size;
-    bool finished;
+    std::atomic_bool finished{false};
 
 #ifdef ENABLE_EVT_TLS
     //tls stuff:
@@ -5839,12 +5843,29 @@ public:
     void readData(MegaTCPContext* tcpctx);
 };
 
-class MegaHTTPContext : public MegaTCPContext
+struct FileStreamResultConsumption
+{
+    struct Value
+    {
+        // Result returned from file service stream callback
+        file_service::FileStreamResult mFileStreamResult;
+        // How many length has been consumed
+        std::uint64_t mConsumedLength{};
+    };
+
+    std::optional<Value> mValue;
+};
+
+class MegaHTTPContext: public MegaTCPContext, public std::enable_shared_from_this<MegaHTTPContext>
 {
 private:
+    friend class MegaHTTPServer;
     static std::atomic_uint32_t nextId;
     const uint32_t contextId;
     std::string logname;
+    FileStreamResultConsumption mFileStreamResultConsumption{};
+
+    std::unique_ptr<uv_work_t> processFileStreamResult();
 
 public:
     MegaHTTPContext();
@@ -5852,13 +5873,11 @@ public:
 
     // Connection management
     StreamingBuffer streamingBuffer;
-    std::unique_ptr<MegaTransferPrivate> transfer;
     http_parser parser;
     char *lastBuffer;
     size_t lastBufferLen;
     bool nodereceived;
-    bool failed;
-    bool pause;
+    std::atomic_bool failed{false};
 
     // Request information
     bool range;
@@ -5895,11 +5914,14 @@ public:
     uv_mutex_t mutex_responses;
     std::list<std::string> responses;
 
-    virtual void onTransferStart(MegaApi*, MegaTransfer* httpTransfer);
-    virtual bool
-        onTransferData(MegaApi*, MegaTransfer* httpTransfer, char* buffer, size_t dataSize);
-    virtual void onTransferFinish(MegaApi* api, MegaTransfer *transfer, MegaError *e);
-    virtual void onRequestFinish(MegaApi* api, MegaRequest *request, MegaError *e);
+    // Support PUT to upload a file by using MegaApi::startUpload
+    virtual void onTransferStart(MegaApi*, MegaTransfer*) override;
+    virtual void onTransferFinish(MegaApi*, MegaTransfer*, MegaError*) override;
+
+    // Only needed by streaming via MegaApi::startStreaming
+    virtual bool onTransferData(MegaApi*, MegaTransfer*, char*, size_t) override;
+
+    virtual void onRequestFinish(MegaApi* api, MegaRequest* request, MegaError* e) override;
 
     const std::string& getLogName() const
     {
@@ -5918,8 +5940,8 @@ protected:
     bool subtitlesSupportEnabled;
 
     //virtual methods:
-    virtual void processReceivedData(MegaTCPContext *ftpctx, ssize_t nread, const uv_buf_t * buf);
-    virtual void processAsyncEvent(MegaTCPContext *ftpctx);
+    virtual void processReceivedData(MegaTCPContext* tcpctx, ssize_t nread, const uv_buf_t* buf);
+    virtual void processAsyncEvent(MegaTCPContext* tcpctx);
     virtual MegaTCPContextPtr initializeContext(uv_stream_t* server_handle);
     virtual void processWriteFinished(MegaTCPContext* tcpctx, int status);
     virtual void processOnAsyncEventClose(MegaTCPContext* tcpctx);
@@ -5938,6 +5960,10 @@ protected:
 
     static void sendHeaders(MegaHTTPContext *httpctx, string *headers);
     static void sendNextBytes(MegaHTTPContext *httpctx);
+    static bool startStream(MegaHTTPContext* httpctx,
+                            NodeHandle h,
+                            std::uint64_t offset,
+                            std::uint64_t length);
     static int streamNode(MegaHTTPContext *httpctx);
 
     //Utility funcitons

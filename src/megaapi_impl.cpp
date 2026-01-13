@@ -29,9 +29,17 @@
 #include "megaapi_impl.h"
 
 #include "mega/canceller.h"
+#include "mega/file_service/file.h"
+#include "mega/file_service/file_callbacks.h"
+#include "mega/file_service/file_id.h"
+#include "mega/file_service/file_service_context.h"
+#include "mega/file_service/file_stream_result.h"
+#include "mega/file_service/utility.h"
+#include "mega/logging.h"
 #include "mega/mediafileattribute.h"
 #include "mega/scoped_helpers.h"
 #include "mega/tlv.h"
+#include "mega/types.h"
 #include "mega/user_attribute.h"
 #include "mega/utils_optional.h"
 #include "megaapi.h"
@@ -34756,6 +34764,28 @@ void MegaHTTPServer::processReceivedData(MegaTCPContext *tcpctx, ssize_t nread, 
     }
 }
 
+// A work continue stream for uv_work_queue, as it may take times
+// Only when all result data has been consumed
+static void continueStream(uv_work_t* req)
+{
+    if (!req->data)
+        return;
+
+    auto fileStreamResult = (file_service::FileStreamResult*)req->data;
+    if (fileStreamResult->mContinue)
+        fileStreamResult->mContinue(fileStreamResult->mLength);
+}
+
+// Callback for the work continue stream
+static void afterContinueStream(uv_work_t* req, int)
+{
+    if (!req->data)
+        return;
+
+    auto fileStreamResult = (file_service::FileStreamResult*)req->data;
+    delete fileStreamResult;
+}
+
 void MegaHTTPServer::processWriteFinished(MegaTCPContext* tcpctx, int status)
 {
     MegaHTTPContext* httpctx = dynamic_cast<MegaHTTPContext *>(tcpctx);
@@ -34770,6 +34800,7 @@ void MegaHTTPServer::processWriteFinished(MegaTCPContext* tcpctx, int status)
                 << " Remaining: " << (httpctx->size - httpctx->bytesWritten);
     httpctx->lastBuffer = NULL;
 
+    assert(httpctx->size >= httpctx->bytesWritten);
     if (status < 0 || httpctx->size == httpctx->bytesWritten)
     {
         if (status < 0)
@@ -34793,25 +34824,19 @@ void MegaHTTPServer::processWriteFinished(MegaTCPContext* tcpctx, int status)
     if (httpctx->lastBufferLen)
     {
         httpctx->streamingBuffer.freeData(httpctx->lastBufferLen);
+        httpctx->lastBufferLen = 0;
     }
 
-    if (httpctx->pause)
-    {
-        if (httpctx->streamingBuffer.availableSpace() >= DirectReadSlot::MAX_DELIVERY_CHUNK)
-        {
-            httpctx->pause = false;
-            m_off_t start = httpctx->rangeStart + httpctx->rangeWritten +
-                            static_cast<m_off_t>(httpctx->streamingBuffer.availableData());
-            m_off_t len = httpctx->rangeEnd - httpctx->rangeStart - httpctx->rangeWritten -
-                          static_cast<m_off_t>(httpctx->streamingBuffer.availableData());
+    // Or Streaming via file service may have pending result, check if we can process
+    std::unique_ptr<uv_work_t> continueWork = httpctx->processFileStreamResult();
 
-            LOG_debug << httpctx->getLogName() << "[Streaming] Resuming streaming from " << start
-                      << " len: " << len << " " << httpctx->streamingBuffer.bufferStatus();
-            httpctx->megaApi->startStreaming(httpctx->node, start, len, httpctx);
-        }
-    }
-    httpctx->lastBufferLen = 0;
     uv_mutex_unlock(&httpctx->mutex);
+
+    // Continue stream is slow operation, do it as a work
+    if (continueWork)
+    {
+        uv_queue_work(&uv_loop, continueWork.release(), &continueStream, &afterContinueStream);
+    }
 
     uv_async_send(&httpctx->asynchandle);
 }
@@ -34823,12 +34848,6 @@ void MegaHTTPServer::processOnAsyncEventClose(MegaTCPContext* tcpctx)
     if (httpctx->resultCode == API_EINTERNAL)
     {
         httpctx->resultCode = API_EINCOMPLETE;
-    }
-
-    if (httpctx->transfer)
-    {
-        httpctx->megaApi->cancelTransfer(httpctx->transfer.get());
-        httpctx->megaApi->fireOnStreamingFinish(httpctx->transfer.release(), std::make_unique<MegaErrorPrivate>(httpctx->resultCode)); // transfer will be deleted in fireOnStreamingFinish
     }
 
     delete httpctx->node;
@@ -35751,11 +35770,7 @@ int MegaHTTPServer::onMessageComplete(http_parser *parser)
                                           httpctx->nodekey.c_str());
             LOG_debug << httpctx->getLogName() << "Getting public link: " << link;
             httpctx->megaApi->getPublicNode(link.c_str(), httpctx);
-            httpctx->transfer.reset(new MegaTransferPrivate(MegaTransfer::TYPE_LOCAL_TCP_DOWNLOAD));
-            httpctx->transfer->setPath(httpctx->path.c_str());
-            httpctx->transfer->setFileName(httpctx->nodename.c_str());
-            httpctx->transfer->setNodeHandle(MegaApi::base64ToHandle(httpctx->nodehandle.c_str()));
-            httpctx->transfer->setStartTime(Waiter::ds);
+            // getPulibNode result is processed inside httpctx onRequestFinish
             return 0;
         }
     }
@@ -36386,24 +36401,101 @@ int MegaHTTPServer::onMessageComplete(http_parser *parser)
             return 0;
         }
 
-        httpctx->transfer.reset(new MegaTransferPrivate(MegaTransfer::TYPE_LOCAL_TCP_DOWNLOAD));
-        httpctx->transfer->setPath(httpctx->path.c_str());
-        if (httpctx->nodename.size())
-        {
-            httpctx->transfer->setFileName(httpctx->nodename.c_str());
-        }
-        if (httpctx->nodehandle.size())
-        {
-            httpctx->transfer->setNodeHandle(MegaApi::base64ToHandle(httpctx->nodehandle.c_str()));
-        }
-        httpctx->transfer->setStartTime(Waiter::ds);
-
         delete httpctx->node;
         httpctx->node = node;
         streamNode(httpctx);
     }
     delete baseNode;
     return 0;
+}
+
+using file_service::FileID;
+using file_service::FileResultOr;
+using file_service::FileStreamDataCallback;
+using file_service::FileStreamResult;
+
+bool MegaHTTPServer::startStream(MegaHTTPContext* httpctx,
+                                 NodeHandle h,
+                                 std::uint64_t offset,
+                                 std::uint64_t length)
+{
+    auto file = httpctx->megaApi->getMegaClient()->mFileService.open(FileID::from(h));
+    if (!file)
+    {
+        LOG_err << "Failed to open file " << toNodeHandle(h) << " for streaming, " << file.error();
+        return false;
+    }
+
+    auto callback = [logName = httpctx->getLogName(),
+                     ctx = std::weak_ptr<MegaHTTPContext>(httpctx->shared_from_this()),
+                     offset,
+                     length](FileResultOr<FileStreamResult> result)
+    {
+        auto ctxPtr = ctx.lock();
+        if (!ctxPtr)
+        {
+            LOG_warn << logName << "[Streaming] callback: httpctx has closed";
+            return;
+        }
+
+        // This check is nice to have, as the uv loop can change it after checking
+        if (ctxPtr->finished)
+        {
+            LOG_verbose << ctxPtr->logname << "[Streaming] callback: finished";
+            return;
+        }
+
+        if (!result)
+        {
+            LOG_info << ctxPtr->logname
+                     << "[Streaming] callback: stream return error: " << result.error();
+            ctxPtr->failed = true;
+            uv_async_send(&ctxPtr->asynchandle);
+            return;
+        }
+
+        const auto receivedLength = result->mLength;
+        LOG_verbose << ctxPtr->logname << "[Streaming] callback: requested [" << offset << ","
+                    << length << "] received " << receivedLength;
+
+        // All requested has been delivered
+        if (receivedLength == 0)
+        {
+            return;
+        }
+
+        // append the data to the buffer
+        uv_mutex_lock(&ctxPtr->mutex);
+        const auto consumedLength =
+            ctxPtr->streamingBuffer.append(static_cast<const char*>(result->mBuffer),
+                                           receivedLength);
+
+        bool hasMore = consumedLength < receivedLength;
+        if (hasMore)
+        {
+            LOG_verbose << ctxPtr->logname << "[Streaming] callback: consumed " << consumedLength
+                        << "," << receivedLength << " , pending";
+            assert(!ctxPtr->mFileStreamResultConsumption.mValue);
+            ctxPtr->mFileStreamResultConsumption.mValue =
+                FileStreamResultConsumption::Value{std::move(*result), consumedLength};
+        }
+        uv_mutex_unlock(&ctxPtr->mutex);
+
+        // notify the HTTP server
+        uv_async_send(&ctxPtr->asynchandle);
+
+        // All has been stored, continue streaming continue streaming
+        // Continue can take long time, do here
+        if (!hasMore)
+        {
+            LOG_verbose << ctxPtr->logname << "[Streaming] callback: consumed " << consumedLength
+                        << "," << receivedLength << " , streaming more";
+            result->mContinue(receivedLength);
+        }
+    };
+
+    file_service::stream(std::move(callback), std::move(*file), offset, length);
+    return true;
 }
 
 int MegaHTTPServer::streamNode(MegaHTTPContext *httpctx)
@@ -36483,15 +36575,9 @@ int MegaHTTPServer::streamNode(MegaHTTPContext *httpctx)
         << "Accept-Ranges: bytes\r\n"
         << "\r\n";
 
-    delete [] mimeType;
-    httpctx->pause = false;
+    delete[] mimeType;
     httpctx->lastBuffer = NULL;
     httpctx->lastBufferLen = 0;
-    if (httpctx->transfer)
-    {
-        httpctx->transfer->setStartPos(start);
-        httpctx->transfer->setEndPos(end);
-    }
 
     httpctx->streamingBuffer.setFileSize(totalSize);
     httpctx->streamingBuffer.setDuration(httpctx->node->getDuration());
@@ -36519,7 +36605,14 @@ int MegaHTTPServer::streamNode(MegaHTTPContext *httpctx)
     if (start || len)
     {
         httpctx->streamingBuffer.reset(!httpctx->lastBufferLen, resstr.size());
-        httpctx->megaApi->startStreaming(node, start, len, httpctx);
+        if (!startStream(httpctx,
+                         NodeHandle().set6byte(node->getHandle()),
+                         static_cast<uint64_t>(start),
+                         static_cast<uint64_t>(len)))
+        {
+            LOG_err << httpctx->getLogName() << "Finishing due to an error of startStream";
+            closeConnection(httpctx);
+        }
     }
     else
     {
@@ -36538,12 +36631,6 @@ void MegaHTTPServer::sendHeaders(MegaHTTPContext *httpctx, string *headers)
     httpctx->size += headers->size();
     httpctx->lastBuffer = resbuf.base;
     httpctx->lastBufferLen = resbuf.len;
-
-    if (httpctx->transfer)
-    {
-        httpctx->transfer->setTotalBytes(httpctx->size);
-        httpctx->megaApi->fireOnStreamingStart(httpctx->transfer.get());
-    }
 
 #ifdef ENABLE_EVT_TLS
     if (httpctx->server->useTLS)
@@ -36715,7 +36802,6 @@ MegaHTTPContext::MegaHTTPContext():
     rangeWritten = -1;
     range = false;
     failed = false;
-    pause = false;
     nodereceived = false;
     resultCode = API_EINTERNAL;
     node = NULL;
@@ -36746,49 +36832,48 @@ MegaHTTPContext::~MegaHTTPContext()
     uv_mutex_destroy(&mutex_responses);
 }
 
-void MegaHTTPContext::onTransferStart(MegaApi*, MegaTransfer* httpTransfer)
+std::unique_ptr<uv_work_t> MegaHTTPContext::processFileStreamResult()
 {
-    if (transfer)
-    {
-        transfer->setTag(httpTransfer->getTag());
-    }
+    // No result or no space to process
+    if (!mFileStreamResultConsumption.mValue || streamingBuffer.availableSpace() <= 0)
+        return nullptr;
+
+    auto& consumption = mFileStreamResultConsumption.mValue.value();
+    const auto offset = consumption.mConsumedLength;
+    const auto len = static_cast<size_t>(consumption.mFileStreamResult.mLength - offset);
+    const char* buf = static_cast<const char*>(consumption.mFileStreamResult.mBuffer) + offset;
+
+    // Append to streaming buffer and update
+    const auto consumed = streamingBuffer.append(buf, len);
+    consumption.mConsumedLength += consumed;
+
+    assert(consumed <= len);
+    LOG_verbose << getLogName() << "[Streaming] consumed " << consumed << ","
+                << consumption.mConsumedLength << "," << consumption.mFileStreamResult.mLength;
+
+    // Not all consumed yet, return early
+    if (consumed < len)
+        return nullptr;
+
+    // Prepare continue work
+    std::unique_ptr<uv_work_t> continueWork{new uv_work_t()};
+    continueWork->data =
+        new file_service::FileStreamResult(std::move(consumption.mFileStreamResult));
+
+    // Release current result
+    mFileStreamResultConsumption.mValue.reset();
+    return continueWork;
 }
 
-bool MegaHTTPContext::onTransferData(MegaApi*,
-                                     MegaTransfer* httpTransfer,
-                                     char* buffer,
-                                     size_t dataSize)
+void MegaHTTPContext::onTransferStart(MegaApi*, MegaTransfer* transfer)
 {
-    LOG_verbose << logname << "Streaming data received: " << httpTransfer->getTransferredBytes()
-                << " Size: " << dataSize << " Queued: " << this->tcphandle.write_queue_size << " "
-                << streamingBuffer.bufferStatus();
+    assert(transfer->getType() == MegaTransfer::TYPE_UPLOAD);
+}
 
-    if (finished)
-    {
-        LOG_info << logname << "Removing streaming transfer after "
-                 << httpTransfer->getTransferredBytes() << " bytes";
-        return false;
-    }
-
-    // append the data to the buffer
-    uv_mutex_lock(&mutex);
-    long long remaining = static_cast<long long>(dataSize) +
-                          (httpTransfer->getTotalBytes() - httpTransfer->getTransferredBytes());
-    long long availableSpace = static_cast<long long>(streamingBuffer.availableSpace());
-    if ((remaining > availableSpace) &&
-        ((availableSpace - static_cast<long long>(dataSize)) <
-         static_cast<long long>(DirectReadSlot::MAX_DELIVERY_CHUNK)))
-    {
-        LOG_debug << logname << "[Streaming] Buffer full: Pausing streaming. "
-                  << streamingBuffer.bufferStatus();
-        pause = true;
-    }
-    streamingBuffer.append(buffer, dataSize);
-    uv_mutex_unlock(&mutex);
-
-    // notify the HTTP server
-    uv_async_send(&asynchandle);
-    return !pause;
+bool MegaHTTPContext::onTransferData(MegaApi*, MegaTransfer*, char*, size_t)
+{
+    // Never be called
+    assert(false);
 }
 
 void MegaHTTPContext::onTransferFinish(MegaApi *, MegaTransfer *, MegaError *e)
