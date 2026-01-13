@@ -139,30 +139,40 @@ void FileRangeContext::dispatch(BufferPtr buffer,
         // Evil but necessary.
         auto& request = const_cast<FileReadRequest&>(*k);
 
-        // Can't dispatch this request.
-        if (!dispatchable(request, minimumLength))
-            continue;
-
-        // Convenience.
-        auto& range = request.mRange;
-
-        // Tweak the request.
-        range.mEnd = std::min(mEnd, range.mEnd);
-
-        // Dispatch the request.
-        mManager.completed(
-            [&]() -> BufferPtr
-            {
-                if (auto displacement = range.mBegin - begin)
-                    return displace(buffer, displacement);
-
-                return buffer;
-            }(),
-            std::move(request));
-
-        // Remove the request from our set.
-        mRequests.erase(k);
+        // Request has been dispatched.
+        if (dispatch(buffer, begin, minimumLength, request))
+            mRequests.erase(k);
     }
+}
+
+bool FileRangeContext::dispatch(BufferPtr buffer,
+                                std::uint64_t begin,
+                                std::uint64_t minimumLength,
+                                FileReadRequest& request)
+{
+    // Can't dispatch this request.
+    if (!dispatchable(request, minimumLength))
+        return false;
+
+    // Convenience.
+    auto& range = request.mRange;
+
+    // Clamp the range as necessary.
+    range.mEnd = std::min(mEnd, range.mEnd);
+
+    // Dispatch the request.
+    mManager.completed(
+        [&]() -> BufferPtr
+        {
+            if (auto displacement = range.mBegin - begin)
+                return displace(std::move(buffer), displacement);
+
+            return std::move(buffer);
+        }(),
+        std::move(request));
+
+    // Let the caller know the request was dispatched.
+    return true;
 }
 
 bool FileRangeContext::dispatchable(const FileReadRequest& request,
@@ -267,21 +277,8 @@ void FileRangeContext::queue(FileFetchCallback callback)
 void FileRangeContext::queue(FileReadRequest request)
 {
     // Request isn't dispatchable so queue it for later execution.
-    if (!dispatchable(request, MinimumLength))
-        return mRequests.emplace(std::move(request)), void();
-
-    // Assume the request requires no displacement.
-    auto buffer = mBuffer;
-
-    // What is the request's displacement?
-    auto displacement = request.mRange.mBegin - mIterator->first.mBegin;
-
-    // Buffer needs to be displaced.
-    if (displacement)
-        buffer = displace(std::move(buffer), displacement);
-
-    // Dispatch the request.
-    mManager.completed(std::move(buffer), std::move(request));
+    if (!dispatch(mBuffer, mIterator->first.mBegin, MinimumLength, request))
+        mRequests.emplace(std::move(request));
 }
 
 bool retryable(const Error& result)

@@ -45,6 +45,14 @@ class FileRangeContext: private common::PartialDownloadCallback
     // Dispatch zero or more read requests.
     void dispatch(BufferPtr buffer, std::uint64_t begin, std::uint64_t minimumLength);
 
+    // Try and dispatch the specified request.
+    //
+    // Returns true if the request was dispatched.
+    bool dispatch(BufferPtr buffer,
+                  std::uint64_t begin,
+                  std::uint64_t minimumLength,
+                  FileReadRequest& request);
+
     // Check if a request can be dispatched.
     bool dispatchable(const FileReadRequest& request, std::uint64_t minimumLength) const;
 
