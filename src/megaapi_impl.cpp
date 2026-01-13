@@ -36874,6 +36874,7 @@ bool MegaHTTPContext::onTransferData(MegaApi*, MegaTransfer*, char*, size_t)
 {
     // Never be called
     assert(false);
+    return false;
 }
 
 void MegaHTTPContext::onTransferFinish(MegaApi *, MegaTransfer *, MegaError *e)
