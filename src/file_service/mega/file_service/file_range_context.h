@@ -43,15 +43,12 @@ class FileRangeContext: private common::PartialDownloadCallback
               const Speeds&) -> std::variant<Abort, Continue> override;
 
     // Dispatch zero or more read requests.
-    void dispatch(BufferPtr buffer, std::uint64_t begin, std::uint64_t minimumLength);
+    void dispatch(std::uint64_t begin, std::uint64_t minimumLength);
 
     // Try and dispatch the specified request.
     //
     // Returns true if the request was dispatched.
-    bool dispatch(BufferPtr buffer,
-                  std::uint64_t begin,
-                  std::uint64_t minimumLength,
-                  FileReadRequest& request);
+    bool dispatch(std::uint64_t begin, std::uint64_t minimumLength, FileReadRequest& request);
 
     // Check if a request can be dispatched.
     bool dispatchable(const FileReadRequest& request, std::uint64_t minimumLength) const;

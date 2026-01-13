@@ -41,7 +41,7 @@ void FileRangeContext::completed([[maybe_unused]] Lock&& lock, Error result)
     mManager.completed(*mBuffer, mIterator, range);
 
     // Complete as many requests as we can.
-    dispatch(std::move(mBuffer), range.mBegin, 1);
+    dispatch(range.mBegin, 1);
 
     // Translate SDK result.
     auto result_ = fileResultFromError(result);
@@ -116,15 +116,13 @@ auto FileRangeContext::data(const void* buffer,
         return Continue();
 
     // Dispatch what requests we can.
-    dispatch(mBuffer, mIterator->first.mBegin, MinimumLength);
+    dispatch(mIterator->first.mBegin, MinimumLength);
 
     // Let the caller know the download should continue.
     return Continue();
 }
 
-void FileRangeContext::dispatch(BufferPtr buffer,
-                                const std::uint64_t begin,
-                                std::uint64_t minimumLength)
+void FileRangeContext::dispatch(const std::uint64_t begin, std::uint64_t minimumLength)
 {
     // What requests might we be able to satisfy?
     auto i = mRequests.begin();
@@ -140,13 +138,12 @@ void FileRangeContext::dispatch(BufferPtr buffer,
         auto& request = const_cast<FileReadRequest&>(*k);
 
         // Request has been dispatched.
-        if (dispatch(buffer, begin, minimumLength, request))
+        if (dispatch(begin, minimumLength, request))
             mRequests.erase(k);
     }
 }
 
-bool FileRangeContext::dispatch(BufferPtr buffer,
-                                std::uint64_t begin,
+bool FileRangeContext::dispatch(std::uint64_t begin,
                                 std::uint64_t minimumLength,
                                 FileReadRequest& request)
 {
@@ -165,9 +162,9 @@ bool FileRangeContext::dispatch(BufferPtr buffer,
         [&]() -> BufferPtr
         {
             if (auto displacement = range.mBegin - begin)
-                return displace(std::move(buffer), displacement);
+                return displace(mBuffer, displacement);
 
-            return std::move(buffer);
+            return mBuffer;
         }(),
         std::move(request));
 
@@ -277,7 +274,7 @@ void FileRangeContext::queue(FileFetchCallback callback)
 void FileRangeContext::queue(FileReadRequest request)
 {
     // Request isn't dispatchable so queue it for later execution.
-    if (!dispatch(mBuffer, mIterator->first.mBegin, MinimumLength, request))
+    if (!dispatch(mIterator->first.mBegin, MinimumLength, request))
         mRequests.emplace(std::move(request));
 }
 
