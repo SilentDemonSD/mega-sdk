@@ -35776,7 +35776,7 @@ int MegaHTTPServer::onMessageComplete(http_parser *parser)
                                           httpctx->nodekey.c_str());
             LOG_debug << httpctx->getLogName() << "Getting public link: " << link;
             httpctx->megaApi->getPublicNode(link.c_str(), httpctx);
-            // getPulibNode result is processed inside httpctx onRequestFinish
+            // getPublicNode result is processed inside httpctx onRequestFinish
             return 0;
         }
     }
@@ -36427,10 +36427,9 @@ bool MegaHTTPServer::startStream(MegaHTTPContext* httpctx,
         return false;
     }
 
-    auto callback = [logName = httpctx->getLogName(),
-                     ctx = std::weak_ptr<MegaHTTPContext>(httpctx->shared_from_this()),
-                     offset,
-                     length](FileResultOr<FileStreamResult> result)
+    auto callback =
+        [logName = httpctx->getLogName(), ctx = httpctx->weak_from_this(), offset, length](
+            FileResultOr<FileStreamResult> result)
     {
         auto ctxPtr = ctx.lock();
         if (!ctxPtr)
@@ -36469,7 +36468,7 @@ bool MegaHTTPServer::startStream(MegaHTTPContext* httpctx,
         uv_mutex_lock(&ctxPtr->mutex);
         const auto consumedLength =
             ctxPtr->streamingBuffer.append(static_cast<const char*>(result->mBuffer),
-                                           receivedLength);
+                                           static_cast<size_t>(receivedLength));
 
         bool hasMore = consumedLength < receivedLength;
         if (hasMore)
@@ -36858,8 +36857,7 @@ std::unique_ptr<uv_work_t> MegaHTTPContext::processFileStreamResult()
 
     // Prepare continue work
     std::unique_ptr<uv_work_t> continueWork{new uv_work_t()};
-    continueWork->data =
-        new file_service::FileStreamResult(std::move(consumption.mFileStreamResult));
+    continueWork->data = new FileStreamResult(std::move(consumption.mFileStreamResult));
 
     // Release current result
     mFileStreamResultConsumption.mValue.reset();
