@@ -34764,26 +34764,32 @@ void MegaHTTPServer::processReceivedData(MegaTCPContext *tcpctx, ssize_t nread, 
     }
 }
 
+using file_service::FileID;
+using file_service::FileResultOr;
+using file_service::FileStreamDataCallback;
+using file_service::FileStreamResult;
+
 // A work continue stream for uv_work_queue, as it may take times
 // Only when all result data has been consumed
 static void continueStream(uv_work_t* req)
 {
+    assert(req->data);
+
     if (!req->data)
         return;
 
-    auto fileStreamResult = (file_service::FileStreamResult*)req->data;
-    if (fileStreamResult->mContinue)
-        fileStreamResult->mContinue(fileStreamResult->mLength);
+    auto result = (FileStreamResult*)req->data;
+    if (result->mContinue)
+        result->mContinue(result->mLength);
 }
 
 // Callback for the work continue stream
 static void afterContinueStream(uv_work_t* req, int)
 {
-    if (!req->data)
-        return;
+    if (req->data)
+        delete (FileStreamResult*)req->data;
 
-    auto fileStreamResult = (file_service::FileStreamResult*)req->data;
-    delete fileStreamResult;
+    delete req;
 }
 
 void MegaHTTPServer::processWriteFinished(MegaTCPContext* tcpctx, int status)
@@ -36408,11 +36414,6 @@ int MegaHTTPServer::onMessageComplete(http_parser *parser)
     delete baseNode;
     return 0;
 }
-
-using file_service::FileID;
-using file_service::FileResultOr;
-using file_service::FileStreamDataCallback;
-using file_service::FileStreamResult;
 
 bool MegaHTTPServer::startStream(MegaHTTPContext* httpctx,
                                  NodeHandle h,
