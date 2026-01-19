@@ -220,6 +220,8 @@ public:
     // Retrieve this file's allocated and reported size.
     auto getFileSize() const -> std::optional<std::pair<std::uint64_t, std::uint64_t>> override;
 
+    OsFileDescriptor dupFileDescriptor() override;
+
 protected:
     void fCloseInternal();
     bool sysread(void* buffer, unsigned long length, m_off_t offset, bool* retry) override;

@@ -1039,6 +1039,11 @@ auto AndroidFileAccess::getFileSize() const
     return std::make_pair(allocatedSize, reportedSize);
 }
 
+OsFileDescriptor AndroidFileAccess::dupFileDescriptor()
+{
+    return dup(fd);
+}
+
 bool AndroidFileAccess::sysread(void* buffer, unsigned long length, m_off_t offset, bool* cretry)
 {
     // Sanity.

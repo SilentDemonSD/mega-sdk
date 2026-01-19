@@ -1304,6 +1304,15 @@ class fsfp_t;
 // Convenience.
 using fsfp_ptr_t = std::shared_ptr<fsfp_t>;
 
+// OS file descriptor
+#ifdef _WIN32
+using OsFileDescriptor = HANDLE;
+constexpr HANDLE INVALID_OS_FD = INVALID_HANDLE_VALUE;
+#else
+using OsFileDescriptor = int;
+constexpr int INVALID_OS_FD = -1;
+#endif
+
 // Convenience.
 using FileAccessPtr = std::unique_ptr<FileAccess>;
 using FileAccessSharedPtr = std::shared_ptr<FileAccess>;

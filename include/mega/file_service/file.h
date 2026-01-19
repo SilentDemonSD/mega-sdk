@@ -47,6 +47,9 @@ public:
     // Append data to the end of this file.
     void append(const void* buffer, FileAppendCallback callback, std::uint64_t length);
 
+    // Duplicate OS file descriptor of storage file, returns INVALID_OS_FD on errors
+    OsFileDescriptor dup();
+
     // Fetch all of this file's data from the cloud.
     void fetch(FileFetchCallback callback);
 

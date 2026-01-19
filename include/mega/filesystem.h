@@ -573,6 +573,8 @@ struct MEGA_API FileAccess
     // Retrieve this file's allocated and reported size.
     virtual auto getFileSize() const -> std::optional<std::pair<std::uint64_t, std::uint64_t>> = 0;
 
+    virtual OsFileDescriptor dupFileDescriptor() = 0;
+
 protected:
     virtual AsyncIOContext* newasynccontext();
     static void asyncopfinished(void *param);

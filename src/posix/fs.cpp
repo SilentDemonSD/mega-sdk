@@ -898,6 +898,11 @@ bool PosixFileAccess::fopen(const LocalPath& f,
     return false;
 }
 
+OsFileDescriptor PosixFileAccess::dupFileDescriptor()
+{
+    return dup(fd);
+}
+
 std::string FileSystemAccess::getErrorMessage(int error)
 {
     return strerror(error);
@@ -2827,6 +2832,5 @@ m_off_t PosixFileSystemAccess::availableDiskSpace(const LocalPath& drivePath)
 
     return (m_off_t)availableBytes;
 }
-
 } // namespace
 

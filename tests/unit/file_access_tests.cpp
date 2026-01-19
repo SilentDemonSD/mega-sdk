@@ -139,6 +139,23 @@ TEST(FileSystemAccessSwitch, DefaultsToDisabled)
     FileSystemAccess::setUsePlatformAvailableDiskSpaceQuery(true);
     EXPECT_TRUE(FileSystemAccess::usePlatformAvailableDiskSpaceQuery());
 }
+    
+TEST_F(FileAccessTests, dupFileDescritptor)
+{
+    const auto osFd = mFileAccess->dupFileDescriptor();
+    ASSERT_TRUE(osFd >= 0);
+
+    auto closeFun = [&osFd]()
+    {
+#ifdef _WIN32
+        return ::CloseHandle(osFd) != 0;
+#else
+        return ::close(osFd) == 0;
+#endif
+    };
+
+    ASSERT_TRUE(closeFun());
+}
 
 TEST(FileSystemAccessAvailableDiskSpace, SwitchOffReturnsPositive)
 {

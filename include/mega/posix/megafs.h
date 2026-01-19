@@ -202,6 +202,8 @@ public:
     // Retrieve this file's allocated and reported size.
     auto getFileSize() const -> std::optional<std::pair<std::uint64_t, std::uint64_t>> override;
 
+    OsFileDescriptor dupFileDescriptor() override;
+
 #ifdef HAVE_AIO_RT
 protected:
     AsyncIOContext* newasynccontext() override;

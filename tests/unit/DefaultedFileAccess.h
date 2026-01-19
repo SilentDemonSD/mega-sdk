@@ -122,6 +122,12 @@ public:
     {
         throw NotImplemented{__func__};
     }
+
+    virtual mega::OsFileDescriptor dupFileDescriptor() override
+    {
+        throw NotImplemented{__func__};
+        return -1;
+    }
 };
 
 } // mt

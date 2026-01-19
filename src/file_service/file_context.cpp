@@ -1664,6 +1664,13 @@ void FileContext::append(FileAppendRequest request)
     executeOrQueue(std::move(request));
 }
 
+OsFileDescriptor FileContext::dup()
+{
+    assert(mFile);
+
+    return mFile->dupFileDescriptor();
+}
+
 void FileContext::fetch(FileFetchRequest request)
 {
     executeOrQueue(std::move(request));

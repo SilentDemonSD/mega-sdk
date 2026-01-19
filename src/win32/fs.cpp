@@ -249,6 +249,21 @@ auto WinFileAccess::getFileSize() const -> std::optional<std::pair<std::uint64_t
     return std::make_pair(allocatedSize, reportedSize);
 }
 
+OsFileDescriptor WinFileAccess::dupFileDescriptor()
+{
+    HANDLE dup = INVALID_OS_FD;
+
+    const auto ok = DuplicateHandle(GetCurrentProcess(), // source process
+                                    hFile, // source handle
+                                    GetCurrentProcess(), // target process
+                                    &dup, // duplicated handle
+                                    0, // desired access, ignored as DUPLICATE_SAME_ACCESS
+                                    FALSE, // inheritable?
+                                    DUPLICATE_SAME_ACCESS);
+
+    return ok ? dup : INVALID_OS_FD;
+}
+
 bool WinFileAccess::sysread(void* buffer, unsigned long length, m_off_t offset, bool* cretry)
 {
     // Sanity.
