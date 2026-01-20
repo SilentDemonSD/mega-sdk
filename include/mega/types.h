@@ -1307,10 +1307,10 @@ using fsfp_ptr_t = std::shared_ptr<fsfp_t>;
 // OS file descriptor
 #ifdef _WIN32
 using OsFileDescriptor = HANDLE;
-constexpr HANDLE INVALID_OS_FD = INVALID_HANDLE_VALUE;
+const OsFileDescriptor INVALID_OS_FD = INVALID_HANDLE_VALUE;
 #else
 using OsFileDescriptor = int;
-constexpr int INVALID_OS_FD = -1;
+const OsFileDescriptor INVALID_OS_FD = -1;
 #endif
 
 // Convenience.

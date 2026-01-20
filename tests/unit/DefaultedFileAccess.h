@@ -126,7 +126,7 @@ public:
     virtual mega::OsFileDescriptor dupFileDescriptor() override
     {
         throw NotImplemented{__func__};
-        return -1;
+        return mega::INVALID_OS_FD;
     }
 };
 
