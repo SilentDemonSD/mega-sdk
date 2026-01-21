@@ -1046,19 +1046,12 @@ OsFileDescriptor AndroidFileAccess::dupFileDescriptor()
 
 bool AndroidFileAccess::sysread(void* buffer, unsigned long length, m_off_t offset, bool* cretry)
 {
-    // Sanity.
-    assert(buffer || !length);
-    assert(offset >= 0);
-
     // Keeps logic simple.
     if (!cretry)
         cretry = &retry;
 
-    // Reads are never retriable on POSIX systems.
-    *cretry = false;
-
     // Perform the read.
-    auto result = pread(fd, buffer, length, offset);
+    auto result = ::mega::sysread(fd, buffer, length, offset, cretry, &errorcode);
 
     // Read failed.
     if (result < 0)

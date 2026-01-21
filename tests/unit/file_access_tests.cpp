@@ -1,3 +1,6 @@
+#include "mega/auto_file_handle.h"
+#include "mega/filesystem.h"
+
 #include <gtest/gtest.h>
 
 #include <megafs.h>
@@ -142,19 +145,23 @@ TEST(FileSystemAccessSwitch, DefaultsToDisabled)
     
 TEST_F(FileAccessTests, dupFileDescritptor)
 {
-    const auto osFd = mFileAccess->dupFileDescriptor();
-    ASSERT_TRUE(osFd >= 0);
+    const AutoFileHandle fd{mFileAccess->dupFileDescriptor()};
+    ASSERT_TRUE(fd.isSet());
 
-    auto closeFun = [&osFd]()
-    {
-#ifdef _WIN32
-        return ::CloseHandle(osFd) != 0;
-#else
-        return ::close(osFd) == 0;
-#endif
-    };
+    // Data we want to write to disk.
+    static const std::string expected = "ABCD";
 
-    ASSERT_TRUE(closeFun());
+    // Try and write the data to disk.
+    ASSERT_TRUE(mFileAccess->fwrite(expected.data(), expected.size(), 0));
+
+    // Where we'll store the data we've read from disk.
+    std::string computed(expected.size(), '\0');
+
+    // Read
+    sysread(fd.get(), computed.data(), computed.size(), 0, nullptr, nullptr);
+
+    // Make sure we've read what we expected.
+    EXPECT_EQ(computed, expected);
 }
 
 TEST(FileSystemAccessAvailableDiskSpace, SwitchOffReturnsPositive)

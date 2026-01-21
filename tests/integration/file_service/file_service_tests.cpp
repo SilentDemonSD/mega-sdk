@@ -1,4 +1,5 @@
 #include <gmock/gmock.h>
+#include <mega/auto_file_handle.h>
 #include <mega/common/error_or.h>
 #include <mega/common/node_info.h>
 #include <mega/common/node_key_data.h>
@@ -40,6 +41,7 @@
 
 #include <chrono>
 #include <cinttypes>
+#include <cstdint>
 
 namespace mega
 {
@@ -126,6 +128,7 @@ using common::testing::ScopedWatch;
 using common::testing::SingleClientTest;
 using common::testing::waitFor;
 using common::testing::Watchdog;
+using ::mega::AutoFileHandle;
 using ::testing::AnyOf;
 using ::testing::ElementsAre;
 using testing::observe;
@@ -2981,6 +2984,84 @@ TEST_F(FileServiceTests, remove_cloud_succeeds)
     ASSERT_LT(*usedAfter, *usedBefore);
 }
 
+TEST_F(FileServiceTests, stream_filedescriptor_succeeds)
+{
+    // Disable readahead.
+    mClient->fileService().options(DisableReadahead);
+
+    // Open a file for streaming.
+    auto file = mClient->fileOpen(mFileHandle);
+    ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+    const AutoFileHandle fd{file->dup()};
+
+    // Make sure we don't stream all of the data at once.
+    mClient->setDownloadSpeed(262144);
+
+    // Try and stream the file's data.
+    auto waiter = [&]()
+    {
+        // Where we'll store the data we've streamed.
+        auto buffer = std::make_shared<std::string>();
+        buffer->resize(mFileContent.size());
+
+        // So we can signal when the file's data has been streamed.
+        auto notifier = makeSharedPromise<FileResultOr<std::string>>();
+
+        // Try and stream all of the file's data.
+        auto callback = [=, fd = fd.get()](auto result)
+        {
+            // For a stronger test, process result on the client's thread.
+            mClient->execute(
+                [=](auto& task)
+                {
+                    // Client's being torn down.
+                    if (task.cancelled())
+                        return notifier->set_value(unexpected(FILE_CANCELLED));
+
+                    // Couldn't stream file data.
+                    if (!result)
+                        return notifier->set_value(unexpected(result.error()));
+
+                    // All data has been streamed.
+                    if (!result->mLength)
+                        return notifier->set_value(std::move(*buffer));
+
+                    // Add the streamed data to our buffer.
+                    assert(result->mOffset + result->mLength <= buffer->size());
+                    const auto bytesRead = ::mega::sysread(fd,
+                                                           buffer->data() + result->mOffset,
+                                                           result->mLength,
+                                                           static_cast<off_t>(result->mOffset),
+                                                           nullptr,
+                                                           nullptr);
+
+                    // Couldn't read from the file descriptor.
+                    if (bytesRead < 0)
+                        return notifier->set_value(unexpected(FILE_FAILED));
+
+                    // Stream the rest of the file's data.
+                    result->mContinue(static_cast<uint64_t>(bytesRead));
+                });
+        };
+
+        stream(FileStreamFDCallback{std::move(callback)}, std::move(*file), 0, mFileContent.size());
+
+        // Return a waiter to our caller.
+        return notifier->get_future();
+    }();
+
+    // Wait for the file's data to be streamed.
+    ASSERT_NE(waiter.wait_for(mDefaultTimeout), timeout);
+
+    // Make sure the file was streamed successfully.
+    auto computed = waiter.get();
+
+    ASSERT_EQ(computed.errorOr(FILE_SUCCESS), FILE_SUCCESS);
+
+    // Make sure the file's data wasn't corrupted.
+    ASSERT_TRUE(compare(*computed, mFileContent, 0, mFileContent.size()));
+}
+
 TEST_F(FileServiceTests, stream_succeeds)
 {
     // Disable readahead.
@@ -3003,36 +3084,37 @@ TEST_F(FileServiceTests, stream_succeeds)
         auto notifier = makeSharedPromise<FileResultOr<std::string>>();
 
         // Try and stream all of the file's data.
-        stream(
-            [=](auto result)
-            {
-                // For a stronger test, process result on the client's thread.
-                mClient->execute(
-                    [=](auto& task)
-                    {
-                        // Client's being torn down.
-                        if (task.cancelled())
-                            return notifier->set_value(unexpected(FILE_CANCELLED));
+        auto callback = [=](auto result)
+        {
+            // For a stronger test, process result on the client's thread.
+            mClient->execute(
+                [=](auto& task)
+                {
+                    // Client's being torn down.
+                    if (task.cancelled())
+                        return notifier->set_value(unexpected(FILE_CANCELLED));
 
-                        // Couldn't stream file data.
-                        if (!result)
-                            return notifier->set_value(unexpected(result.error()));
+                    // Couldn't stream file data.
+                    if (!result)
+                        return notifier->set_value(unexpected(result.error()));
 
-                        // All data has been streamed.
-                        if (!result->mLength)
-                            return notifier->set_value(std::move(*buffer));
+                    // All data has been streamed.
+                    if (!result->mLength)
+                        return notifier->set_value(std::move(*buffer));
 
-                        // Add the streamed data to our buffer.
-                        buffer->append(static_cast<const char*>(result->mBuffer),
-                                       static_cast<std::size_t>(result->mLength));
+                    // Add the streamed data to our buffer.
+                    buffer->append(static_cast<const char*>(result->mBuffer),
+                                   static_cast<std::size_t>(result->mLength));
 
-                        // Stream the rest of the file's data.
-                        result->mContinue(result->mLength);
-                    });
-            },
-            std::move(*file),
-            0,
-            mFileContent.size());
+                    // Stream the rest of the file's data.
+                    result->mContinue(result->mLength);
+                });
+        };
+
+        stream(FileStreamDataCallback{std::move(callback)},
+               std::move(*file),
+               0,
+               mFileContent.size());
 
         // Return a waiter to our caller.
         return notifier->get_future();

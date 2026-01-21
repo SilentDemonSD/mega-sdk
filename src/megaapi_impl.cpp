@@ -36494,7 +36494,10 @@ bool MegaHTTPServer::startStream(MegaHTTPContext* httpctx,
         }
     };
 
-    file_service::stream(std::move(callback), std::move(*file), offset, length);
+    file_service::stream(FileStreamDataCallback{std::move(callback)},
+                         std::move(*file),
+                         offset,
+                         length);
     return true;
 }
 

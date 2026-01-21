@@ -264,13 +264,25 @@ OsFileDescriptor WinFileAccess::dupFileDescriptor()
     return ok ? dup : INVALID_OS_FD;
 }
 
-bool WinFileAccess::sysread(void* buffer, unsigned long length, m_off_t offset, bool* cretry)
+m_off_t sysread(OsFileDescriptor fd,
+                void* buffer,
+                unsigned long length,
+                m_off_t offset,
+                bool* cretry,
+                int* cerrorcode)
 {
     // Sanity.
     assert(buffer || !length);
-    assert(hFile != INVALID_HANDLE_VALUE);
+    assert(fd != INVALID_OS_FD);
 
     // Keeps logic simple.
+    int errorcode = 0;
+
+    if (!cerrorcode)
+        cerrorcode = &errorcode;
+
+    bool retry = false;
+
     if (!cretry)
         cretry = &retry;
 
@@ -292,12 +304,13 @@ bool WinFileAccess::sysread(void* buffer, unsigned long length, m_off_t offset, 
     *cretry = false;
 
     // Couldn't perform read.
-    if (!ReadFile(hFile, buffer, length_, &numRead, &overlapped))
+    if (!ReadFile(fd, buffer, length_, &numRead, &overlapped))
     {
         // Latch the error.
         auto error = GetLastError();
 
-        errorcode = static_cast<int>(error);
+        // Persist error code.
+        *cerrorcode = static_cast<int>(error);
 
         // Let the caller know if it's worth retrying the read.
         *cretry = WinFileSystemAccess::istransient(error);
@@ -306,23 +319,40 @@ bool WinFileAccess::sysread(void* buffer, unsigned long length, m_off_t offset, 
         LOG_err << "ReadFile failed. Error: " << error;
 
         // Let the caller know the read failed.
-        return false;
+        return -1;
     }
+
+    // Assume the read wasn't truncated.
+    *cerrorcode = ERROR_SUCCESS;
 
     // Read was successful but didn't get everything we asked for.
-    if (length != numRead)
+    if (static_cast<unsigned long>(numRead) != length)
     {
-        errorcode = ERROR_HANDLE_EOF;
+        *cerrorcode = ERROR_HANDLE_EOF;
 
         // Leave a trail.
-        LOG_err << "ReadFile failed (dwRead) " << numRead << " - " << length;
-
-        // Let the caller know the read failed.
-        return false;
+        LOG_err << "ReadFile failed (dwRead) " << numRead << "-" << length;
     }
 
-    // Read was successful.
-    return true;
+    // Let the caller know how much data we read.
+    return static_cast<m_off_t>(numRead);
+}
+
+bool WinFileAccess::sysread(void* buffer, unsigned long length, m_off_t offset, bool* cretry)
+{
+    // Keeps logic simple.
+    if (!cretry)
+        cretry = &retry;
+
+    // Perform read.
+    auto numRead = ::mega::sysread(hFile, buffer, length, offset, cretry, &errorcode);
+
+    // Error
+    if (numRead < 0)
+        return false;
+
+    // Read was successful if all bytes were read.
+    return static_cast<unsigned long>(numRead) == length;
 }
 
 void WinFileAccess::fclose()

@@ -1137,6 +1137,14 @@ private:
 // True if type denotes a network filesystem.
 bool isNetworkFilesystem(FileSystemType type);
 
+// Read from a file descriptor at a given offset. Negative values indicate errors.
+m_off_t sysread(OsFileDescriptor fd,
+                void* buffer,
+                unsigned long length,
+                m_off_t offset,
+                bool* cretry,
+                int* cerrorcode);
+
 } // namespace
 
 #endif

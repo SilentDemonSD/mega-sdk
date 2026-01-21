@@ -13,15 +13,10 @@ namespace mega
 
 class AutoFileHandle
 {
-#ifdef WIN32
-    using HandleType = HANDLE;
-    const HandleType UNSET = INVALID_HANDLE_VALUE;
-#else // _WIN32
-    using HandleType = int;
-    const HandleType UNSET = -1;
-#endif // ! _WIN32
+    using HandleType = OsFileDescriptor;
+    const HandleType UNSET = INVALID_OS_FD;
 
-    HandleType h = UNSET;
+    OsFileDescriptor h = UNSET;
 
 public:
     AutoFileHandle() {}
@@ -96,8 +91,7 @@ public:
         if (this != &other)
         {
             close();
-            h = other.h;
-            other.h = UNSET;
+            h = std::exchange(other.h, UNSET);
         }
         return *this;
     }

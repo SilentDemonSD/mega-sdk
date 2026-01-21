@@ -15,5 +15,8 @@ namespace file_service
 // Stream data from the specified file.
 void stream(FileStreamDataCallback callback, File file, std::uint64_t offset, std::uint64_t length);
 
+// Stream data from the specified file.
+void stream(FileStreamFDCallback callback, File file, std::uint64_t offset, std::uint64_t length);
+
 } // file_service
 } // mega

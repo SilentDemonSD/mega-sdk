@@ -20,5 +20,17 @@ struct FileStreamResult
     std::uint64_t mLength = 0ul;
 }; // FileStreamResult
 
+struct FileStreamFDResult
+{
+    // Call to continue streaming data from the file.
+    FileStreamContinueCallback mContinue;
+
+    // Offset from the file.
+    std::uint64_t mOffset = 0L;
+
+    // How many bytes of data mBuffer contains.
+    std::uint64_t mLength = 0ul;
+}; // FileStreamResult
+
 } // file_service
 } // mega
