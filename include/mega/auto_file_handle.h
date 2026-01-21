@@ -75,6 +75,11 @@ public:
         return h;
     }
 
+    HandleType release()
+    {
+        return std::exchange(h, UNSET);
+    }
+
     // Prevent copying to avoid double-close issues
     AutoFileHandle(const AutoFileHandle&) = delete;
     AutoFileHandle& operator=(const AutoFileHandle&) = delete;
