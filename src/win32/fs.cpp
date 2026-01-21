@@ -249,7 +249,7 @@ auto WinFileAccess::getFileSize() const -> std::optional<std::pair<std::uint64_t
     return std::make_pair(allocatedSize, reportedSize);
 }
 
-OsFileDescriptor WinFileAccess::dupFileDescriptor()
+AutoFileHandle WinFileAccess::dupFileDescriptor()
 {
     HANDLE dup = INVALID_OS_FD;
 

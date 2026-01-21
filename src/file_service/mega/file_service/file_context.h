@@ -1,5 +1,6 @@
 #pragma once
 
+#include <mega/auto_file_handle.h>
 #include <mega/common/activity_monitor.h>
 #include <mega/common/database_forward.h>
 #include <mega/common/instance_logger.h>
@@ -274,8 +275,8 @@ public:
     // Append data to the end of this file.
     void append(FileAppendRequest request);
 
-    // Duplicate OS file descriptor of storage file, returns INVALID_OS_FD on errors
-    OsFileDescriptor dupFileDescriptor();
+    // Duplicate OS file descriptor of storage file, return an unset AutoFileHandle on errors
+    AutoFileHandle dupFileDescriptor();
 
     // Fetch all of this file's data from the cloud.
     void fetch(FileFetchRequest request);

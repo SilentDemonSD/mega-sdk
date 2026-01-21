@@ -921,7 +921,7 @@ bool PosixFileAccess::fopen(const LocalPath& f,
     return false;
 }
 
-OsFileDescriptor PosixFileAccess::dupFileDescriptor()
+AutoFileHandle PosixFileAccess::dupFileDescriptor()
 {
     return dup(fd);
 }

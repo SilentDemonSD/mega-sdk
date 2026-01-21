@@ -145,7 +145,7 @@ TEST(FileSystemAccessSwitch, DefaultsToDisabled)
     
 TEST_F(FileAccessTests, dupFileDescritptor)
 {
-    const AutoFileHandle fd{mFileAccess->dupFileDescriptor()};
+    const auto fd = mFileAccess->dupFileDescriptor();
     ASSERT_TRUE(fd.isSet());
 
     // Data we want to write to disk.

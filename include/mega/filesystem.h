@@ -28,6 +28,7 @@
 #include "utils.h"
 #include "waiter.h"
 
+#include <mega/auto_file_handle.h>
 #include <mega/localpath.h>
 
 #include <atomic>
@@ -573,7 +574,7 @@ struct MEGA_API FileAccess
     // Retrieve this file's allocated and reported size.
     virtual auto getFileSize() const -> std::optional<std::pair<std::uint64_t, std::uint64_t>> = 0;
 
-    virtual OsFileDescriptor dupFileDescriptor() = 0;
+    virtual AutoFileHandle dupFileDescriptor() = 0;
 
 protected:
     virtual AsyncIOContext* newasynccontext();

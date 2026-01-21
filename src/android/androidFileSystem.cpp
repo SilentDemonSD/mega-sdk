@@ -1039,7 +1039,7 @@ auto AndroidFileAccess::getFileSize() const
     return std::make_pair(allocatedSize, reportedSize);
 }
 
-OsFileDescriptor AndroidFileAccess::dupFileDescriptor()
+AutoFileHandle AndroidFileAccess::dupFileDescriptor()
 {
     return dup(fd);
 }

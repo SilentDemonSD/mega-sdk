@@ -75,7 +75,7 @@ void File::append(const void* buffer, FileAppendCallback callback, std::uint64_t
     return mContext->append(FileAppendRequest{buffer, std::move(callback), length});
 }
 
-OsFileDescriptor File::dupFileDescriptor()
+AutoFileHandle File::dupFileDescriptor()
 {
     assert(mContext);
 
