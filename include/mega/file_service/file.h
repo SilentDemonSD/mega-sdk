@@ -48,7 +48,7 @@ public:
     void append(const void* buffer, FileAppendCallback callback, std::uint64_t length);
 
     // Duplicate OS file descriptor of storage file, returns INVALID_OS_FD on errors
-    OsFileDescriptor dup();
+    OsFileDescriptor dupFileDescriptor();
 
     // Fetch all of this file's data from the cloud.
     void fetch(FileFetchCallback callback);

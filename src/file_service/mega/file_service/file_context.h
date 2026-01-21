@@ -275,7 +275,7 @@ public:
     void append(FileAppendRequest request);
 
     // Duplicate OS file descriptor of storage file, returns INVALID_OS_FD on errors
-    OsFileDescriptor dup();
+    OsFileDescriptor dupFileDescriptor();
 
     // Fetch all of this file's data from the cloud.
     void fetch(FileFetchRequest request);

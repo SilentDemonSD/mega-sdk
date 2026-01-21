@@ -1664,7 +1664,7 @@ void FileContext::append(FileAppendRequest request)
     executeOrQueue(std::move(request));
 }
 
-OsFileDescriptor FileContext::dup()
+OsFileDescriptor FileContext::dupFileDescriptor()
 {
     assert(mFile);
 

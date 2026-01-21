@@ -75,11 +75,11 @@ void File::append(const void* buffer, FileAppendCallback callback, std::uint64_t
     return mContext->append(FileAppendRequest{buffer, std::move(callback), length});
 }
 
-OsFileDescriptor File::dup()
+OsFileDescriptor File::dupFileDescriptor()
 {
     assert(mContext);
 
-    return mContext->dup();
+    return mContext->dupFileDescriptor();
 }
 
 void File::fetch(FileFetchCallback callback)

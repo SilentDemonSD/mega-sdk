@@ -2992,7 +2992,7 @@ TEST_F(FileServiceTests, stream_filedescriptor_succeeds)
     // Open a file for streaming.
     auto file = mClient->fileOpen(mFileHandle);
     ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
-    const AutoFileHandle fd{file->dup()};
+    const AutoFileHandle fd{file->dupFileDescriptor()};
 
     // Make sure we don't stream all of the data at once.
     mClient->setDownloadSpeed(262144);
