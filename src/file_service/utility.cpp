@@ -91,8 +91,11 @@ void StreamContext::onData(StreamContextPtr& context,
     if (!result->mLength)
         return mCallback(FileStreamResult{});
 
-    // How much data do we want to store in our buffer?
-    auto count = std::min<std::uint64_t>(mBuffer.size(), result->mLength);
+    // How much data can we buffer?
+    auto count = std::min<std::uint64_t>(SIZE_MAX, result->mLength);
+
+    // Make sure our buffer's large enough for our data.
+    mBuffer.resize(static_cast<std::size_t>(count));
 
     // Try and transfer the streamed data into our buffer.
     std::tie(count, std::ignore) = result->mSource.read(mBuffer.data(), 0, count);
@@ -113,7 +116,7 @@ void StreamContext::onData(StreamContextPtr& context,
 }
 
 StreamContext::StreamContext(FileStreamDataCallback callback, File file):
-    mBuffer(128 * 1024),
+    mBuffer(),
     mCallback(std::move(callback)),
     mFile(std::move(file))
 {}
