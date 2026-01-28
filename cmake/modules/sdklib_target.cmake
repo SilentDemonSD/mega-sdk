@@ -98,6 +98,7 @@ set(SDKLIB_HEADERS
     include/mega/log_level_forward.h
     include/mega/overloaded.h
     include/mega/banner.h
+    include/mega/auto_file.h
     include/mega/auto_file_handle.h
     include/mega/sc_streaming_parser.h
     include/mega/tree_filters.h
@@ -180,6 +181,7 @@ set(SDKLIB_SOURCES
     src/user_attribute_manager.cpp
     src/megautils.cpp
     src/log_level.cpp
+    src/auto_file_handle.cpp
     src/sc_streaming_parser.cpp
     src/tree_filters.cpp
 
@@ -340,6 +342,8 @@ target_sources_conditional(SDKlib
     FLAG USE_LIBUV
     PRIVATE
     include/impl/tcp_context_pool.h
+    include/mega/auto_uvfile.h
+    src/auto_uvfile.cpp
     src/impl/tcp_context_pool.cpp
 )
 
