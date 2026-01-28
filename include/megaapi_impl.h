@@ -50,6 +50,7 @@
 #include <evt-tls/evt_tls.h>
 #define ENABLE_EVT_TLS 1
 #endif
+#include "mega/auto_uvfile.h"
 
 #endif
 
@@ -5938,19 +5939,11 @@ public:
     void removeAllowedHandle(MegaHandle handle);
 
     void readData(MegaTCPContext* tcpctx);
-};
 
-struct FileStreamResultConsumption
-{
-    struct Value
+    uv_loop_t* loop()
     {
-        // Result returned from file service stream callback
-        file_service::FileStreamResult mFileStreamResult;
-        // How many length has been consumed
-        std::uint64_t mConsumedLength{};
+        return &uv_loop;
     };
-
-    std::optional<Value> mValue;
 };
 
 class PublicNodeCache
@@ -5989,12 +5982,6 @@ private:
     static std::atomic_uint32_t nextId;
     const uint32_t contextId;
     std::string logname;
-    FileStreamResultConsumption mFileStreamResultConsumption{};
-
-    auto processFileStreamResult() -> std::unique_ptr<TaskContext>;
-
-    static void afterContinueStream(uv_work_t* request, int status);
-    static void continueStream(uv_work_t* request);
 
 public:
     MegaHTTPContext();
@@ -6013,6 +6000,15 @@ public:
 
     bool nodereceived;
     std::atomic_bool failed{false};
+
+    // Header bytes going to be written
+    m_off_t headerSize{0};
+    // Cached file related
+    AutoUVFile fd;
+    m_off_t offset{0};
+    m_off_t availableBytes{0};
+    m_off_t consumedBytes{0};
+    bool isReading{false};
 
     // Request information
     bool range;
