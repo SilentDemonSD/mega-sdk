@@ -2113,7 +2113,7 @@ private:
      *
      * @param sync The affected sync. Its state might be changed
      */
-    void manageRemoteRootLocationChange(Sync& sync) const;
+    void manageRemoteRootLocationChange(Sync& sync);
 
     // ------ private data members
 

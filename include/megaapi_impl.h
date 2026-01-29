@@ -3726,6 +3726,11 @@ class MegaApiImpl : public MegaApp
 
         static MegaApiImpl* ImplOf(MegaApi*);
 
+        void ensureIsMegaApiImplThread()
+        {
+            assert(threadId == std::this_thread::get_id() && "We are not in MegaApiImpl's thread");
+        }
+
         /**
          * @brief Max children count to allow name-based search for nodes with same name than local
          * file to be uploaded, otherwise search nodes by fingerprint (to avoid penalization).

@@ -2812,7 +2812,13 @@ void LocalNode::recursiveSetAndReportTreestate(treestate_t ts, bool recurse, boo
     if (reportToApp && ts != mReportedSyncState)
     {
         assert(sync->syncs.onSyncThread());
-        sync->syncs.mClient.app->syncupdate_treestate(sync->getConfig(), getLocalPath(), ts, type);
+        sync->syncs.queueClient(
+            [config{sync->getConfig()}, localPath = getLocalPath(), ts, t = type](
+                MegaClient& mc,
+                TransferDbCommitter&)
+            {
+                mc.app->syncupdate_treestate(config, localPath, ts, t);
+            });
     }
 
     mReportedSyncState = ts;
