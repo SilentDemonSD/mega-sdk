@@ -14575,6 +14575,7 @@ std::unique_ptr<MegaPushNotificationSettingsPrivate> MegaApiImpl::getMegaPushNot
 
 MegaSyncPrivate* MegaApiImpl::cachedMegaSyncPrivateByBackupId(const SyncConfig& config)
 {
+    ensureIsMegaApiImplThread();
     if (mCachedMegaSyncPrivate && config.mBackupId == mCachedMegaSyncPrivate->getBackupId())
     {
         return mCachedMegaSyncPrivate.get();
@@ -15554,6 +15555,7 @@ void MegaApiImpl::copysession_result(string *session, error e)
 void MegaApiImpl::clearing()
 {
 #ifdef ENABLE_SYNC
+    ensureIsMegaApiImplThread();
     mCachedMegaSyncPrivate.reset();
 #endif
 }
@@ -15880,6 +15882,7 @@ void MegaApiImpl::login_result(error result)
 
 void MegaApiImpl::logout_result(error e, MegaRequestPrivate* request)
 {
+    ensureIsMegaApiImplThread();
     if(!e || e == API_ESID)
     {
         requestMap.erase(request->getTag());
