@@ -4685,7 +4685,7 @@ void Syncs::changeSyncLocalRootInThread(const handle backupId,
     exitResumingIfNeeded(API_OK, NO_SYNC_ERROR);
 }
 
-void Syncs::manageRemoteRootLocationChange(Sync& sync)
+void Syncs::manageRemoteRootLocationChange(Sync& sync) const
 {
     std::unique_lock<std::recursive_mutex> syncVecMutexLock(mSyncVecMutex);
     // Currently, we don't support movements for backup roots
@@ -4884,7 +4884,7 @@ void Syncs::queueSync(std::function<void()>&& f, const string& actionName)
 }
 
 void Syncs::queueClient(std::function<void(MegaClient&, TransferDbCommitter&)>&& f,
-                        [[maybe_unused]] bool fromAnyThread)
+                        [[maybe_unused]] bool fromAnyThread) const
 {
     assert(onSyncThread() || fromAnyThread);
     clientThreadActions.pushBack(std::move(f));

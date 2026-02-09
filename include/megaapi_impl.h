@@ -3726,7 +3726,7 @@ class MegaApiImpl : public MegaApp
 
         static MegaApiImpl* ImplOf(MegaApi*);
 
-        void ensureIsMegaApiImplThread()
+        void ensureIsMegaApiImplThread() const
         {
             assert(threadId == std::this_thread::get_id() && "We are not in MegaApiImpl's thread");
         }
