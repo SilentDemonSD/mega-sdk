@@ -10627,7 +10627,7 @@ int MegaApiImpl::syncPathState(string* platformEncoded)
                 if (mc->syncs.getSyncStateForLocalPath(p, ts, nt, sc))
                 {
                     mc->syncs.queueClient(
-                        [sc, p, ts, nt](MegaClient& mc, TransferDbCommitter&)
+                        [sc = std::move(sc), p, ts, nt](MegaClient& mc, TransferDbCommitter&)
                         {
                             mc.app->syncupdate_treestate(sc, p, ts, nt);
                         });

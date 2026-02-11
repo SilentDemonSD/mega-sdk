@@ -7207,13 +7207,12 @@ void Syncs::removeSyncAfterDeregistration_inThread(handle backupId, std::functio
     SyncConfig configCopy;
     if (unloadSyncByBackupID(backupId, false, configCopy))
     {
+        mSyncConfigStore->markDriveDirty(configCopy.mExternalDrivePath);
         queueClient(
-            [config{configCopy}](MegaClient& mc, TransferDbCommitter&)
+            [config = std::move(configCopy)](MegaClient& mc, TransferDbCommitter&)
             {
                 mc.app->sync_removed(config);
             });
-
-        mSyncConfigStore->markDriveDirty(configCopy.mExternalDrivePath);
 
         // lastly, send the command to remove the sds entry from the (former) sync root Node's attributes
         if (clientRemoveSdsEntryFunction)
