@@ -17882,7 +17882,6 @@ void MegaApiImpl::fireOnEvent(MegaEventPrivate *event)
 void MegaApiImpl::fireOnSyncStateChanged(MegaSyncPrivate *sync)
 {
     assert(sync->getBackupId() != INVALID_HANDLE);
-    assert(client->syncs.onSyncThread());
     for(set<MegaListener *>::iterator it = listeners.begin(); it != listeners.end() ;)
     {
         (*it++)->onSyncStateChanged(api, sync);
@@ -17892,7 +17891,6 @@ void MegaApiImpl::fireOnSyncStateChanged(MegaSyncPrivate *sync)
 void MegaApiImpl::fireOnSyncStatsUpdated(MegaSyncStatsPrivate *stats)
 {
     assert(stats->getBackupId() != INVALID_HANDLE);
-    assert(client->syncs.onSyncThread());
     for(set<MegaListener *>::iterator it = listeners.begin(); it != listeners.end() ;)
     {
         (*it++)->onSyncStatsUpdated(api, stats);
@@ -17902,7 +17900,6 @@ void MegaApiImpl::fireOnSyncStatsUpdated(MegaSyncStatsPrivate *stats)
 void MegaApiImpl::fireOnSyncAdded(MegaSyncPrivate *sync)
 {
     assert(sync->getBackupId() != INVALID_HANDLE);
-    assert(client->syncs.onSyncThread());
     for(set<MegaListener *>::iterator it = listeners.begin(); it != listeners.end() ;)
     {
         (*it++)->onSyncAdded(api, sync);
@@ -17922,7 +17919,6 @@ void MegaApiImpl::fireOnSyncRemoteRootChanged(MegaSyncPrivate* sync)
 void MegaApiImpl::fireOnSyncDeleted(MegaSyncPrivate *sync)
 {
     assert(sync->getBackupId() != INVALID_HANDLE);
-    assert(client->syncs.onSyncThread());
     for(set<MegaListener *>::iterator it = listeners.begin(); it != listeners.end() ;)
     {
         (*it++)->onSyncDeleted(api, sync);
@@ -17931,7 +17927,6 @@ void MegaApiImpl::fireOnSyncDeleted(MegaSyncPrivate *sync)
 
 void MegaApiImpl::fireOnGlobalSyncStateChanged()
 {
-    assert(client->syncs.onSyncThread());
     for(set<MegaListener *>::iterator it = listeners.begin(); it != listeners.end() ;)
     {
         (*it++)->onGlobalSyncStateChanged(api);
@@ -17946,7 +17941,6 @@ void MegaApiImpl::fireOnGlobalSyncStateChanged()
 void MegaApiImpl::fireOnFileSyncStateChanged(MegaSyncPrivate *sync, string *localPath, int newState)
 {
     assert(sync->getBackupId() != INVALID_HANDLE);
-    assert(client->syncs.onSyncThread());
     for(set<MegaListener *>::iterator it = listeners.begin(); it != listeners.end() ;)
     {
         (*it++)->onSyncFileStateChanged(api, sync, localPath, newState);
