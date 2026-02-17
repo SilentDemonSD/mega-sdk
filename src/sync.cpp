@@ -7461,7 +7461,11 @@ void Syncs::loadSyncConfigsOnFetchnodesComplete_inThread(bool resetSyncConfigSto
     if (error e = syncConfigStoreLoad(configs))
     {
         LOG_warn << "syncConfigStoreLoad failed: " << e;
-        mClient.app->syncs_restored(SYNC_CONFIG_READ_FAILURE);
+        queueClient(
+            [](MegaClient& mc, TransferDbCommitter&)
+            {
+                mc.app->syncs_restored(SYNC_CONFIG_READ_FAILURE);
+            });
         return;
     }
 
@@ -14107,7 +14111,11 @@ void Syncs::syncLoop()
             {
                 assert(onSyncThread());
                 syncBusyState = anySyncBusy;
-                mClient.app->syncupdate_syncing(anySyncBusy);
+                queueClient(
+                    [anySyncBusy](MegaClient& mc, TransferDbCommitter&)
+                    {
+                        mc.app->syncupdate_syncing(anySyncBusy);
+                    });
             }
 
             // Process stall issues
