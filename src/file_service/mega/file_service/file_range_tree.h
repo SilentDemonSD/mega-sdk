@@ -224,6 +224,17 @@ public:
         return const_cast<FileRangeTree&>(*this).beginsAfter(position);
     }
 
+    // Find the range that begins at position.
+    Iterator beginsAt(std::uint64_t position)
+    {
+        return mByRangeBegin.find(position).nodePointer();
+    }
+
+    ConstIterator beginsAt(std::uint64_t position) const
+    {
+        return const_cast<FileRangeTree&>(*this).beginsAt(position);
+    }
+
     // Return an iterator to the first node in the tree.
     ConstIterator cbegin() const
     {
