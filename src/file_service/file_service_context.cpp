@@ -331,7 +331,7 @@ auto FileServiceContext::fileContextFromCloud(FileID id) -> FileServiceResultOr<
                                                  std::move(file),
                                                  std::move(info),
                                                  std::nullopt,
-                                                 FileRangeVector(),
+                                                 FileRangeSet(),
                                                  *this);
 
     // Make sure the file is in our index.
@@ -376,7 +376,7 @@ auto FileServiceContext::fileContextFromDatabase(FileID id) -> FileServiceResult
 
     // Retrieve this file's key data and ranges from the database.
     std::optional<NodeKeyData> keyData;
-    FileRangeVector ranges;
+    FileRangeSet ranges;
 
     {
         // Acquire database lock.
@@ -580,12 +580,12 @@ auto FileServiceContext::keyData(FileID id, Transaction&& transaction) -> std::o
 }
 
 template<typename Transaction>
-auto FileServiceContext::ranges(FileID id, Transaction&& transaction) -> FileRangeVector
+auto FileServiceContext::ranges(FileID id, Transaction&& transaction) -> FileRangeSet
 {
     assert(transaction.inProgress());
 
     auto query = transaction.query(mQueries.mGetFileRanges);
-    auto ranges = FileRangeVector();
+    auto ranges = FileRangeSet();
 
     query.param(":id").set(id);
 
@@ -594,7 +594,7 @@ auto FileServiceContext::ranges(FileID id, Transaction&& transaction) -> FileRan
         auto begin = query.field("begin").template get<std::uint64_t>();
         auto end = query.field("end").template get<std::uint64_t>();
 
-        ranges.emplace_back(begin, end);
+        ranges.add(FileRange(begin, end));
     }
 
     return ranges;
@@ -1124,7 +1124,7 @@ try
                                               mStorage.addFile(id),
                                               info,
                                               std::nullopt,
-                                              FileRangeVector(),
+                                              FileRangeSet(),
                                               *this);
 
     // Persist our changes.

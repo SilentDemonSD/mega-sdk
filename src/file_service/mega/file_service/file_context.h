@@ -23,6 +23,7 @@
 #include <mega/file_service/file_range_context_pointer.h>
 #include <mega/file_service/file_range_forward.h>
 #include <mega/file_service/file_range_map.h>
+#include <mega/file_service/file_range_set.h>
 #include <mega/file_service/file_range_vector.h>
 #include <mega/file_service/file_read_request_forward.h>
 #include <mega/file_service/file_read_write_state.h>
@@ -225,6 +226,12 @@ class FileContext final: public std::enable_shared_from_this<FileContext>
     // How many write requests are pending?
     std::size_t mNumPendingWriteRequests;
 
+    // What ranges are present on disk?
+    FileRangeSet mOnDisk;
+
+    // Serializes access to mOnDisk.
+    std::recursive_mutex mOnDiskLock;
+
     // Tracks whether any reads or writes are in progress.
     FileReadWriteState mReadWriteState;
 
@@ -251,7 +258,7 @@ public:
                 FileAccessPtr file,
                 FileInfoContextPtr info,
                 std::optional<common::NodeKeyData> keyData,
-                const FileRangeVector& ranges,
+                FileRangeSet ranges,
                 FileServiceContext& service);
 
     ~FileContext();

@@ -1377,7 +1377,7 @@ FileContext::FileContext(Activity activity,
                          FileAccessPtr file,
                          FileInfoContextPtr info,
                          std::optional<NodeKeyData> keyData,
-                         const FileRangeVector& ranges,
+                         FileRangeSet ranges,
                          FileServiceContext& service):
     enable_shared_from_this(),
     mInstanceLogger("FileContext", *this, logger()),
@@ -1393,6 +1393,8 @@ FileContext::FileContext(Activity activity,
     mFlushContextLock(),
     mKeyData(std::move(keyData)),
     mNumPendingWriteRequests(0u),
+    mOnDisk(std::move(ranges)),
+    mOnDiskLock(),
     mReadWriteState(),
     mReclaimContext(),
     mReclaimContextLock(),
@@ -1401,7 +1403,7 @@ FileContext::FileContext(Activity activity,
     mService(service),
     mActivities()
 {
-    for (auto& range: ranges)
+    for (auto& range: mOnDisk)
         mDownloading.add(range, nullptr);
 }
 

@@ -18,7 +18,7 @@
 #include <mega/file_service/file_info_context_badge_forward.h>
 #include <mega/file_service/file_info_context_pointer.h>
 #include <mega/file_service/file_info_forward.h>
-#include <mega/file_service/file_range_vector.h>
+#include <mega/file_service/file_range_set.h>
 #include <mega/file_service/file_service_callbacks.h>
 #include <mega/file_service/file_service_context_forward.h>
 #include <mega/file_service/file_service_options.h>
@@ -83,7 +83,7 @@ class FileServiceContext: common::NodeEventObserver
     auto keyData(FileID id, Transaction&& transaction) -> std::optional<common::NodeKeyData>;
 
     template<typename Transaction>
-    auto ranges(FileID id, Transaction&& transaction) -> FileRangeVector;
+    auto ranges(FileID id, Transaction&& transaction) -> FileRangeSet;
 
     void reclaimTaskCallback(common::Activity& activity,
                              std::chrono::steady_clock::time_point when,
