@@ -347,17 +347,6 @@ Watchdog FileServiceTests::mWatchdog(logger());
 
 static const FileServiceOptions DefaultOptions;
 
-static const FileServiceOptions DisableReadahead = {
-    DefaultOptions.mMaximumRangeRetries,
-    0u,
-    0u,
-    DefaultOptions.mRangeRetryBackoff,
-    DefaultOptions.mReclaimAgeThreshold,
-    DefaultOptions.mReclaimBatchSize,
-    DefaultOptions.mReclaimDelay,
-    DefaultOptions.mReclaimPeriod,
-    DefaultOptions.mReclaimSizeThreshold}; // DisableReadahead
-
 static constexpr auto MaxTestRunTime = std::chrono::minutes(15);
 static constexpr auto MaxTestSetupTime = std::chrono::minutes(15);
 
@@ -511,9 +500,6 @@ TEST_F(FileServiceTests, add_public_succeeds)
 
 TEST_F(FileServiceTests, append_succeeds)
 {
-    // Disable readahead.
-    mClient->fileService().options(DisableReadahead);
-
     // Open file for writing.
     auto file = mClient->fileOpen(mFileHandle);
 
@@ -937,9 +923,6 @@ TEST_F(FileServiceTests, create_succeeds)
 
 TEST_F(FileServiceTests, create_write_succeeds)
 {
-    // Disable readahead.
-    mClient->fileService().options(DisableReadahead);
-
     // Create a new file.
     auto file = mClient->fileCreate(mRootHandle, randomName());
 
@@ -1006,9 +989,6 @@ TEST_F(FileServiceTests, create_write_succeeds)
 
 TEST_F(FileServiceTests, fetch_succeeds)
 {
-    // Disable readahead.
-    mClient->fileService().options(DisableReadahead);
-
     // Open a file for reading.
     auto file = mClient->fileOpen(mFileHandle);
 
@@ -1041,9 +1021,6 @@ TEST_F(FileServiceTests, file_destroyed_on_client_thread_during_read_callback_su
     // Open our test file for reading.
     auto file = mClient->fileOpen(mFileHandle);
     ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
-
-    // Make sure readahead is disabled.
-    mClient->fileService().options(DisableReadahead);
 
     // Make sure the client doesn't complete the download in one hit.
     mClient->setDownloadSpeed(8192);
@@ -1914,9 +1891,6 @@ TEST_F(FileServiceTests, read_cancel_on_client_logout_succeeds)
     // Log the client in.
     ASSERT_EQ(client->login(0), API_OK);
 
-    // Disable readahead.
-    client->fileService().options(DisableReadahead);
-
     // Open a file for reading.
     auto file = client->fileOpen(mFileHandle);
     ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
@@ -1939,9 +1913,6 @@ TEST_F(FileServiceTests, read_cancel_on_client_logout_succeeds)
 
 TEST_F(FileServiceTests, read_cancel_on_file_destruction_succeeds)
 {
-    // Disable readahead.
-    mClient->fileService().options(DisableReadahead);
-
     // Open a file for reading.
     auto file = mClient->fileOpen(mFileHandle);
     ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
@@ -1957,79 +1928,6 @@ TEST_F(FileServiceTests, read_cancel_on_file_destruction_succeeds)
 
     // Make sure the read was cancelled.
     EXPECT_EQ(waiter.get().errorOr(FILE_SUCCESS), FILE_CANCELLED);
-}
-
-TEST_F(FileServiceTests, read_extension_succeeds)
-{
-    // No minimum read size, extend if another range is <= 32K distant.
-    mClient->fileService().options(FileServiceOptions{DefaultOptions.mMaximumRangeRetries,
-                                                      32_KiB,
-                                                      0u,
-                                                      DefaultOptions.mRangeRetryBackoff});
-
-    // Open a file for reading.
-    auto file = mClient->fileOpen(mFileHandle);
-
-    // Make sure the file was opened successfully.
-    ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
-
-    // Read two ranges, leaving a 128KiB hole between them.
-    auto data = execute(read, *file, 0, 64_KiB);
-    ASSERT_EQ(data.errorOr(FILE_SUCCESS), FILE_SUCCESS);
-
-    data = execute(read, *file, 192_KiB, 64_KiB);
-    ASSERT_EQ(data.errorOr(FILE_SUCCESS), FILE_SUCCESS);
-
-    // Make sure we have the ranges we expect.
-    ASSERT_THAT(file->ranges(), ElementsAre(FileRange(0, 64_KiB), FileRange(192_KiB, 256_KiB)));
-
-    // Read another range, right in the hole we created before.
-    data = execute(read, *file, 96_KiB, 64_KiB);
-    ASSERT_EQ(data.errorOr(FILE_SUCCESS), FILE_SUCCESS);
-
-    // Make sure our range was expanded to fill the hole.
-    ASSERT_EQ(execute(fetchBarrier, *file), FILE_SUCCESS);
-    ASSERT_THAT(file->ranges(), ElementsAre(FileRange(0, 256_KiB)));
-
-    // Read another range, just beyond the extension threshold.
-    data = execute(read, *file, 289_KiB, 64_KiB);
-    ASSERT_EQ(data.errorOr(FILE_SUCCESS), FILE_SUCCESS);
-
-    // Make sure the range wasn't extended.
-    ASSERT_EQ(execute(fetchBarrier, *file), FILE_SUCCESS);
-    ASSERT_THAT(file->ranges(), ElementsAre(FileRange(0, 256_KiB), FileRange(289_KiB, 353_KiB)));
-
-    // Perform a read to make sure we extend to the left.
-    data = execute(read, *file, 385_KiB, 64_KiB);
-    ASSERT_EQ(data.errorOr(FILE_SUCCESS), FILE_SUCCESS);
-
-    ASSERT_EQ(execute(fetchBarrier, *file), FILE_SUCCESS);
-    ASSERT_THAT(file->ranges(), ElementsAre(FileRange(0, 256_KiB), FileRange(289_KiB, 449_KiB)));
-
-    // Perform another read to create another hole.
-    data = execute(read, *file, 640_KiB, 64_KiB);
-    ASSERT_EQ(data.errorOr(FILE_SUCCESS), FILE_SUCCESS);
-
-    // Perform a read to make sure we extend to the right.
-    data = execute(read, *file, 576_KiB, 32_KiB);
-    ASSERT_EQ(data.errorOr(FILE_SUCCESS), FILE_SUCCESS);
-
-    ASSERT_EQ(execute(fetchBarrier, *file), FILE_SUCCESS);
-    ASSERT_THAT(file->ranges(),
-                ElementsAre(FileRange(0, 256_KiB),
-                            FileRange(289_KiB, 449_KiB),
-                            FileRange(576_KiB, 704_KiB)));
-
-    // Fill remaining holes via extension.
-    data = execute(read, *file, 272_KiB, 8_KiB);
-    ASSERT_EQ(data.errorOr(FILE_SUCCESS), FILE_SUCCESS);
-
-    data = execute(read, *file, 481_KiB, 63_KiB);
-    ASSERT_EQ(data.errorOr(FILE_SUCCESS), FILE_SUCCESS);
-
-    // We should now have a single range.
-    ASSERT_EQ(execute(fetchBarrier, *file), FILE_SUCCESS);
-    ASSERT_THAT(file->ranges(), ElementsAre(FileRange(0, 704_KiB)));
 }
 
 TEST_F(FileServiceTests, read_external_succeeds)
@@ -2114,9 +2012,6 @@ TEST_F(FileServiceTests, read_removed_file_succeeds)
     // Make sure we could open the file.
     ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
 
-    // Disable readahead.
-    mClient->fileService().options(DisableReadahead);
-
     // Read some data from the file.
     auto data0 = execute(read, *file, 0, 256_KiB);
 
@@ -2137,32 +2032,8 @@ TEST_F(FileServiceTests, read_removed_file_succeeds)
     ASSERT_EQ(data1.errorOr(FILE_SUCCESS), FILE_REMOVED);
 }
 
-TEST_F(FileServiceTests, read_size_extension_succeeds)
-{
-    // Minimum read size is 64KiB, everything else are defaults.
-    mClient->fileService().options(FileServiceOptions{DefaultOptions.mMaximumRangeRetries,
-                                                      DefaultOptions.mMinimumRangeDistance,
-                                                      64_KiB,
-                                                      DefaultOptions.mRangeRetryBackoff});
-
-    // Open a file for reading.
-    auto file = mClient->fileOpen(mFileHandle);
-    ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
-
-    // Read 4K from the file.
-    auto data = execute(read, *file, 0, 4_KiB);
-    ASSERT_EQ(data.errorOr(FILE_SUCCESS), FILE_SUCCESS);
-    ASSERT_EQ(static_cast<std::uint64_t>(data->size()), 4_KiB);
-
-    // Make sure the read's size was extended.
-    ASSERT_THAT(file->ranges(), ElementsAre(FileRange(0, 64_KiB)));
-}
-
 TEST_F(FileServiceTests, read_succeeds)
 {
-    // Disable readahead.
-    mClient->fileService().options(DisableReadahead);
-
     // Open a file for reading.
     auto file = mClient->fileOpen(mFileHandle);
     ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
@@ -2284,9 +2155,6 @@ TEST_F(FileServiceTests, read_write_sequence)
     // Generate some data for us to write to the file.
     auto expected = randomBytes(512_KiB);
 
-    // Disable readahead.
-    mClient->fileService().options(DisableReadahead);
-
     // Make sure our initial read doesn't complete too quickly.
     mClient->setDownloadSpeed(4096);
 
@@ -2360,7 +2228,7 @@ TEST_F(FileServiceTests, reclaim_all_succeeds)
     std::vector<File> files;
 
     // We'll be modifying these options later.
-    auto options = DisableReadahead;
+    auto options = DefaultOptions;
 
     // Disable readahead.
     //
@@ -2511,11 +2379,11 @@ TEST_F(FileServiceTests, reclaim_cancel_on_file_destruction_succeeds)
 
 TEST_F(FileServiceTests, reclaim_concurrent_succeeds)
 {
-    // Disable readahead and reclamation.
+    // Disable reclamation.
     mClient->fileService().options(
         []()
         {
-            auto options = DisableReadahead;
+            auto options = DefaultOptions;
             options.mReclaimSizeThreshold = 0;
             return options;
         }());
@@ -2612,8 +2480,8 @@ TEST_F(FileServiceTests, reclaim_periodic_succeeds)
     // Keeps track of our test files.
     std::vector<File> files;
 
-    // Disable readahead and reclamation.
-    auto options = DisableReadahead;
+    // Disable reclamation.
+    auto options = DefaultOptions;
 
     options.mReclaimSizeThreshold = 0;
 
@@ -3252,9 +3120,6 @@ TEST_F(FileServiceTests, remove_cloud_succeeds)
 
 TEST_F(FileServiceTests, stream_filedescriptor_succeeds)
 {
-    // Disable readahead.
-    mClient->fileService().options(DisableReadahead);
-
     // Open a file for streaming.
     auto file = mClient->fileOpen(mFileHandle);
     ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
@@ -3330,9 +3195,6 @@ TEST_F(FileServiceTests, stream_filedescriptor_succeeds)
 
 TEST_F(FileServiceTests, stream_succeeds)
 {
-    // Disable readahead.
-    mClient->fileService().options(DisableReadahead);
-
     // Open a file for streaming.
     auto file = mClient->fileOpen(mFileHandle);
     ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
@@ -3441,9 +3303,6 @@ TEST_F(FileServiceTests, touch_succeeds)
 
 TEST_F(FileServiceTests, truncate_with_ranges_succeeds)
 {
-    // Disable readahead.
-    mClient->fileService().options(DisableReadahead);
-
     // Open the file for truncation.
     auto file = mClient->fileOpen(mFileHandle);
 
@@ -3645,9 +3504,6 @@ TEST_F(FileServiceTests, write_cancels_orphan_reads)
     auto file = mClient->fileOpen(mFileHandle);
     ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
 
-    // Disable readahead.
-    mClient->fileService().options(DisableReadahead);
-
     // Generate some data to write to our file.
     auto expected = randomBytes(512_KiB);
 
@@ -3675,9 +3531,6 @@ TEST_F(FileServiceTests, write_cancels_orphan_reads)
 
 TEST_F(FileServiceTests, write_succeeds)
 {
-    // Disable readahead.
-    mClient->fileService().options(DisableReadahead);
-
     // File content that's updated as we write.
     auto expected = mFileContent;
 
