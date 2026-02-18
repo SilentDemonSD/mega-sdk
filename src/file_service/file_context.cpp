@@ -1054,7 +1054,7 @@ void FileContext::execute(FileRemoveRequest& request)
         return completed(std::move(request), setRemoved(replaced));
 
     // Called when the file's been removed.
-    auto removed = [replaced, this](auto&&, auto&& request, auto result)
+    auto removed = [replaced, this](auto&&, auto&& request, auto result) mutable
     {
         // File was removed from the cloud.
         if (result == API_OK)
