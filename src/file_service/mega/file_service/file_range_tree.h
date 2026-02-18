@@ -272,6 +272,17 @@ public:
         return mByRangeBegin.end();
     }
 
+    // Find the first range that ends after position.
+    Iterator endsAfter(std::uint64_t position)
+    {
+        return mByRangeEnd.upper_bound(position).nodePointer();
+    }
+
+    ConstIterator endsAfter(std::uint64_t position) const
+    {
+        return const_cast<FileRangeTree&>(*this).endsAfter(position);
+    }
+
     // Find the first range that ends at or after position.
     Iterator endsAtOrAfter(std::uint64_t position)
     {
