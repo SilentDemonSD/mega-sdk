@@ -20,7 +20,6 @@
 #include <mega/file_service/file_forward.h>
 #include <mega/file_service/file_info_context_pointer.h>
 #include <mega/file_service/file_info_forward.h>
-#include <mega/file_service/file_range_context_manager.h>
 #include <mega/file_service/file_range_context_pointer_map.h>
 #include <mega/file_service/file_range_forward.h>
 #include <mega/file_service/file_range_vector.h>

@@ -104,8 +104,6 @@ target_sources(SDKlib PRIVATE
                       src/file_service/mega/file_service/file_info_context_badge_forward.h
                       src/file_service/mega/file_service/file_range_context.h
                       src/file_service/mega/file_service/file_range_context_forward.h
-                      src/file_service/mega/file_service/file_range_context_manager.h
-                      src/file_service/mega/file_service/file_range_context_manager_forward.h
                       src/file_service/mega/file_service/file_range_context_pointer.h
                       src/file_service/mega/file_service/file_range_context_pointer_map.h
                       src/file_service/mega/file_service/file_range_map.h
