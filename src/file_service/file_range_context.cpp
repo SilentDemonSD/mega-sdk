@@ -31,7 +31,7 @@ void FileRangeContext::completed([[maybe_unused]] Lock&& lock, Error result)
 {
     // Sanity.
     assert(lock.owns_lock());
-    assert(lock.mutex() == &mContext.mRangesLock);
+    assert(lock.mutex() == &mContext.mDownloadingLock);
 
     // Convenience.
     FileRange range(mIterator->first.mBegin, mEnd);
@@ -81,7 +81,7 @@ void FileRangeContext::completed(Error result)
     [[maybe_unused]] auto context = std::move(mIterator->second);
 
     // Complete the download.
-    completed(std::unique_lock(mContext.mRangesLock), result);
+    completed(std::unique_lock(mContext.mDownloadingLock), result);
 }
 
 auto FileRangeContext::data(const void* buffer,
@@ -96,7 +96,7 @@ auto FileRangeContext::data(const void* buffer,
     auto [count, success] = mBuffer->write(buffer, offset, length);
 
     // Lock our manager.
-    std::unique_lock lock(mContext.mRangesLock);
+    std::unique_lock lock(mContext.mDownloadingLock);
 
     // Bump our buffer iterator.
     mEnd += count;
@@ -180,7 +180,7 @@ auto FileRangeContext::failed(Error result, int retries) -> std::variant<Abort, 
 
 FileRangeContext::FileRangeContext(Activity activity,
                                    FileContext& context,
-                                   FileRangeContextPtrMap::Iterator iterator):
+                                   FileRangeMap<FileRangeContextPtr>::Iterator iterator):
     PartialDownloadCallback(),
     mInstanceLogger("FileRangeContext", *this, logger()),
     mActivity(std::move(activity)),

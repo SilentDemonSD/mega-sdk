@@ -182,11 +182,11 @@ void FileContext::addRange(const FileRange& range, Transaction& transaction)
 
 void FileContext::cancel(const FileRange& range)
 {
-    // Make sure we have exclusive access to mRanges.
-    std::unique_lock lock(mRangesLock);
+    // Make sure we have exclusive access to mDownloading.
+    std::unique_lock lock(mDownloadingLock);
 
     // What ranges does range intersect?
-    auto [begin, end] = mRanges.find(range);
+    auto [begin, end] = mDownloading.find(range);
 
     // No ranges intersect range.
     if (begin == end)
@@ -275,8 +275,8 @@ void FileContext::cancel()
     // Get a snapshot of our ranges.
     auto ranges = [&]()
     {
-        std::lock_guard guard(mRangesLock);
-        return mRanges;
+        std::lock_guard guard(mDownloadingLock);
+        return mDownloading;
     }();
 
     // Cancel any downloads in progress.
@@ -333,7 +333,7 @@ void FileContext::cancel()
 }
 
 void FileContext::completed(Buffer& buffer,
-                            FileRangeContextPtrMap::Iterator iterator,
+                            FileRangeMap<FileRangeContextPtr>::Iterator iterator,
                             FileRange range)
 try
 {
@@ -343,7 +343,7 @@ try
 
     // No data for this range was downloaded.
     if (!length)
-        return mRanges.remove(iterator), void();
+        return mDownloading.remove(iterator), void();
 
     // Flush this range's data to storage if necessary.
     if (buffer.isMemoryBuffer())
@@ -351,7 +351,7 @@ try
 
     // Couldn't flush any of this range's data to storage.
     if (!length)
-        return mRanges.remove(iterator), void();
+        return mDownloading.remove(iterator), void();
 
     // Compute the range's actual end point.
     range.mEnd = range.mBegin + length;
@@ -360,7 +360,7 @@ try
     auto begin = [&]()
     {
         // We don't have a left neighbor.
-        if (iterator == mRanges.begin())
+        if (iterator == mDownloading.begin())
             return iterator;
 
         // Get an iterator to our left neighbor.
@@ -387,7 +387,7 @@ try
         auto candidate = std::next(iterator);
 
         // We don't have a right neighbor.
-        if (candidate == mRanges.end())
+        if (candidate == mDownloading.end())
             return candidate;
 
         // Neighbor hasn't completed downloading.
@@ -427,10 +427,10 @@ try
     updateSize(mInfo->size(), transaction);
 
     // Remove obsolete ranges from memory.
-    mRanges.remove(begin, end);
+    mDownloading.remove(begin, end);
 
     // Add our new range to memory.
-    mRanges.add(range, nullptr);
+    mDownloading.add(range, nullptr);
 
     // Persist our changes.
     transaction.commit();
@@ -445,7 +445,7 @@ catch (std::runtime_error& exception)
                exception.what());
 
     // Consider the range absent.
-    mRanges.remove(iterator);
+    mDownloading.remove(iterator);
 }
 
 void FileContext::completed(BufferPtr buffer, FileReadRequest&& request)
@@ -591,16 +591,16 @@ void FileContext::execute(FileAppendRequest& request)
     FileRange range(size, size + request.mLength);
 
     // Acquire ranges lock.
-    std::unique_lock rangesLock(mRangesLock);
+    std::unique_lock rangesLock(mDownloadingLock);
 
     // Assume we can grow the last range.
-    auto candidate = mRanges.rbegin();
+    auto candidate = mDownloading.rbegin();
 
     // Can grow the last range.
-    if (!mRanges.empty() && candidate->first.mEnd == size)
+    if (!mDownloading.empty() && candidate->first.mEnd == size)
         range.mBegin = candidate->first.mBegin;
     else
-        candidate = mRanges.end();
+        candidate = mDownloading.end();
 
     // Disambiguate.
     using file_service::write;
@@ -637,10 +637,10 @@ void FileContext::execute(FileAppendRequest& request)
     updateSize(range.mEnd, transaction);
 
     // Remove obsolete ranges from memory.
-    mRanges.remove(candidate, mRanges.end());
+    mDownloading.remove(candidate, mDownloading.end());
 
     // Add new range to memory.
-    mRanges.add(range, nullptr);
+    mDownloading.add(range, nullptr);
 
     // Persist our changes.
     transaction.commit();
@@ -731,11 +731,11 @@ void FileContext::execute(FileReadRequest& request)
     // Update the file's access time.
     mInfo->accessed(now());
 
-    // Make sure we have exclusive access to mRanges.
-    std::unique_lock lock(mRangesLock);
+    // Make sure we have exclusive access to mDownloading.
+    std::unique_lock lock(mDownloadingLock);
 
     // The read's contained within an existing range.
-    if (auto i = mRanges.endsAfter(begin); i != mRanges.end() && i->first.mBegin <= begin)
+    if (auto i = mDownloading.endsAfter(begin); i != mDownloading.end() && i->first.mBegin <= begin)
     {
         // Range is still being downloaded.
         if (i->second)
@@ -749,12 +749,12 @@ void FileContext::execute(FileReadRequest& request)
     }
 
     // Add a new range.
-    auto [i, added] = mRanges.tryAdd(
+    auto [i, added] = mDownloading.tryAdd(
         [&]()
         {
             // We'd overlap an existing range.
-            if (auto i = mRanges.endsAfter(range.mBegin);
-                i != mRanges.end() && i->first.mBegin < range.mEnd)
+            if (auto i = mDownloading.endsAfter(range.mBegin);
+                i != mDownloading.end() && i->first.mBegin < range.mEnd)
                 return FileRange(range.mBegin, i->first.mBegin);
 
             // Read doesn't overlap any existing range.
@@ -788,8 +788,8 @@ void FileContext::execute(FileReadRequest& request)
 // When this request is executed, any pending downloads will have completed.
 void FileContext::execute(FileReclaimRequest& request)
 {
-    // Make sure no one else is modifying mRanges.
-    std::lock_guard rangesLock(mRangesLock);
+    // Make sure no one else is modifying mDownloading.
+    std::lock_guard rangesLock(mDownloadingLock);
 
     // Convenience.
     auto& database = mService.database();
@@ -811,7 +811,7 @@ void FileContext::execute(FileReclaimRequest& request)
         return completed(std::move(request), FILE_FAILED);
 
     // Remove all of the ranges from memory.
-    mRanges.clear();
+    mDownloading.clear();
 
     // Update the file's size.
     updateSize(mInfo->size(), transaction);
@@ -941,8 +941,8 @@ void FileContext::execute(FileWriteRequest& request)
     // Cancel any downloads in progress that intersect our write.
     cancel(range);
 
-    // Get exclusive access to mRanges.
-    std::unique_lock rangesLock(mRangesLock);
+    // Get exclusive access to mDownloading.
+    std::unique_lock rangesLock(mDownloadingLock);
 
     // Disambiguate.
     using file_service::write;
@@ -958,7 +958,7 @@ void FileContext::execute(FileWriteRequest& request)
     range.mEnd = range.mBegin + length;
 
     // Convenience.
-    using Iterator = decltype(mRanges.begin());
+    using Iterator = decltype(mDownloading.begin());
 
     Iterator begin;
     Iterator end;
@@ -967,7 +967,7 @@ void FileContext::execute(FileWriteRequest& request)
     FileRange effectiveRange = {std::min(mInfo->size(), range.mBegin), range.mEnd};
 
     // Find out which ranges we've touched.
-    std::tie(begin, end) = mRanges.find(extend(effectiveRange, 1));
+    std::tie(begin, end) = mDownloading.find(extend(effectiveRange, 1));
 
     // Refine our effective range.
     effectiveRange = [&]()
@@ -977,7 +977,7 @@ void FileContext::execute(FileWriteRequest& request)
         auto to = effectiveRange.mEnd;
 
         // Range has no siblings.
-        if (begin == mRanges.end())
+        if (begin == mDownloading.end())
             return FileRange(from, to);
 
         // Range has a sibling.
@@ -985,7 +985,7 @@ void FileContext::execute(FileWriteRequest& request)
         to = std::max(begin->first.mEnd, to);
 
         // Range has a right sibling.
-        if (end != mRanges.end())
+        if (end != mDownloading.end())
         {
             // Clarity.
             auto sibling = std::prev(end);
@@ -998,10 +998,10 @@ void FileContext::execute(FileWriteRequest& request)
         }
 
         // Range may have a right sibling.
-        auto candidate = mRanges.crbegin();
+        auto candidate = mDownloading.crbegin();
 
         // Range doesn't have a right sibling.
-        if (candidate == mRanges.crend())
+        if (candidate == mDownloading.crend())
             return FileRange(from, to);
 
         // Recompute range's end point.
@@ -1036,10 +1036,10 @@ void FileContext::execute(FileWriteRequest& request)
     updateSize(std::max(mInfo->size(), effectiveRange.mEnd), transaction);
 
     // Remove obsolete ranges from memory.
-    mRanges.remove(begin, end);
+    mDownloading.remove(begin, end);
 
     // Add our new range to memory.
-    mRanges.add(effectiveRange, nullptr);
+    mDownloading.add(effectiveRange, nullptr);
 
     // Persist our changes.
     transaction.commit();
@@ -1149,8 +1149,8 @@ void FileContext::executed(FileWriteRequestTag)
 auto FileContext::grow(std::uint64_t newSize, std::uint64_t oldSize)
     -> std::pair<UniqueLock<Database>, Transaction>
 {
-    // Make sure we have exclusive access to mRanges.
-    std::lock_guard rangesLock(mRangesLock);
+    // Make sure we have exclusive access to mDownloading.
+    std::lock_guard rangesLock(mDownloadingLock);
 
     // Convenience.
     auto& database = mService.database();
@@ -1162,13 +1162,13 @@ auto FileContext::grow(std::uint64_t newSize, std::uint64_t oldSize)
     auto transaction = database.transaction();
 
     // Get our hands on this file's last range.
-    auto last = mRanges.rbegin();
+    auto last = mDownloading.rbegin();
 
     // Assume the file has no range for us to enlarge.
     FileRange range(oldSize, newSize);
 
     // File has a range we can enlarge.
-    if (last != mRanges.rend() && last->first.mEnd == oldSize)
+    if (last != mDownloading.rend() && last->first.mEnd == oldSize)
     {
         // Remove the range from the database.
         removeRanges(last->first, transaction);
@@ -1177,14 +1177,14 @@ auto FileContext::grow(std::uint64_t newSize, std::uint64_t oldSize)
         range.mBegin = last->first.mBegin;
 
         // Remove the range from memory.
-        mRanges.remove(last);
+        mDownloading.remove(last);
     }
 
     // (Re)?add the range to the database.
     addRange(range, transaction);
 
     // (Re)?add the range to memory.
-    mRanges.add(range, nullptr);
+    mDownloading.add(range, nullptr);
 
     // Return the transaction to our caller.
     return std::make_pair(std::move(databaseLock), std::move(transaction));
@@ -1299,8 +1299,8 @@ auto FileContext::shrink(std::uint64_t newSize, std::uint64_t oldSize)
     // Cancel any downloads in progress that would be "cut off."
     cancel(FileRange(oldSize, newSize));
 
-    // So we have exclusive access to mRanges.
-    std::lock_guard rangesLock(mRangesLock);
+    // So we have exclusive access to mDownloading.
+    std::lock_guard rangesLock(mDownloadingLock);
 
     // Convenience.
     auto& database = mService.database();
@@ -1316,10 +1316,10 @@ auto FileContext::shrink(std::uint64_t newSize, std::uint64_t oldSize)
         throw FSError1("Couldn't reduce file size");
 
     // What ranges end at or after our file's new size?
-    auto begin = mRanges.endsAtOrAfter(newSize);
+    auto begin = mDownloading.endsAtOrAfter(newSize);
 
     // No ranges end at or after our new size.
-    if (begin == mRanges.end())
+    if (begin == mDownloading.end())
         return std::make_pair(std::move(databaseLock), std::move(transaction));
 
     // Convenience.
@@ -1329,7 +1329,7 @@ auto FileContext::shrink(std::uint64_t newSize, std::uint64_t oldSize)
     removeRanges(range, transaction);
 
     // Remove affected ranges from memory.
-    mRanges.remove(begin, mRanges.end());
+    mDownloading.remove(begin, mDownloading.end());
 
     // First range has been "cut" by the file's new size.
     if (range.mBegin < newSize)
@@ -1341,7 +1341,7 @@ auto FileContext::shrink(std::uint64_t newSize, std::uint64_t oldSize)
         addRange(range, transaction);
 
         // Readd the range to memory.
-        mRanges.add(range, nullptr);
+        mDownloading.add(range, nullptr);
     }
 
     // Return the transaction to our caller.
@@ -1383,6 +1383,8 @@ FileContext::FileContext(Activity activity,
     mInstanceLogger("FileContext", *this, logger()),
     mActivity(std::move(activity)),
     mBuffer(std::make_shared<SparseFileBuffer>(*file, *info)),
+    mDownloading(),
+    mDownloadingLock(),
     mInfo(std::move(info)),
     mFetchContext(),
     mFetchContextLock(),
@@ -1391,8 +1393,6 @@ FileContext::FileContext(Activity activity,
     mFlushContextLock(),
     mKeyData(std::move(keyData)),
     mNumPendingWriteRequests(0u),
-    mRanges(),
-    mRangesLock(),
     mReadWriteState(),
     mReclaimContext(),
     mReclaimContextLock(),
@@ -1402,7 +1402,7 @@ FileContext::FileContext(Activity activity,
     mActivities()
 {
     for (auto& range: ranges)
-        mRanges.add(range, nullptr);
+        mDownloading.add(range, nullptr);
 }
 
 FileContext::~FileContext()
@@ -1442,7 +1442,7 @@ void FileContext::fetchBarrier(FileFetchBarrierCallback callback)
     assert(callback);
 
     // Acquire range lock.
-    std::unique_lock lock(mRangesLock);
+    std::unique_lock lock(mDownloadingLock);
 
     // True if a download is in progress.
     auto fetching = [](const auto& entry)
@@ -1451,7 +1451,7 @@ void FileContext::fetchBarrier(FileFetchBarrierCallback callback)
     }; // fetching
 
     // How many fetches are in progress?
-    auto count = std::count_if(mRanges.begin(), mRanges.end(), fetching);
+    auto count = std::count_if(mDownloading.begin(), mDownloading.end(), fetching);
 
     // No fetches are in progress.
     if (!count)
@@ -1487,7 +1487,7 @@ void FileContext::fetchBarrier(FileFetchBarrierCallback callback)
     }; // fetched
 
     // Make sure fetched is called when each fetch has completed.
-    for (const auto& entry: mRanges)
+    for (const auto& entry: mDownloading)
     {
         if (entry.second)
             entry.second->queue(fetched);
@@ -1509,11 +1509,14 @@ FileRangeVector FileContext::ranges() const
     // Will store the ranges we'll return our caller.
     FileRangeVector ranges;
 
-    // Get exclusive access to mRanges.
-    std::lock_guard guard(mRangesLock);
+    // Get exclusive access to mDownloading.
+    std::lock_guard guard(mDownloadingLock);
 
     // Populate our range vector.
-    std::transform(mRanges.begin(), mRanges.end(), std::back_inserter(ranges), SelectFirst());
+    std::transform(mDownloading.begin(),
+                   mDownloading.end(),
+                   std::back_inserter(ranges),
+                   SelectFirst());
 
     // Return ranges to our caller.
     return ranges;

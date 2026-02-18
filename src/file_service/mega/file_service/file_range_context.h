@@ -11,7 +11,7 @@
 #include <mega/file_service/file_callbacks.h>
 #include <mega/file_service/file_context_forward.h>
 #include <mega/file_service/file_range_context_forward.h>
-#include <mega/file_service/file_range_context_pointer_map.h>
+#include <mega/file_service/file_range_map.h>
 #include <mega/file_service/file_read_request_forward.h>
 #include <mega/file_service/file_read_request_set.h>
 
@@ -75,7 +75,7 @@ class FileRangeContext: private common::PartialDownloadCallback
     std::uint64_t mEnd;
 
     // Where are we in our manager's map of contexts?
-    FileRangeContextPtrMap::Iterator mIterator;
+    FileRangeMap<FileRangeContextPtr>::Iterator mIterator;
 
     // Requests pending completion.
     FileReadRequestSet mRequests;
@@ -83,7 +83,7 @@ class FileRangeContext: private common::PartialDownloadCallback
 public:
     FileRangeContext(common::Activity activity,
                      FileContext& context,
-                     FileRangeContextPtrMap::Iterator iterator);
+                     FileRangeMap<FileRangeContextPtr>::Iterator iterator);
 
     ~FileRangeContext();
 

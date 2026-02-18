@@ -20,8 +20,9 @@
 #include <mega/file_service/file_forward.h>
 #include <mega/file_service/file_info_context_pointer.h>
 #include <mega/file_service/file_info_forward.h>
-#include <mega/file_service/file_range_context_pointer_map.h>
+#include <mega/file_service/file_range_context_pointer.h>
 #include <mega/file_service/file_range_forward.h>
+#include <mega/file_service/file_range_map.h>
 #include <mega/file_service/file_range_vector.h>
 #include <mega/file_service/file_read_request_forward.h>
 #include <mega/file_service/file_read_write_state.h>
@@ -80,7 +81,9 @@ class FileContext final: public std::enable_shared_from_this<FileContext>
     void cancel();
 
     // Called when a file range has been downloaded.
-    void completed(Buffer& buffer, FileRangeContextPtrMap::Iterator iterator, FileRange range);
+    void completed(Buffer& buffer,
+                   FileRangeMap<FileRangeContextPtr>::Iterator iterator,
+                   FileRange range);
 
     // Called when a file read request has been completed.
     void completed(BufferPtr buffer, FileReadRequest&& request);
@@ -192,6 +195,12 @@ class FileContext final: public std::enable_shared_from_this<FileContext>
     // Wraps mFile and unifies logic.
     FileBufferPtr mBuffer;
 
+    // What ranges are currently being downloaded?
+    FileRangeMap<FileRangeContextPtr> mDownloading;
+
+    // Serializes access to mDownloading.
+    mutable std::recursive_mutex mDownloadingLock;
+
     // How we get and set our file's attributes.
     FileInfoContextPtr mInfo;
 
@@ -215,12 +224,6 @@ class FileContext final: public std::enable_shared_from_this<FileContext>
 
     // How many write requests are pending?
     std::size_t mNumPendingWriteRequests;
-
-    // What ranges of the file do we have?
-    FileRangeContextPtrMap mRanges;
-
-    // Serializes access to mRanges.
-    mutable std::recursive_mutex mRangesLock;
 
     // Tracks whether any reads or writes are in progress.
     FileReadWriteState mReadWriteState;
