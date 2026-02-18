@@ -795,7 +795,7 @@ void FileContext::execute(FileReadRequest& request)
     auto i = [&range, this]()
     {
         // Search for the first range that ends at or after our read begins.
-        auto i = mRanges.endsAfter(range.mBegin);
+        auto i = mRanges.endsAtOrAfter(range.mBegin);
 
         // No ranges end at or after our read begins.
         //
@@ -1509,7 +1509,7 @@ auto FileContext::shrink(std::uint64_t newSize, std::uint64_t oldSize)
         throw FSError1("Couldn't reduce file size");
 
     // What ranges end at or after our file's new size?
-    auto begin = mRanges.endsAfter(newSize);
+    auto begin = mRanges.endsAtOrAfter(newSize);
 
     // No ranges end at or after our new size.
     if (begin == mRanges.end())
