@@ -155,15 +155,7 @@ bool FileRangeContext::dispatch(std::uint64_t begin, FileReadRequest& request)
     range.mEnd = std::min(mEnd, range.mEnd);
 
     // Dispatch the request.
-    mContext.completed(
-        [&]() -> BufferPtr
-        {
-            if (auto displacement = range.mBegin - begin)
-                return displace(mBuffer, displacement);
-
-            return mBuffer;
-        }(),
-        std::move(request));
+    mContext.completed(displace(mBuffer, range.mBegin - begin), std::move(request));
 
     // Let the caller know the request was dispatched.
     return true;

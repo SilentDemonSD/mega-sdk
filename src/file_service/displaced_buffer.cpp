@@ -31,16 +31,6 @@ auto DisplacedBuffer::copy(Buffer& target,
     return mBuffer->copy(target, mDisplacement + sourceOffset, targetOffset, length);
 }
 
-void DisplacedBuffer::displacement(std::uint64_t displacement)
-{
-    mDisplacement = displacement;
-}
-
-std::uint64_t DisplacedBuffer::displacement() const
-{
-    return mDisplacement;
-}
-
 bool DisplacedBuffer::isFileBuffer() const
 {
     assert(mBuffer);
@@ -74,9 +64,12 @@ auto DisplacedBuffer::write(const void* buffer, std::uint64_t offset, std::uint6
     return mBuffer->write(buffer, mDisplacement + offset, length);
 }
 
-DisplacedBufferPtr displace(BufferPtr buffer, std::uint64_t displacement)
+BufferPtr displace(BufferPtr buffer, std::uint64_t displacement)
 {
-    return std::make_shared<DisplacedBuffer>(std::move(buffer), displacement);
+    if (displacement)
+        return std::make_shared<DisplacedBuffer>(std::move(buffer), displacement);
+
+    return buffer;
 }
 
 } // file_service
