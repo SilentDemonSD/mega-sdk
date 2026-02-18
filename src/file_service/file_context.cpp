@@ -332,9 +332,7 @@ void FileContext::cancel()
     }
 }
 
-void FileContext::completed(Buffer& buffer,
-                            FileRangeMap<FileRangeContextPtr>::Iterator iterator,
-                            FileRange range)
+void FileContext::completed(FileRangeMap<FileRangeContextPtr>::Iterator iterator, FileRange range)
 try
 {
     // Convenience.
@@ -344,17 +342,6 @@ try
     // No data for this range was downloaded.
     if (!length)
         return mDownloading.remove(iterator), void();
-
-    // Flush this range's data to storage if necessary.
-    if (buffer.isMemoryBuffer())
-        std::tie(length, std::ignore) = buffer.copy(*mBuffer, 0, offset, length);
-
-    // Couldn't flush any of this range's data to storage.
-    if (!length)
-        return mDownloading.remove(iterator), void();
-
-    // Compute the range's actual end point.
-    range.mEnd = range.mBegin + length;
 
     // Figure out what ranges we can coalesce with.
     auto begin = [&]()
@@ -772,7 +759,7 @@ void FileContext::execute(FileReadRequest& request)
     i->second->queue(std::move(request));
 
     // Try and create a download for the range.
-    auto download = i->second->download(mService.client(), mBuffer, mInfo->handle(), mKeyData);
+    auto download = i->second->download();
 
     // Couldn't create a download for range.
     if (!download)

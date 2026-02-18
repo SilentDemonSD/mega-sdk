@@ -5,6 +5,7 @@
 #include <mega/file_service/displaced_buffer.h>
 #include <mega/file_service/file_buffer.h>
 #include <mega/file_service/file_context.h>
+#include <mega/file_service/file_info_context.h>
 #include <mega/file_service/file_range.h>
 #include <mega/file_service/file_range_context.h>
 #include <mega/file_service/file_read_request.h>
@@ -26,21 +27,30 @@ using namespace common;
 // Check if result is a retryable error.
 static bool retryable(const Error& result);
 
-template<typename Lock>
-void FileRangeContext::completed([[maybe_unused]] Lock&& lock, Error result)
+void FileRangeContext::completed(Error result)
 {
-    // Sanity.
-    assert(lock.owns_lock());
-    assert(lock.mutex() == &mContext.mDownloadingLock);
+    // Get a reference to our context.
+    //
+    // We're doing this here for two reasons:
+    //
+    // 1. We want to make sure this instance is kept alive until we've
+    //    finished processing this donwload's completion.
+    //
+    // 2. We want to make sure that the lock we acquire immediately below is
+    //    released before this instance itself is destroyed.
+    [[maybe_unused]] auto context = std::move(mIterator->second);
+
+    // Acquire lock on our file's map of downloading ranges.
+    std::unique_lock lock(mContext.mDownloadingLock);
 
     // Convenience.
     FileRange range(mIterator->first.mBegin, mEnd);
 
     // Let the manager know this download has completed.
-    mContext.completed(*mBuffer, mIterator, range);
+    mContext.completed(mIterator, range);
 
     // Complete as many requests as we can.
-    dispatch(range.mBegin);
+    dispatch();
 
     // Translate SDK result.
     auto result_ = fileResultFromError(result);
@@ -67,33 +77,13 @@ void FileRangeContext::completed([[maybe_unused]] Lock&& lock, Error result)
         mContext.mService.execute(std::bind(std::move(callback), result_));
 }
 
-void FileRangeContext::completed(Error result)
-{
-    // Get a reference to our context.
-    //
-    // We're doing this here for two reasons:
-    //
-    // 1. We want to make sure this instance is kept alive until we've
-    //    finished processing this donwload's completion.
-    //
-    // 2. We want to make sure that the lock we acquire immediately below is
-    //    released before this instance itself is destroyed.
-    [[maybe_unused]] auto context = std::move(mIterator->second);
-
-    // Complete the download.
-    completed(std::unique_lock(mContext.mDownloadingLock), result);
-}
-
 auto FileRangeContext::data(const void* buffer,
-                            std::uint64_t,
+                            std::uint64_t offset,
                             std::uint64_t length,
                             const Speeds&) -> std::variant<Abort, Continue>
 {
-    // Convenience.
-    auto offset = mEnd - mIterator->first.mBegin;
-
     // Try and write data to our buffer.
-    auto [count, success] = mBuffer->write(buffer, offset, length);
+    auto [count, success] = mContext.mBuffer->write(buffer, offset, length);
 
     // Lock our manager.
     std::unique_lock lock(mContext.mDownloadingLock);
@@ -115,17 +105,17 @@ auto FileRangeContext::data(const void* buffer,
         return Continue();
 
     // Dispatch what requests we can.
-    dispatch(mIterator->first.mBegin);
+    dispatch();
 
     // Let the caller know the download should continue.
     return Continue();
 }
 
-void FileRangeContext::dispatch(const std::uint64_t begin)
+void FileRangeContext::dispatch()
 {
     // What requests might we be able to satisfy?
     auto i = mRequests.begin();
-    auto j = mRequests.upper_bound(mEnd);
+    auto j = mRequests.lower_bound(mEnd);
 
     // Dispatch as many requests as we can.
     while (i != j)
@@ -137,12 +127,12 @@ void FileRangeContext::dispatch(const std::uint64_t begin)
         auto& request = const_cast<FileReadRequest&>(*k);
 
         // Request has been dispatched.
-        if (dispatch(begin, request))
+        if (dispatch(request))
             mRequests.erase(k);
     }
 }
 
-bool FileRangeContext::dispatch(std::uint64_t begin, FileReadRequest& request)
+bool FileRangeContext::dispatch(FileReadRequest& request)
 {
     // Convenience.
     auto& range = request.mRange;
@@ -155,7 +145,7 @@ bool FileRangeContext::dispatch(std::uint64_t begin, FileReadRequest& request)
     range.mEnd = std::min(mEnd, range.mEnd);
 
     // Dispatch the request.
-    mContext.completed(displace(mBuffer, range.mBegin - begin), std::move(request));
+    mContext.completed(displace(mContext.mBuffer, range.mBegin), std::move(request));
 
     // Let the caller know the request was dispatched.
     return true;
@@ -184,7 +174,6 @@ FileRangeContext::FileRangeContext(Activity activity,
     PartialDownloadCallback(),
     mInstanceLogger("FileRangeContext", *this, logger()),
     mActivity(std::move(activity)),
-    mBuffer(),
     mCallbacks(),
     mContext(context),
     mDownload(),
@@ -206,26 +195,18 @@ void FileRangeContext::cancel()
         download->cancel();
 }
 
-auto FileRangeContext::download(Client& client,
-                                FileBufferPtr buffer,
-                                NodeHandle handle,
-                                const std::optional<NodeKeyData>& keyData) -> PartialDownloadPtr
+auto FileRangeContext::download() -> PartialDownloadPtr
 {
     // Sanity.
-    assert(buffer);
-    assert(!mBuffer);
     assert(!mDownload);
 
     // Convenience.
+    auto& client = mContext.mService.client();
+    auto& keyData = mContext.mKeyData;
+
+    auto handle = mContext.mInfo->handle();
     auto offset = mIterator->first.mBegin;
     auto length = mIterator->first.mEnd - offset;
-
-    // Assume the range isn't displaced.
-    mBuffer = std::move(buffer);
-
-    // Range is displaced.
-    if (offset)
-        mBuffer = std::make_shared<DisplacedBuffer>(std::move(mBuffer), offset);
 
     // Try and create a partial download.
     auto download = keyData ? client.partialDownload(*this, handle, *keyData, length, offset) :
@@ -251,7 +232,7 @@ void FileRangeContext::queue(FileFetchCallback callback)
 void FileRangeContext::queue(FileReadRequest request)
 {
     // Request isn't dispatchable so queue it for later execution.
-    if (!dispatch(mIterator->first.mBegin, request))
+    if (!dispatch(request))
         mRequests.emplace(std::move(request));
 }
 

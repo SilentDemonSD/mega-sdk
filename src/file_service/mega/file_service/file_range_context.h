@@ -31,9 +31,6 @@ namespace file_service
 class FileRangeContext: private common::PartialDownloadCallback
 {
     // Called when the file range has been downloaded.
-    template<typename Lock>
-    void completed(Lock&& lock, Error result);
-
     void completed(Error result) override;
 
     // Called repeatedly as data is donwloaded from the cloud.
@@ -43,12 +40,12 @@ class FileRangeContext: private common::PartialDownloadCallback
               const Speeds&) -> std::variant<Abort, Continue> override;
 
     // Dispatch zero or more read requests.
-    void dispatch(std::uint64_t begin);
+    void dispatch();
 
     // Try and dispatch the specified request.
     //
     // Returns true if the request was dispatched.
-    bool dispatch(std::uint64_t begin, FileReadRequest& request);
+    bool dispatch(FileReadRequest& request);
 
     // Called when our download's encountered a failure.
     virtual auto failed(Error result, int retries) -> std::variant<Abort, Retry> override;
@@ -58,9 +55,6 @@ class FileRangeContext: private common::PartialDownloadCallback
 
     // Keeps our manager alive until we're dead.
     common::Activity mActivity;
-
-    // The buffer containing our downloaded data.
-    BufferPtr mBuffer;
 
     // Callbacks to execute when this range's fetch completes.
     std::vector<FileFetchCallback> mCallbacks;
@@ -91,10 +85,7 @@ public:
     void cancel();
 
     // Create a download this range.
-    auto download(common::Client& client,
-                  FileBufferPtr buffer,
-                  NodeHandle handle,
-                  const std::optional<common::NodeKeyData>& keyData) -> common::PartialDownloadPtr;
+    auto download() -> common::PartialDownloadPtr;
 
     // Queue a callback for execution when this range has downloaded.
     void queue(FileFetchCallback callback);

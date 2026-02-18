@@ -82,9 +82,7 @@ class FileContext final: public std::enable_shared_from_this<FileContext>
     void cancel();
 
     // Called when a file range has been downloaded.
-    void completed(Buffer& buffer,
-                   FileRangeMap<FileRangeContextPtr>::Iterator iterator,
-                   FileRange range);
+    void completed(FileRangeMap<FileRangeContextPtr>::Iterator iterator, FileRange range);
 
     // Called when a file read request has been completed.
     void completed(BufferPtr buffer, FileReadRequest&& request);
