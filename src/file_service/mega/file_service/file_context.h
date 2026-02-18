@@ -49,10 +49,12 @@ namespace mega
 namespace file_service
 {
 
-class FileContext final: FileRangeContextManager, public std::enable_shared_from_this<FileContext>
+class FileContext final: public std::enable_shared_from_this<FileContext>
 {
     // Tracks state necessary for fetch.
     class FetchContext;
+
+    friend class FileRangeContext;
 
     // Tracks state necessary for flush.
     class FlushContext;
@@ -79,12 +81,10 @@ class FileContext final: FileRangeContextManager, public std::enable_shared_from
     void cancel();
 
     // Called when a file range has been downloaded.
-    void completed(Buffer& buffer,
-                   FileRangeContextPtrMap::Iterator iterator,
-                   FileRange range) override;
+    void completed(Buffer& buffer, FileRangeContextPtrMap::Iterator iterator, FileRange range);
 
     // Called when a file read request has been completed.
-    void completed(BufferPtr buffer, FileReadRequest&& request) override;
+    void completed(BufferPtr buffer, FileReadRequest&& request);
 
     // Called when a file request has been completed.
     template<typename Request, typename Result, typename... Captures>
@@ -107,9 +107,6 @@ class FileContext final: FileRangeContextManager, public std::enable_shared_from
     // Check if a particular class of request can be executed.
     bool executable(std::unique_lock<std::mutex>& lock, bool queuing, FileReadRequestTag tag);
     bool executable(std::unique_lock<std::mutex>& lock, bool queuing, FileWriteRequestTag tag);
-
-    // Called to execute an arbitrary function on the service's thread pool.
-    void execute(std::function<void()> function) override;
 
     // Try and execute an append request.
     void execute(FileAppendRequest& request);
@@ -152,21 +149,9 @@ class FileContext final: FileRangeContextManager, public std::enable_shared_from
     void executed(FileReadRequestTag tag);
     void executed(FileWriteRequestTag tag);
 
-    // Called when a file read request has failed.
-    void failed(FileReadRequest&& request, FileResult result) override;
-
     // Increase this file's size.
     auto grow(std::uint64_t newSize, std::uint64_t oldSize)
         -> std::pair<common::UniqueLock<common::Database>, common::Transaction>;
-
-    // Acquire a lock on this manager.
-    std::unique_lock<std::recursive_mutex> lock() const override;
-
-    // Return a reference to the mutex protecting this manager.
-    std::recursive_mutex& mutex() const override;
-
-    // Retrieve a copy of the service's current options.
-    FileServiceOptions options() const override;
 
     // Queue a request for later execution.
     template<typename Request>

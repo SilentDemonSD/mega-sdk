@@ -4,11 +4,13 @@
 #include <mega/file_service/buffer.h>
 #include <mega/file_service/displaced_buffer.h>
 #include <mega/file_service/file_buffer.h>
+#include <mega/file_service/file_context.h>
 #include <mega/file_service/file_range.h>
 #include <mega/file_service/file_range_context.h>
 #include <mega/file_service/file_range_context_manager.h>
 #include <mega/file_service/file_read_request.h>
 #include <mega/file_service/file_result.h>
+#include <mega/file_service/file_service_context.h>
 #include <mega/file_service/file_service_options.h>
 #include <mega/file_service/memory_buffer.h>
 #include <mega/types.h>
@@ -30,13 +32,13 @@ void FileRangeContext::completed([[maybe_unused]] Lock&& lock, Error result)
 {
     // Sanity.
     assert(lock.owns_lock());
-    assert(lock.mutex() == &mManager.mutex());
+    assert(lock.mutex() == &mContext.mRangesLock);
 
     // Convenience.
     FileRange range(mIterator->first.mBegin, mEnd);
 
     // Let the manager know this download has completed.
-    mManager.completed(*mBuffer, mIterator, range);
+    mContext.completed(*mBuffer, mIterator, range);
 
     // Complete as many requests as we can.
     dispatch(range.mBegin);
@@ -54,7 +56,7 @@ void FileRangeContext::completed([[maybe_unused]] Lock&& lock, Error result)
             auto& request = const_cast<FileReadRequest&>(*i);
 
             // Fail the request.
-            mManager.failed(std::move(request), result_);
+            mContext.completed(std::move(request), result_);
 
             // Remove the request from our set.
             i = mRequests.erase(i);
@@ -63,7 +65,7 @@ void FileRangeContext::completed([[maybe_unused]] Lock&& lock, Error result)
 
     // Let any waiters know this range's download has completed.
     for (auto& callback: mCallbacks)
-        mManager.execute(std::bind(std::move(callback), result_));
+        mContext.mService.execute(std::bind(std::move(callback), result_));
 }
 
 void FileRangeContext::completed(Error result)
@@ -80,7 +82,7 @@ void FileRangeContext::completed(Error result)
     [[maybe_unused]] auto context = std::move(mIterator->second);
 
     // Complete the download.
-    completed(mManager.lock(), result);
+    completed(std::unique_lock(mContext.mRangesLock), result);
 }
 
 auto FileRangeContext::data(const void* buffer,
@@ -95,7 +97,7 @@ auto FileRangeContext::data(const void* buffer,
     auto [count, success] = mBuffer->write(buffer, offset, length);
 
     // Lock our manager.
-    auto lock = mManager.lock();
+    std::unique_lock lock(mContext.mRangesLock);
 
     // Bump our buffer iterator.
     mEnd += count;
@@ -154,7 +156,7 @@ bool FileRangeContext::dispatch(std::uint64_t begin, FileReadRequest& request)
     range.mEnd = std::min(mEnd, range.mEnd);
 
     // Dispatch the request.
-    mManager.completed(
+    mContext.completed(
         [&]() -> BufferPtr
         {
             if (auto displacement = range.mBegin - begin)
@@ -175,7 +177,7 @@ auto FileRangeContext::failed(Error result, int retries) -> std::variant<Abort, 
         return Abort();
 
     // Convenience.
-    auto options = mManager.options();
+    auto options = mContext.mService.options();
 
     // Or if we've already retried the download too many times.
     if (static_cast<std::uint64_t>(retries) >= options.mMaximumRangeRetries)
@@ -186,17 +188,17 @@ auto FileRangeContext::failed(Error result, int retries) -> std::variant<Abort, 
 }
 
 FileRangeContext::FileRangeContext(Activity activity,
-                                   FileRangeContextPtrMap::Iterator iterator,
-                                   FileRangeContextManager& manager):
+                                   FileContext& context,
+                                   FileRangeContextPtrMap::Iterator iterator):
     PartialDownloadCallback(),
     mInstanceLogger("FileRangeContext", *this, logger()),
     mActivity(std::move(activity)),
     mBuffer(),
     mCallbacks(),
+    mContext(context),
     mDownload(),
     mEnd(iterator->first.mBegin),
     mIterator(iterator),
-    mManager(manager),
     mRequests()
 {}
 

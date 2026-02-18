@@ -9,6 +9,7 @@
 #include <mega/file_service/buffer_pointer.h>
 #include <mega/file_service/file_buffer_pointer.h>
 #include <mega/file_service/file_callbacks.h>
+#include <mega/file_service/file_context_forward.h>
 #include <mega/file_service/file_range_context_forward.h>
 #include <mega/file_service/file_range_context_manager_forward.h>
 #include <mega/file_service/file_range_context_pointer_map.h>
@@ -65,6 +66,9 @@ class FileRangeContext: private common::PartialDownloadCallback
     // Callbacks to execute when this range's fetch completes.
     std::vector<FileFetchCallback> mCallbacks;
 
+    // Which file is responsible for this context?
+    FileContext& mContext;
+
     // The download that's retrieving this file range's data.
     common::PartialDownloadPtr mDownload;
 
@@ -74,16 +78,13 @@ class FileRangeContext: private common::PartialDownloadCallback
     // Where are we in our manager's map of contexts?
     FileRangeContextPtrMap::Iterator mIterator;
 
-    // Who's responsible for this context?
-    FileRangeContextManager& mManager;
-
     // Requests pending completion.
     FileReadRequestSet mRequests;
 
 public:
     FileRangeContext(common::Activity activity,
-                     FileRangeContextPtrMap::Iterator iterator,
-                     FileRangeContextManager& manager);
+                     FileContext& context,
+                     FileRangeContextPtrMap::Iterator iterator);
 
     ~FileRangeContext();
 

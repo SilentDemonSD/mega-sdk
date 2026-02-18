@@ -582,22 +582,6 @@ bool FileContext::executable([[maybe_unused]] std::unique_lock<std::mutex>& lock
     return mReadWriteState.write();
 }
 
-void FileContext::execute(std::function<void()> function)
-{
-    // Sanity.
-    assert(function);
-
-    // Wrap the caller's function.
-    auto wrapper = [function = std::move(function)](auto&)
-    {
-        // Execute the caller's function.
-        function();
-    }; // wrapper
-
-    // Queue function for execution on the service's thread pool.
-    mService.execute(std::move(wrapper));
-}
-
 void FileContext::execute(FileAppendRequest& request)
 {
     // Convenience.
@@ -907,7 +891,7 @@ void FileContext::execute(FileReadRequest& request)
         auto& context = iterator->second;
 
         // Instantiate a context to track the range's download.
-        context.reset(new FileRangeContext(mActivities.begin(), iterator, *this));
+        context.reset(new FileRangeContext(mActivities.begin(), *this, iterator));
 
         // Return a reference to the context to our caller.
         return context.get();
@@ -1355,12 +1339,6 @@ void FileContext::executed(FileWriteRequestTag)
     mReadWriteState.writeCompleted();
 }
 
-void FileContext::failed(FileReadRequest&& request, FileResult result)
-{
-    // Delegate to template function.
-    completed<>(std::move(request), result);
-}
-
 auto FileContext::grow(std::uint64_t newSize, std::uint64_t oldSize)
     -> std::pair<UniqueLock<Database>, Transaction>
 {
@@ -1403,21 +1381,6 @@ auto FileContext::grow(std::uint64_t newSize, std::uint64_t oldSize)
 
     // Return the transaction to our caller.
     return std::make_pair(std::move(databaseLock), std::move(transaction));
-}
-
-std::unique_lock<std::recursive_mutex> FileContext::lock() const
-{
-    return std::unique_lock(mRangesLock);
-}
-
-std::recursive_mutex& FileContext::mutex() const
-{
-    return mRangesLock;
-}
-
-FileServiceOptions FileContext::options() const
-{
-    return mService.options();
 }
 
 template<typename Request>
@@ -1609,7 +1572,6 @@ FileContext::FileContext(Activity activity,
                          std::optional<NodeKeyData> keyData,
                          const FileRangeVector& ranges,
                          FileServiceContext& service):
-    FileRangeContextManager(),
     enable_shared_from_this(),
     mInstanceLogger("FileContext", *this, logger()),
     mActivity(std::move(activity)),
