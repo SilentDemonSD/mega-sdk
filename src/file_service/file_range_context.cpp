@@ -1,6 +1,9 @@
 #include <mega/common/client.h>
+#include <mega/common/database.h>
 #include <mega/common/expected.h>
 #include <mega/common/partial_download.h>
+#include <mega/common/scoped_query.h>
+#include <mega/common/transaction.h>
 #include <mega/file_service/buffer.h>
 #include <mega/file_service/displaced_buffer.h>
 #include <mega/file_service/file_buffer.h>
@@ -27,7 +30,7 @@ using namespace common;
 // Check if result is a retryable error.
 static bool retryable(const Error& result);
 
-void FileRangeContext::completed(Error result)
+void FileRangeContext::completed(Error error)
 {
     // Get a reference to our context.
     //
@@ -43,20 +46,14 @@ void FileRangeContext::completed(Error result)
     // Acquire lock on our file's map of downloading ranges.
     std::unique_lock lock(mContext.mDownloadingLock);
 
-    // Convenience.
-    FileRange range(mIterator->first.mBegin, mEnd);
+    // Remove ourselves from our file's map of downloading ranges.
+    mContext.mDownloading.remove(mIterator);
 
-    // Let the manager know this download has completed.
-    mContext.completed(mIterator, range);
-
-    // Complete as many requests as we can.
-    dispatch();
-
-    // Translate SDK result.
-    auto result_ = fileResultFromError(result);
+    // Translate SDK error code to a file result.
+    auto result = fileResultFromError(error);
 
     // Download didn't complete successfully.
-    if (result_ != FILE_SUCCESS)
+    if (result != FILE_SUCCESS)
     {
         // Fail any remaining requests.
         for (auto i = mRequests.begin(); i != mRequests.end();)
@@ -65,7 +62,7 @@ void FileRangeContext::completed(Error result)
             auto& request = const_cast<FileReadRequest&>(*i);
 
             // Fail the request.
-            mContext.completed(std::move(request), result_);
+            mContext.completed(std::move(request), result);
 
             // Remove the request from our set.
             i = mRequests.erase(i);
@@ -74,7 +71,7 @@ void FileRangeContext::completed(Error result)
 
     // Let any waiters know this range's download has completed.
     for (auto& callback: mCallbacks)
-        mContext.mService.execute(std::bind(std::move(callback), result_));
+        mContext.mService.execute(std::bind(std::move(callback), result));
 }
 
 auto FileRangeContext::data(const void* buffer,
@@ -82,32 +79,92 @@ auto FileRangeContext::data(const void* buffer,
                             std::uint64_t length,
                             const Speeds&) -> std::variant<Abort, Continue>
 {
-    // Try and write data to our buffer.
-    auto [count, success] = mContext.mBuffer->write(buffer, offset, length);
+    // Records how much data we could write to disk.
+    std::uint64_t count;
 
-    // Lock our manager.
-    std::unique_lock lock(mContext.mDownloadingLock);
+    // Try and write data to disk.
+    try
+    {
+        // Acquire on disk map lock.
+        std::lock_guard onDiskLock(mContext.mOnDiskLock);
 
-    // Bump our buffer iterator.
+        // Try and write data to our buffer.
+        std::tie(count, std::ignore) = mContext.mBuffer->write(buffer, offset, length);
+
+        // Couldn't write any data to disk.
+        if (!count)
+            return Abort();
+
+        // Convenience.
+        auto& onDisk = mContext.mOnDisk;
+
+        // The range we've written.
+        FileRange range(offset, offset + count);
+
+        // Is this write appending data to a range on our left?
+        auto left = onDisk.endsAt(offset);
+
+        // Write is appending data to the range on our left.
+        if (left != onDisk.end())
+            range.mBegin = left->mBegin;
+
+        // Is this write prepending data to a range on our right?
+        auto right = onDisk.beginsAt(range.mEnd);
+
+        // Write is prepending data to the right on our right.
+        if (right != onDisk.end())
+            range.mEnd = right->mEnd;
+
+        // Convenience.
+        auto& database = mContext.mService.database();
+
+        // Acquire database lock.
+        std::lock_guard databaseLock(database);
+
+        // Begin a transaction so we can safely modify the database.
+        auto transaction = database.transaction();
+
+        // Remove obsolete ranges from the database.
+        mContext.removeRanges(range, transaction);
+
+        // Add our new range to the database.
+        mContext.addRange(range, transaction);
+
+        // Update the file's size.
+        mContext.updateSize(mContext.mInfo->size(), transaction);
+
+        // Persist database changes.
+        transaction.commit();
+
+        // Remove obsolete ranges from memory.
+        if (left != onDisk.end())
+            onDisk.remove(left);
+
+        if (right != onDisk.end())
+            onDisk.remove(right);
+
+        // Add the new range in memory.
+        onDisk.add(range);
+    }
+    catch (std::runtime_error&)
+    {
+        return Abort();
+    }
+
+    // Acquire downloading map lock.
+    std::unique_lock downloadingLock(mContext.mDownloadingLock);
+
+    // Bump our end position.
     mEnd += count;
 
-    // Couldn't write all of the data to our buffer.
-    if (!success)
-        return Abort();
-
-    // Don't dispatch any requests here if this is the last piece of the
-    // file. Instead, dispatch them when the download is completed.
-    //
-    // This is necessary to stabilize the integration tests as they expect
-    // all necessary processing to have completed by the time any final read
-    // callbacks have been executed.
-    if (mEnd == mIterator->first.mEnd)
-        return Continue();
-
-    // Dispatch what requests we can.
+    // Dispatch any requests that can now be satisfied.
     dispatch();
 
-    // Let the caller know the download should continue.
+    // Couldn't write all of the data to disk.
+    if (count < length)
+        return Abort();
+
+    // Continue the download.
     return Continue();
 }
 

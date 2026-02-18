@@ -81,9 +81,6 @@ class FileContext final: public std::enable_shared_from_this<FileContext>
     // Cancel any downloads and pending requests.
     void cancel();
 
-    // Called when a file range has been downloaded.
-    void completed(FileRangeMap<FileRangeContextPtr>::Iterator iterator, FileRange range);
-
     // Called when a file read request has been completed.
     void completed(BufferPtr buffer, FileReadRequest&& request);
 
@@ -228,7 +225,7 @@ class FileContext final: public std::enable_shared_from_this<FileContext>
     FileRangeSet mOnDisk;
 
     // Serializes access to mOnDisk.
-    std::recursive_mutex mOnDiskLock;
+    mutable std::recursive_mutex mOnDiskLock;
 
     // Tracks whether any reads or writes are in progress.
     FileReadWriteState mReadWriteState;
