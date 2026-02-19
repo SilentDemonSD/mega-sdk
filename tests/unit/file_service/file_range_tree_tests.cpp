@@ -1,6 +1,10 @@
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include <mega/file_service/file_range.h>
 #include <mega/file_service/file_range_map.h>
 #include <mega/file_service/file_range_set.h>
+#include <mega/file_service/file_range_tree_utilities.h>
+#include <mega/file_service/file_range_vector.h>
 #include <mega/file_service/testing/unit/avl_utilities.h>
 
 #include <cstdlib>
@@ -437,6 +441,67 @@ void testAdd(AddFunction&& add)
     EXPECT_EQ(iterator->mBegin, 4);
     EXPECT_EQ(iterator->mEnd, 6);
     EXPECT_EQ(set.size(), 4u);
+}
+
+struct FileRangeGapIteratorTests: ::testing::Test
+{
+    FileRangeSet mRanges;
+
+    FileRangeGapIteratorTests():
+        mRanges()
+    {
+        // Populate ranges.
+        mRanges.add(16u, 24u);
+        mRanges.add(32u, 40u);
+        mRanges.add(48u, 56u);
+    }
+
+    // Return all gaps in ranges between begin and end.
+    FileRangeVector gaps(std::uint64_t begin, std::uint64_t end)
+    {
+        auto i = file_service::gaps(mRanges, begin, end);
+        return FileRangeVector(i, i.end());
+    };
+}; // FileRangeGapIteratorTests
+
+// Convenience.
+using ::testing::ElementsAre;
+
+TEST_F(FileRangeGapIteratorTests, all_gaps_between_middle_of_two_gaps)
+{
+    EXPECT_THAT(gaps(30, 44), ElementsAre(FileRange(30, 32), FileRange(40, 44)));
+}
+
+TEST_F(FileRangeGapIteratorTests, all_gaps_from_middle_of_first_range)
+{
+    EXPECT_THAT(gaps(20, 64), ElementsAre(FileRange(24, 32), FileRange(40, 48), FileRange(56, 64)));
+}
+
+TEST_F(FileRangeGapIteratorTests, all_gaps_up_to_middle_of_last_range)
+{
+    EXPECT_THAT(gaps(0, 50), ElementsAre(FileRange(0, 16), FileRange(24, 32), FileRange(40, 48)));
+}
+
+TEST_F(FileRangeGapIteratorTests, all_gaps_within_larger_bounding_range)
+{
+    EXPECT_THAT(
+        gaps(0, 64),
+        ElementsAre(FileRange(0, 16), FileRange(24, 32), FileRange(40, 48), FileRange(56, 64)));
+}
+
+TEST_F(FileRangeGapIteratorTests, all_gaps_within_minimum_bounding_range)
+{
+    EXPECT_THAT(gaps(16, 56), ElementsAre(FileRange(24, 32), FileRange(40, 48)));
+}
+
+TEST_F(FileRangeGapIteratorTests, no_gaps)
+{
+    EXPECT_THAT(gaps(16, 24), ElementsAre());
+}
+
+TEST_F(FileRangeGapIteratorTests, no_ranges)
+{
+    EXPECT_THAT(gaps(64, 128), ElementsAre(FileRange(64, 128)));
 }
 
 } // file_service

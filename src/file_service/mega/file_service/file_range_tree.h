@@ -2,6 +2,7 @@
 
 #include <mega/file_service/avl_tree.h>
 #include <mega/file_service/file_range.h>
+#include <mega/file_service/file_range_tree_forward.h>
 #include <mega/file_service/file_range_tree_traits.h>
 #include <mega/file_service/type_traits.h>
 

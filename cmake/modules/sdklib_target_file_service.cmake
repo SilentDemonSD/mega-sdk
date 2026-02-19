@@ -109,8 +109,10 @@ target_sources(SDKlib PRIVATE
                       src/file_service/mega/file_service/file_range_set.h
                       src/file_service/mega/file_service/file_range_traits.h
                       src/file_service/mega/file_service/file_range_tree.h
+                      src/file_service/mega/file_service/file_range_tree_forward.h
                       src/file_service/mega/file_service/file_range_tree_node.h
                       src/file_service/mega/file_service/file_range_tree_traits.h
+                      src/file_service/mega/file_service/file_range_tree_utilities.h
                       src/file_service/mega/file_service/file_read_request.h
                       src/file_service/mega/file_service/file_read_request_forward.h
                       src/file_service/mega/file_service/file_read_request_set.h

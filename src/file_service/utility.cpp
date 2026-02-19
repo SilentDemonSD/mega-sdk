@@ -3,6 +3,7 @@
 #include <mega/file_service/file_result_or.h>
 #include <mega/file_service/file_stream_result.h>
 #include <mega/file_service/source.h>
+#include <mega/file_service/utility.h>
 
 #include <cassert>
 #include <memory>
