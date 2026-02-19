@@ -62,7 +62,7 @@ TEST(FileRangeMapTests, add)
     EXPECT_EQ(iterator->second.mValue, 1);
 }
 
-TEST(FileRangeSet, add)
+TEST(FileRangeSetTests, add)
 {
     auto add = [](FileRangeSet& set, const FileRange& range)
     {
@@ -72,7 +72,7 @@ TEST(FileRangeSet, add)
     EXPECT_NO_FATAL_FAILURE(testAdd(std::move(add)));
 }
 
-TEST(FileRangeSet, constructor)
+TEST(FileRangeSetTests, constructor)
 {
     FileRangeSet set;
 
@@ -82,7 +82,7 @@ TEST(FileRangeSet, constructor)
     EXPECT_EQ(set.size(), 0u);
 }
 
-TEST(FileRangeSet, copy_assignment)
+TEST(FileRangeSetTests, copy_assignment)
 {
     FileRangeSet set0;
 
@@ -113,7 +113,7 @@ TEST(FileRangeSet, copy_assignment)
     EXPECT_TRUE(set1.empty());
 }
 
-TEST(FileRangeSet, copy_constructor)
+TEST(FileRangeSetTests, copy_constructor)
 {
     FileRangeSet set0;
 
@@ -134,7 +134,7 @@ TEST(FileRangeSet, copy_constructor)
     EXPECT_EQ(set0, set1);
 }
 
-TEST(FileRangeSet, find)
+TEST(FileRangeSetTests, find)
 {
     FileRangeSet set;
 
@@ -193,7 +193,7 @@ TEST(FileRangeSet, find)
     EXPECT_EQ(++m, n);
 }
 
-TEST(FileRangeSet, iteration)
+TEST(FileRangeSetTests, iteration)
 {
     // The ranges that we'll be adding to our set.
     std::vector<FileRange> ranges = {{0, 1}, {1, 2}, {2, 3}};
@@ -221,7 +221,7 @@ TEST(FileRangeSet, iteration)
     EXPECT_EQ(m, n);
 }
 
-TEST(FileRangeSet, move_assignment)
+TEST(FileRangeSetTests, move_assignment)
 {
     FileRangeSet set0;
     FileRangeSet set1;
@@ -259,7 +259,7 @@ TEST(FileRangeSet, move_assignment)
     EXPECT_EQ(set0, set2);
 }
 
-TEST(FileRangeSet, move_constructor)
+TEST(FileRangeSetTests, move_constructor)
 {
     FileRangeSet set0;
     FileRangeSet set1;
@@ -289,7 +289,7 @@ TEST(FileRangeSet, move_constructor)
     EXPECT_EQ(set1, set2);
 }
 
-TEST(FileRangeSet, remove_contained)
+TEST(FileRangeSetTests, remove_contained)
 {
     FileRangeSet set;
 
@@ -315,7 +315,7 @@ TEST(FileRangeSet, remove_contained)
     EXPECT_EQ(set.size(), 0u);
 }
 
-TEST(FileRangeSet, remove_multiple)
+TEST(FileRangeSetTests, remove_multiple)
 {
     FileRangeSet set;
 
@@ -335,7 +335,7 @@ TEST(FileRangeSet, remove_multiple)
     EXPECT_EQ(set.size(), 1u);
 }
 
-TEST(FileRangeSet, remove_single)
+TEST(FileRangeSetTests, remove_single)
 {
     FileRangeSet set;
 
@@ -361,7 +361,7 @@ TEST(FileRangeSet, remove_single)
     EXPECT_EQ(set.size(), 0u);
 }
 
-TEST(FileRangeSet, tryAdd)
+TEST(FileRangeSetTests, tryAdd)
 {
     auto tryAdd = [](FileRangeSet& set, const FileRange& range)
     {
