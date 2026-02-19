@@ -40,7 +40,7 @@ static_assert(std::is_copy_constructible_v<FileRangeMap<int>>);
 static_assert(!std::is_copy_assignable_v<FileRangeMap<NoCopyMove>>);
 static_assert(!std::is_copy_constructible_v<FileRangeMap<NoCopyMove>>);
 
-TEST(FileRangeMap, add)
+TEST(FileRangeMapTests, add)
 {
     FileRangeMap<NoCopyMove> map;
 
