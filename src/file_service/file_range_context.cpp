@@ -47,8 +47,8 @@ void FileRangeContext::completed(Error error)
     // Acquire lock.
     std::lock_guard guard(mContext.mLock);
 
-    // What range were we downloading?
-    auto range = mIterator->first;
+    // What part of our original range do we still need to download?
+    FileRange range(mEnd, mIterator->first.mEnd);
 
     // Remove ourselves from our file's map of downloading ranges.
     mContext.mDownloading.remove(mIterator);
@@ -58,26 +58,7 @@ void FileRangeContext::completed(Error error)
 
     // Download didn't complete successfully.
     if (result != FILE_SUCCESS)
-    {
-        // Convenience.
-        auto& requests = mContext.mPendingReadRequests;
-
-        auto i = requests.lower_bound(mEnd);
-        auto j = requests.lower_bound(range.mEnd);
-
-        // Fail any remaining requests.
-        while (i != j)
-        {
-            // Convenience.
-            auto& request = const_cast<FileReadRequest&>(*i);
-
-            // Fail the request.
-            mContext.completed(std::move(request), result);
-
-            // Remove the request from our set.
-            i = requests.erase(i);
-        }
-    }
+        mContext.failed(range, result);
 
     // Convenience.
     auto& executor = mContext.mService.executor();
@@ -155,7 +136,7 @@ try
     onDisk.add(range);
 
     // Dispatch requests we can now satisfy.
-    dispatch(range.mBegin, range.mEnd);
+    mContext.completed(range);
 
     // Bump our end position.
     mEnd += count;
@@ -171,49 +152,6 @@ try
 catch (std::runtime_error&)
 {
     return Abort();
-}
-
-void FileRangeContext::dispatch(std::uint64_t begin, std::uint64_t end)
-{
-    // Convenience,
-    auto& requests = mContext.mPendingReadRequests;
-
-    // What requests might we be able to satisfy?
-    auto i = requests.lower_bound(begin);
-    auto j = requests.lower_bound(end);
-
-    // Dispatch as many requests as we can.
-    while (i != j)
-    {
-        // Copying the iterator keeps logic clean.
-        auto k = i++;
-
-        // Evil but necessary.
-        auto& request = const_cast<FileReadRequest&>(*k);
-
-        // Request has been dispatched.
-        if (dispatch(end, request))
-            requests.erase(k);
-    }
-}
-
-bool FileRangeContext::dispatch(std::uint64_t end, FileReadRequest& request)
-{
-    // Convenience.
-    auto& range = request.mRange;
-
-    // Can't dispatch this request.
-    if (range.mBegin >= end)
-        return false;
-
-    // Clamp the range as necessary.
-    range.mEnd = std::min(end, range.mEnd);
-
-    // Dispatch the request.
-    mContext.completed(displace(mContext.mBuffer, range.mBegin), std::move(request));
-
-    // Let the caller know the request was dispatched.
-    return true;
 }
 
 auto FileRangeContext::failed(Error result, int retries) -> std::variant<Abort, Retry>
@@ -283,17 +221,15 @@ auto FileRangeContext::download() -> PartialDownloadPtr
     return mDownload;
 }
 
+std::uint64_t FileRangeContext::end() const
+{
+    return mEnd;
+}
+
 void FileRangeContext::queue(FileFetchCallback callback)
 {
     // Queue the callback for later execution.
     mCallbacks.emplace_back(std::move(callback));
-}
-
-void FileRangeContext::queue(FileReadRequest request)
-{
-    // Request isn't dispatchable so queue it for later execution.
-    if (!dispatch(mEnd, request))
-        mContext.mPendingReadRequests.emplace(std::move(request));
 }
 
 bool retryable(const Error& result)

@@ -39,14 +39,6 @@ class FileRangeContext: private common::PartialDownloadCallback
               std::uint64_t length,
               const Speeds&) -> std::variant<Abort, Continue> override;
 
-    // Dispatch zero or more read requests.
-    void dispatch(std::uint64_t begin, std::uint64_t end);
-
-    // Try and dispatch the specified request.
-    //
-    // Returns true if the request was dispatched
-    bool dispatch(std::uint64_t end, FileReadRequest& request);
-
     // Called when our download's encountered a failure.
     virtual auto failed(Error result, int retries) -> std::variant<Abort, Retry> override;
 
@@ -84,11 +76,11 @@ public:
     // Create a download this range.
     auto download() -> common::PartialDownloadPtr;
 
+    // Where does our downloaded data currently end?
+    std::uint64_t end() const;
+
     // Queue a callback for execution when this range has downloaded.
     void queue(FileFetchCallback callback);
-
-    // Queue a file read request for later completion.
-    void queue(FileReadRequest request);
 }; // FileRangeContext
 
 } // file_service

@@ -92,6 +92,9 @@ class FileContext final: public std::enable_shared_from_this<FileContext>
     auto completed(Request&& request, Result result, Captures&&... captures)
         -> std::enable_if_t<IsFileRequestV<Request>>;
 
+    // Called to complete all file read requests within range.
+    void completed(const FileRange& range);
+
     // Called when a file write request has been completed.
     void completed(FileWriteRequest&& request);
 
@@ -101,6 +104,10 @@ class FileContext final: public std::enable_shared_from_this<FileContext>
 
     // Called when a request has been dequeued.
     void dequeued(std::unique_lock<std::mutex> lock, const FileRequest& request);
+
+    // Dispatch all read requests within range.
+    template<typename Dispatcher>
+    void dispatch(Dispatcher&& dispatcher, const FileRange& range);
 
     // Check if a request can be executed.
     bool executable(std::unique_lock<std::mutex>& lock, bool queuing, const FileRequest& request);
@@ -149,6 +156,9 @@ class FileContext final: public std::enable_shared_from_this<FileContext>
     // Called when a request of a particular class has executed.
     void executed(FileReadRequestTag tag);
     void executed(FileWriteRequestTag tag);
+
+    // Called to fail all read requests within range.
+    void failed(const FileRange& range, FileResult result);
 
     // Increase this file's size.
     auto grow(std::uint64_t newSize, std::uint64_t oldSize)

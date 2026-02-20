@@ -393,6 +393,23 @@ auto FileContext::completed(Request&& request, Result result, Captures&&... capt
                      true);
 }
 
+void FileContext::completed(const FileRange& range)
+{
+    dispatch(
+        [this](auto end, auto& request)
+        {
+            // Clamp the read as necessary.
+            request.mRange.mEnd = std::min(end, request.mRange.mEnd);
+
+            // Displace the file's buffer as necessary.
+            auto buffer = displace(mBuffer, request.mRange.mBegin);
+
+            // Complete the request.
+            completed(std::move(buffer), std::move(request));
+        },
+        range);
+}
+
 void FileContext::completed(FileWriteRequest&& request)
 {
     // Convenience.
@@ -430,6 +447,24 @@ void FileContext::dequeued(std::unique_lock<std::mutex> lock, const FileRequest&
             this->dequeued(std::move(lock), tag(request));
         },
         request);
+}
+
+template<typename Dispatcher>
+void FileContext::dispatch(Dispatcher&& dispatcher, const FileRange& range)
+{
+    // What requests might we be able to satisfy?
+    auto i = mPendingReadRequests.lower_bound(range.mBegin);
+    auto j = mPendingReadRequests.lower_bound(range.mEnd);
+
+    // Dispatch as many requests as we can.
+    while (i != j)
+    {
+        // Dispatch the request.
+        dispatcher(range.mEnd, const_cast<FileReadRequest&>(*i));
+
+        // Move to the next request.
+        i = mPendingReadRequests.erase(i);
+    }
 }
 
 bool FileContext::executable(std::unique_lock<std::mutex>& lock,
@@ -635,12 +670,15 @@ void FileContext::execute(FileReadRequest& request)
     // The read's contained within an existing range that is downloading.
     if (auto i = mDownloading.endsAfter(begin); i != mDownloading.end() && i->first.mBegin <= begin)
     {
-        // Range is still being downloaded.
-        if (i->second)
-            return i->second->queue(std::move(request));
+        // Wher does the range's downloaded data end?
+        auto max = i->second->end();
+
+        // Can't yet satisfy the read.
+        if (begin >= max)
+            return mPendingReadRequests.emplace(std::move(request)), void();
 
         // Clamp the read so it stays within range.
-        request.mRange.mEnd = std::min(i->first.mEnd, request.mRange.mEnd);
+        request.mRange.mEnd = std::min(request.mRange.mEnd, max);
 
         // The range can completely or partially satisfy the read.
         return completed(displace(mBuffer, begin), std::move(request));
@@ -1053,6 +1091,16 @@ void FileContext::executed(FileReadRequestTag)
 void FileContext::executed(FileWriteRequestTag)
 {
     mReadWriteState.writeCompleted();
+}
+
+void FileContext::failed(const FileRange& range, FileResult result)
+{
+    dispatch(
+        [&](auto, auto& request)
+        {
+            completed(std::move(request), result);
+        },
+        range);
 }
 
 auto FileContext::grow(std::uint64_t newSize, std::uint64_t oldSize)
