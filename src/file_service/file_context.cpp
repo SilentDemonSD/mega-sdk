@@ -516,15 +516,6 @@ void FileContext::execute(FileAppendRequest& request)
     // Acquire lock.
     std::lock_guard guard(mLock);
 
-    // Assume we can grow the last range.
-    auto candidate = mOnDisk.rbegin();
-
-    // Can grow the last range.
-    if (!mOnDisk.empty() && candidate->mEnd == size)
-        range.mBegin = candidate->mBegin;
-    else
-        candidate = mOnDisk.end();
-
     // Disambiguate.
     using file_service::write;
 
@@ -544,26 +535,14 @@ void FileContext::execute(FileAppendRequest& request)
     // Start a transaction so we can safely modify the database.
     auto transaction = database.transaction();
 
-    // Remove obsolete ranges from the database.
-    removeRanges(range, transaction);
-
-    // Add a new range to the database.
-    addRange(range, transaction);
-
     // Compute the file's new modification time.
     auto modified = now();
 
+    // Update ranges on disk and in memory.
+    updateRanges(range, transaction);
+
     // Update the file's access and modification time.
     updateAccessAndModificationTimes(modified, modified, transaction);
-
-    // Update the file's size.
-    updateSize(range.mEnd, transaction);
-
-    // Remove obsolete ranges from memory.
-    mOnDisk.remove(candidate, mOnDisk.end());
-
-    // Add new range to memory.
-    mOnDisk.add(range);
 
     // Persist our changes.
     transaction.commit();
@@ -857,9 +836,6 @@ void FileContext::execute(FileTruncateRequest& request)
     // Update the file's access and modification times in the database.
     updateAccessAndModificationTimes(modified, modified, transaction);
 
-    // Update the file's size in the database.
-    updateSize(newSize, transaction);
-
     // Persist our changes.
     transaction.commit();
 
@@ -905,60 +881,6 @@ void FileContext::execute(FileWriteRequest& request)
     range.mEnd = range.mBegin + length;
 
     // Convenience.
-    using Iterator = decltype(mOnDisk.begin());
-
-    Iterator begin;
-    Iterator end;
-
-    // Compute initial effective range.
-    FileRange effectiveRange = {std::min(mInfo->size(), range.mBegin), range.mEnd};
-
-    // Find out which ranges we've touched.
-    std::tie(begin, end) = mOnDisk.find(extend(effectiveRange, 1));
-
-    // Refine our effective range.
-    effectiveRange = [&]()
-    {
-        // Assume range has no contiguous siblings.
-        auto from = effectiveRange.mBegin;
-        auto to = effectiveRange.mEnd;
-
-        // Range has no siblings.
-        if (begin == mOnDisk.end())
-            return FileRange(from, to);
-
-        // Range has a sibling.
-        from = std::min(begin->mBegin, from);
-        to = std::max(begin->mEnd, to);
-
-        // Range has a right sibling.
-        if (end != mOnDisk.end())
-        {
-            // Clarity.
-            auto sibling = std::prev(end);
-
-            // Recompute range's end point.
-            to = std::max(sibling->mEnd, to);
-
-            // Return effective range to caller.
-            return FileRange(from, to);
-        }
-
-        // Range may have a right sibling.
-        auto candidate = mOnDisk.crbegin();
-
-        // Range doesn't have a right sibling.
-        if (candidate == mOnDisk.crend())
-            return FileRange(from, to);
-
-        // Recompute range's end point.
-        to = std::max(candidate->mEnd, to);
-
-        // Return effective range to caller.
-        return FileRange(from, to);
-    }();
-
-    // Convenience.
     auto& database = mService.database();
 
     // Acquire database lock.
@@ -967,26 +889,14 @@ void FileContext::execute(FileWriteRequest& request)
     // Start a transaction so we can safely modify the database.
     auto transaction = database.transaction();
 
-    // Remove obsolete ranges from the database.
-    removeRanges(effectiveRange, transaction);
-
-    // Add a new range to the database.
-    addRange(effectiveRange, transaction);
+    // Update ranges on disk and in memory.
+    updateRanges(range, transaction);
 
     // Compute the file's new modification time.
     auto modified = now();
 
     // Update the file's access and modification times in the database.
     updateAccessAndModificationTimes(modified, modified, transaction);
-
-    // Update the file's size in the database.
-    updateSize(std::max(mInfo->size(), effectiveRange.mEnd), transaction);
-
-    // Remove obsolete ranges from memory.
-    mOnDisk.remove(begin, end);
-
-    // Add our new range to memory.
-    mOnDisk.add(effectiveRange);
 
     // Persist our changes.
     transaction.commit();
@@ -1118,30 +1028,8 @@ auto FileContext::grow(std::uint64_t newSize, std::uint64_t oldSize)
     // So we can safely modify the database.
     auto transaction = database.transaction();
 
-    // Get our hands on this file's last range.
-    auto last = mOnDisk.rbegin();
-
-    // Assume the file has no range for us to enlarge.
-    FileRange range(oldSize, newSize);
-
-    // File has a range we can enlarge.
-    if (last != mOnDisk.rend() && last->mEnd == oldSize)
-    {
-        // Remove the range from the database.
-        removeRanges(*last, transaction);
-
-        // Tweak our range.
-        range.mBegin = last->mBegin;
-
-        // Remove the range from memory.
-        mOnDisk.remove(last);
-    }
-
-    // (Re)?add the range to the database.
-    addRange(range, transaction);
-
-    // (Re)?add the range to memory.
-    mOnDisk.add(range);
+    // Update the file's ranges on disk and in memory.
+    updateRanges(FileRange(oldSize, newSize), transaction);
 
     // Return the transaction to our caller.
     return std::make_pair(std::move(databaseLock), std::move(transaction));
@@ -1285,6 +1173,9 @@ auto FileContext::shrink(std::uint64_t newSize, std::uint64_t oldSize)
     // Remove affected ranges from the database.
     removeRanges(range, transaction);
 
+    // Update the file's size in the database.
+    updateSize(newSize, transaction);
+
     // Remove affected ranges from memory.
     mOnDisk.remove(begin, mOnDisk.end());
 
@@ -1316,6 +1207,79 @@ void FileContext::updateAccessAndModificationTimes(std::int64_t accessed,
     query.param(":id").set(mInfo->id());
 
     query.execute();
+}
+
+FileRange FileContext::updateRanges(FileRange range, Transaction& transaction)
+try
+{
+    // Convenience.
+    auto& [from, to] = range;
+
+    // Compute initial effective range.
+    from = std::min(from, mInfo->size());
+
+    // What ranges did our write touch?
+    auto [begin, end] = mOnDisk.find(extend(range, 1));
+
+    // Calculate our effective range.
+    do
+    {
+        // Range has no siblings.
+        if (begin == mOnDisk.end())
+            break;
+
+        // Range has a sibling.
+        from = std::min(begin->mBegin, from);
+        to = std::max(begin->mEnd, to);
+
+        // Range has a right sibling.
+        if (end != mOnDisk.end())
+        {
+            // Recompute range's end point.
+            to = std::max(std::prev(end)->mEnd, to);
+            break;
+        }
+
+        // Range may have a right sibling.
+        auto candidate = mOnDisk.crbegin();
+
+        // Range doesn't have a right sibling.
+        if (candidate == mOnDisk.crend())
+            break;
+
+        // Recompute range's end point.
+        to = std::max(candidate->mEnd, to);
+    }
+    while (0);
+
+    // Remove obsolete ranges from the database.
+    removeRanges(range, transaction);
+
+    // Add our new range to the database.
+    addRange(range, transaction);
+
+    // Update the file's size in the database.
+    updateSize(std::max(mInfo->size(), to), transaction);
+
+    // Remove obsolete ranges from memory.
+    mOnDisk.remove(begin, end);
+
+    // Add our new range to memory.
+    mOnDisk.add(range);
+
+    // Return effective range to our caller.
+    return range;
+}
+
+catch (std::runtime_error& exception)
+{
+    // Let debuggers know what went wrong.
+    FSErrorF("Couldn't update range in database: %s: %s",
+             toString(range).c_str(),
+             exception.what());
+
+    // Propagate the original exception.
+    throw;
 }
 
 void FileContext::updateSize(std::uint64_t size, Transaction& transaction)

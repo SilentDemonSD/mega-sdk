@@ -192,6 +192,9 @@ class FileContext final: public std::enable_shared_from_this<FileContext>
                                           std::int64_t modified,
                                           common::Transaction& transaction);
 
+    // Called after a range has been written to disk.
+    FileRange updateRanges(FileRange range, common::Transaction& transaction);
+
     // Update the file's sizes in the database.
     void updateSize(std::uint64_t size, common::Transaction& transaction);
 

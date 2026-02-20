@@ -16,6 +16,7 @@
 #include <mega/file_service/file_result.h>
 #include <mega/file_service/file_service_context.h>
 #include <mega/file_service/file_service_options.h>
+#include <mega/file_service/logging.h>
 #include <mega/file_service/memory_buffer.h>
 #include <mega/types.h>
 
@@ -84,25 +85,8 @@ try
     if (!count)
         return Abort();
 
-    // Convenience.
-    auto& onDisk = mContext.mOnDisk;
-
     // The range we've written.
     FileRange range(offset, offset + count);
-
-    // Is this write appending data to a range on our left?
-    auto left = onDisk.endsAt(offset);
-
-    // Write is appending data to the range on our left.
-    if (left != onDisk.end())
-        range.mBegin = left->mBegin;
-
-    // Is this write prepending data to a range on our right?
-    auto right = onDisk.beginsAt(range.mEnd);
-
-    // Write is prepending data to the right on our right.
-    if (right != onDisk.end())
-        range.mEnd = right->mEnd;
 
     // Convenience.
     auto& database = mContext.mService.database();
@@ -113,27 +97,11 @@ try
     // Begin a transaction so we can safely modify the database.
     auto transaction = database.transaction();
 
-    // Remove obsolete ranges from the database.
-    mContext.removeRanges(range, transaction);
-
-    // Add our new range to the database.
-    mContext.addRange(range, transaction);
-
-    // Update the file's size.
-    mContext.updateSize(mContext.mInfo->size(), transaction);
+    // Update ranges on disk and in memory.
+    mContext.updateRanges(range, transaction);
 
     // Persist database changes.
     transaction.commit();
-
-    // Remove obsolete ranges from memory.
-    if (left != onDisk.end())
-        onDisk.remove(left);
-
-    if (right != onDisk.end())
-        onDisk.remove(right);
-
-    // Add the new range in memory.
-    onDisk.add(range);
 
     // Dispatch requests we can now satisfy.
     mContext.completed(range);
