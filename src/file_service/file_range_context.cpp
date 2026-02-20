@@ -44,8 +44,11 @@ void FileRangeContext::completed(Error error)
     //    released before this instance itself is destroyed.
     [[maybe_unused]] auto self = std::move(mIterator->second);
 
-    // Acquire lock on our file's map of downloading ranges.
-    std::unique_lock lock(mContext.mDownloadingLock);
+    // Acquire lock.
+    std::lock_guard guard(mContext.mLock);
+
+    // What range were we downloading?
+    auto range = mIterator->first;
 
     // Remove ourselves from our file's map of downloading ranges.
     mContext.mDownloading.remove(mIterator);
@@ -56,8 +59,14 @@ void FileRangeContext::completed(Error error)
     // Download didn't complete successfully.
     if (result != FILE_SUCCESS)
     {
+        // Convenience.
+        auto& requests = mContext.mPendingReadRequests;
+
+        auto i = requests.lower_bound(mEnd);
+        auto j = requests.lower_bound(range.mEnd);
+
         // Fail any remaining requests.
-        for (auto i = mRequests.begin(); i != mRequests.end();)
+        while (i != j)
         {
             // Convenience.
             auto& request = const_cast<FileReadRequest&>(*i);
@@ -66,7 +75,7 @@ void FileRangeContext::completed(Error error)
             mContext.completed(std::move(request), result);
 
             // Remove the request from our set.
-            i = mRequests.erase(i);
+            i = requests.erase(i);
         }
     }
 
@@ -82,87 +91,74 @@ auto FileRangeContext::data(const void* buffer,
                             std::uint64_t offset,
                             std::uint64_t length,
                             const Speeds&) -> std::variant<Abort, Continue>
+try
 {
-    // Records how much data we could write to disk.
-    std::uint64_t count;
+    // Acquire lock.
+    std::lock_guard guard(mContext.mLock);
 
-    // Try and write data to disk.
-    try
-    {
-        // Acquire on disk map lock.
-        std::lock_guard onDiskLock(mContext.mOnDiskLock);
+    // Try and write data to our buffer.
+    auto [count, _] = mContext.mBuffer->write(buffer, offset, length);
 
-        // Try and write data to our buffer.
-        std::tie(count, std::ignore) = mContext.mBuffer->write(buffer, offset, length);
-
-        // Couldn't write any data to disk.
-        if (!count)
-            return Abort();
-
-        // Convenience.
-        auto& onDisk = mContext.mOnDisk;
-
-        // The range we've written.
-        FileRange range(offset, offset + count);
-
-        // Is this write appending data to a range on our left?
-        auto left = onDisk.endsAt(offset);
-
-        // Write is appending data to the range on our left.
-        if (left != onDisk.end())
-            range.mBegin = left->mBegin;
-
-        // Is this write prepending data to a range on our right?
-        auto right = onDisk.beginsAt(range.mEnd);
-
-        // Write is prepending data to the right on our right.
-        if (right != onDisk.end())
-            range.mEnd = right->mEnd;
-
-        // Convenience.
-        auto& database = mContext.mService.database();
-
-        // Acquire database lock.
-        std::lock_guard databaseLock(database);
-
-        // Begin a transaction so we can safely modify the database.
-        auto transaction = database.transaction();
-
-        // Remove obsolete ranges from the database.
-        mContext.removeRanges(range, transaction);
-
-        // Add our new range to the database.
-        mContext.addRange(range, transaction);
-
-        // Update the file's size.
-        mContext.updateSize(mContext.mInfo->size(), transaction);
-
-        // Persist database changes.
-        transaction.commit();
-
-        // Remove obsolete ranges from memory.
-        if (left != onDisk.end())
-            onDisk.remove(left);
-
-        if (right != onDisk.end())
-            onDisk.remove(right);
-
-        // Add the new range in memory.
-        onDisk.add(range);
-    }
-    catch (std::runtime_error&)
-    {
+    // Couldn't write any data to disk.
+    if (!count)
         return Abort();
-    }
 
-    // Acquire downloading map lock.
-    std::unique_lock downloadingLock(mContext.mDownloadingLock);
+    // Convenience.
+    auto& onDisk = mContext.mOnDisk;
+
+    // The range we've written.
+    FileRange range(offset, offset + count);
+
+    // Is this write appending data to a range on our left?
+    auto left = onDisk.endsAt(offset);
+
+    // Write is appending data to the range on our left.
+    if (left != onDisk.end())
+        range.mBegin = left->mBegin;
+
+    // Is this write prepending data to a range on our right?
+    auto right = onDisk.beginsAt(range.mEnd);
+
+    // Write is prepending data to the right on our right.
+    if (right != onDisk.end())
+        range.mEnd = right->mEnd;
+
+    // Convenience.
+    auto& database = mContext.mService.database();
+
+    // Acquire database lock.
+    std::lock_guard databaseLock(database);
+
+    // Begin a transaction so we can safely modify the database.
+    auto transaction = database.transaction();
+
+    // Remove obsolete ranges from the database.
+    mContext.removeRanges(range, transaction);
+
+    // Add our new range to the database.
+    mContext.addRange(range, transaction);
+
+    // Update the file's size.
+    mContext.updateSize(mContext.mInfo->size(), transaction);
+
+    // Persist database changes.
+    transaction.commit();
+
+    // Remove obsolete ranges from memory.
+    if (left != onDisk.end())
+        onDisk.remove(left);
+
+    if (right != onDisk.end())
+        onDisk.remove(right);
+
+    // Add the new range in memory.
+    onDisk.add(range);
+
+    // Dispatch requests we can now satisfy.
+    dispatch(range.mBegin, range.mEnd);
 
     // Bump our end position.
     mEnd += count;
-
-    // Dispatch any requests that can now be satisfied.
-    dispatch();
 
     // Couldn't write all of the data to disk.
     if (count < length)
@@ -172,11 +168,19 @@ auto FileRangeContext::data(const void* buffer,
     return Continue();
 }
 
-void FileRangeContext::dispatch()
+catch (std::runtime_error&)
 {
+    return Abort();
+}
+
+void FileRangeContext::dispatch(std::uint64_t begin, std::uint64_t end)
+{
+    // Convenience,
+    auto& requests = mContext.mPendingReadRequests;
+
     // What requests might we be able to satisfy?
-    auto i = mRequests.begin();
-    auto j = mRequests.lower_bound(mEnd);
+    auto i = requests.lower_bound(begin);
+    auto j = requests.lower_bound(end);
 
     // Dispatch as many requests as we can.
     while (i != j)
@@ -188,22 +192,22 @@ void FileRangeContext::dispatch()
         auto& request = const_cast<FileReadRequest&>(*k);
 
         // Request has been dispatched.
-        if (dispatch(request))
-            mRequests.erase(k);
+        if (dispatch(end, request))
+            requests.erase(k);
     }
 }
 
-bool FileRangeContext::dispatch(FileReadRequest& request)
+bool FileRangeContext::dispatch(std::uint64_t end, FileReadRequest& request)
 {
     // Convenience.
     auto& range = request.mRange;
 
     // Can't dispatch this request.
-    if (range.mBegin >= mEnd)
+    if (range.mBegin >= end)
         return false;
 
     // Clamp the range as necessary.
-    range.mEnd = std::min(mEnd, range.mEnd);
+    range.mEnd = std::min(end, range.mEnd);
 
     // Dispatch the request.
     mContext.completed(displace(mContext.mBuffer, range.mBegin), std::move(request));
@@ -239,15 +243,10 @@ FileRangeContext::FileRangeContext(Activity activity,
     mContext(context),
     mDownload(),
     mEnd(iterator->first.mBegin),
-    mIterator(iterator),
-    mRequests()
+    mIterator(iterator)
 {}
 
-FileRangeContext::~FileRangeContext()
-{
-    // No requests should be queued at this point.
-    assert(mRequests.empty());
-}
+FileRangeContext::~FileRangeContext() = default;
 
 void FileRangeContext::cancel()
 {
@@ -293,8 +292,8 @@ void FileRangeContext::queue(FileFetchCallback callback)
 void FileRangeContext::queue(FileReadRequest request)
 {
     // Request isn't dispatchable so queue it for later execution.
-    if (!dispatch(request))
-        mRequests.emplace(std::move(request));
+    if (!dispatch(mEnd, request))
+        mContext.mPendingReadRequests.emplace(std::move(request));
 }
 
 bool retryable(const Error& result)

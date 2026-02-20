@@ -183,7 +183,7 @@ void FileContext::addRange(const FileRange& range, Transaction& transaction)
 void FileContext::cancel(const FileRange& range)
 {
     // Make sure we have exclusive access to mDownloading.
-    std::unique_lock lock(mDownloadingLock);
+    std::unique_lock lock(mLock);
 
     // What ranges does range intersect?
     auto [begin, end] = mDownloading.find(range);
@@ -275,7 +275,7 @@ void FileContext::cancel()
     // Get a snapshot of our ranges.
     auto ranges = [&]()
     {
-        std::lock_guard guard(mDownloadingLock);
+        std::lock_guard guard(mLock);
         return mDownloading;
     }();
 
@@ -478,8 +478,8 @@ void FileContext::execute(FileAppendRequest& request)
     // Assume there's no range for us to grow.
     FileRange range(size, size + request.mLength);
 
-    // Acquire on disk ranges lock.
-    std::unique_lock onDiskLock(mOnDiskLock);
+    // Acquire lock.
+    std::lock_guard guard(mLock);
 
     // Assume we can grow the last range.
     auto candidate = mOnDisk.rbegin();
@@ -619,11 +619,8 @@ void FileContext::execute(FileReadRequest& request)
     // Update the file's access time.
     mInfo->accessed(now());
 
-    // Make sure we have exclusive access to mDownloading.
-    std::unique_lock downloadingLock(mDownloadingLock);
-
-    // Make sure we have exclusive access to mOnDisk.
-    std::unique_lock onDiskLock(mOnDiskLock);
+    // Acquire lock.
+    std::unique_lock lock(mLock);
 
     // The read's contained within an existing range on disk.
     if (auto i = mOnDisk.endsAfter(begin); i != mOnDisk.end() && i->mBegin <= begin)
@@ -674,8 +671,8 @@ void FileContext::execute(FileReadRequest& request)
     // Instantiate a context so manage the range's download.
     i->second = std::make_shared<FileRangeContext>(mActivities.begin(), *this, i);
 
-    // Queue the read on our context.
-    i->second->queue(std::move(request));
+    // Queue the read for later completion.
+    mPendingReadRequests.emplace(std::move(request));
 
     // Try and create a download for the range.
     auto download = i->second->download();
@@ -684,9 +681,8 @@ void FileContext::execute(FileReadRequest& request)
     if (!download)
         return;
 
-    // Release the locks we can begin the download.
-    onDiskLock.unlock();
-    downloadingLock.unlock();
+    // Release our lock so we can begin the download.
+    lock.unlock();
 
     // Begin the download.
     download->begin();
@@ -696,8 +692,7 @@ void FileContext::execute(FileReadRequest& request)
 void FileContext::execute(FileReclaimRequest& request)
 {
     // Make sure no one is messing with our range maps.
-    std::lock_guard downloadingLock(mDownloadingLock);
-    std::lock_guard onDiskLock(mOnDiskLock);
+    std::lock_guard guard(mLock);
 
     // Convenience.
     auto& database = mService.database();
@@ -855,8 +850,8 @@ void FileContext::execute(FileWriteRequest& request)
     // Cancel any downloads in progress that intersect our write.
     cancel(range);
 
-    // Get exclusive access to mOnDisk.
-    std::unique_lock onDiskLock(mOnDiskLock);
+    // Acquire lock.
+    std::lock_guard guard(mLock);
 
     // Disambiguate.
     using file_service::write;
@@ -1064,7 +1059,7 @@ auto FileContext::grow(std::uint64_t newSize, std::uint64_t oldSize)
     -> std::pair<UniqueLock<Database>, Transaction>
 {
     // Make sure we have exclusive access to mOnDisk.
-    std::lock_guard onDiskLock(mOnDiskLock);
+    std::lock_guard guard(mLock);
 
     // Convenience.
     auto& database = mService.database();
@@ -1214,7 +1209,7 @@ auto FileContext::shrink(std::uint64_t newSize, std::uint64_t oldSize)
     cancel(FileRange(oldSize, newSize));
 
     // So we have exclusive access to mOnDisk.
-    std::lock_guard onDiskLock(mOnDiskLock);
+    std::lock_guard guard(mLock);
 
     // Convenience.
     auto& database = mService.database();
@@ -1298,17 +1293,16 @@ FileContext::FileContext(Activity activity,
     mActivity(std::move(activity)),
     mBuffer(std::make_shared<SparseFileBuffer>(*file, *info)),
     mDownloading(),
-    mDownloadingLock(),
     mInfo(std::move(info)),
     mFetchContext(),
     mFetchContextLock(),
     mFile(std::move(file)),
     mFlushContext(),
-    mFlushContextLock(),
     mKeyData(std::move(keyData)),
+    mLock(),
     mNumPendingWriteRequests(0u),
     mOnDisk(std::move(ranges)),
-    mOnDiskLock(),
+    mPendingReadRequests(),
     mPinTask(),
     mPinTaskLock(),
     mReadWriteState(),
@@ -1356,8 +1350,8 @@ void FileContext::fetchBarrier(FileFetchBarrierCallback callback)
     // Sanity.
     assert(callback);
 
-    // Acquire range lock.
-    std::unique_lock lock(mDownloadingLock);
+    // Acquire lock.
+    std::unique_lock lock(mLock);
 
     // True if a download is in progress.
     auto fetching = [](const auto& entry)
@@ -1456,8 +1450,8 @@ FileServiceOptions FileContext::options() const
 
 FileRangeVector FileContext::ranges() const
 {
-    // Get exclusive access to mOnDisk.
-    std::lock_guard guard(mOnDiskLock);
+    // Make sure no one is messing with our range maps.
+    std::lock_guard guard(mLock);
 
     // Return ranges to our caller.
     return FileRangeVector(mOnDisk.begin(), mOnDisk.end());

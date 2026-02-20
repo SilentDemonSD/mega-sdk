@@ -27,6 +27,7 @@
 #include <mega/file_service/file_range_set.h>
 #include <mega/file_service/file_range_vector.h>
 #include <mega/file_service/file_read_request_forward.h>
+#include <mega/file_service/file_read_request_set.h>
 #include <mega/file_service/file_read_write_state.h>
 #include <mega/file_service/file_reclaim_request_forward.h>
 #include <mega/file_service/file_remove_request_forward.h>
@@ -196,9 +197,6 @@ class FileContext final: public std::enable_shared_from_this<FileContext>
     // What ranges are currently being downloaded?
     FileRangeMap<FileRangeContextPtr> mDownloading;
 
-    // Serializes access to mDownloading.
-    mutable std::recursive_mutex mDownloadingLock;
-
     // How we get and set our file's attributes.
     FileInfoContextPtr mInfo;
 
@@ -220,14 +218,17 @@ class FileContext final: public std::enable_shared_from_this<FileContext>
     // The file's decryption key, IV and authentication tokens.
     const std::optional<common::NodeKeyData> mKeyData;
 
+    // Serializes access to mDownloading, mOnDisk and mPendingReadRequests.
+    mutable std::recursive_mutex mLock;
+
     // How many write requests are pending?
     std::size_t mNumPendingWriteRequests;
 
     // What ranges are present on disk?
     FileRangeSet mOnDisk;
 
-    // Serializes access to mOnDisk.
-    mutable std::recursive_mutex mOnDiskLock;
+    // Read requests pending completion.
+    FileReadRequestSet mPendingReadRequests;
 
     // Task pinning this context in memory, if any.
     common::Task mPinTask;
