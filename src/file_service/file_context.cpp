@@ -861,9 +861,6 @@ void FileContext::execute(FileWriteRequest& request)
     if (!request.mBuffer)
         return completed(std::move(request), FILE_INVALID_ARGUMENTS);
 
-    // Cancel any downloads in progress that intersect our write.
-    cancel(range);
-
     // Acquire lock.
     std::lock_guard guard(mLock);
 

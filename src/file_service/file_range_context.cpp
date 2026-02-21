@@ -12,6 +12,7 @@
 #include <mega/file_service/file_info_context.h>
 #include <mega/file_service/file_range.h>
 #include <mega/file_service/file_range_context.h>
+#include <mega/file_service/file_range_tree_utilities.h>
 #include <mega/file_service/file_read_request.h>
 #include <mega/file_service/file_result.h>
 #include <mega/file_service/file_service_context.h>
@@ -75,18 +76,47 @@ auto FileRangeContext::data(const void* buffer,
                             const Speeds&) -> std::variant<Abort, Continue>
 try
 {
+    // Convenience.
+    auto* bytebuffer = static_cast<const std::uint8_t*>(buffer);
+    auto& onDisk = mContext.mOnDisk;
+
+    // Original range of our write.
+    FileRange range(offset, offset + length);
+
+    // Effective range our write.
+    FileRange written(offset, offset);
+
     // Acquire lock.
     std::lock_guard guard(mContext.mLock);
 
-    // Try and write data to our buffer.
-    auto [count, _] = mContext.mBuffer->write(buffer, offset, length);
+    // Convenience.
+    auto current = gaps(onDisk, range);
+    auto end = current.end();
+
+    // Write data to each gap in range.
+    for (; current != end; ++current)
+    {
+        offset = current->mBegin;
+        length = current->mEnd - offset;
+
+        // Try and write data to disk.
+        auto [count, _] =
+            mContext.mBuffer->write(bytebuffer + (offset - range.mBegin), offset, length);
+
+        // Bump end of written range.
+        written.mEnd = offset + count;
+
+        // Couldn't write all of the data to disk.
+        if (count < length)
+            break;
+    }
 
     // Couldn't write any data to disk.
-    if (!count)
+    if (written.mBegin == written.mEnd)
         return Abort();
 
-    // The range we've written.
-    FileRange range(offset, offset + count);
+    // Adjust effective written range.
+    written = current == end ? range : written;
 
     // Convenience.
     auto& database = mContext.mService.database();
@@ -98,19 +128,19 @@ try
     auto transaction = database.transaction();
 
     // Update ranges on disk and in memory.
-    mContext.updateRanges(range, transaction);
+    mContext.updateRanges(written, transaction);
 
     // Persist database changes.
     transaction.commit();
 
-    // Dispatch requests we can now satisfy.
-    mContext.completed(range);
+    // Bump end of written range.
+    mEnd = written.mEnd;
 
-    // Bump our end position.
-    mEnd += count;
+    // Dispatch requests we can now satisfy.
+    mContext.completed(written);
 
     // Couldn't write all of the data to disk.
-    if (count < length)
+    if (current != end)
         return Abort();
 
     // Continue the download.

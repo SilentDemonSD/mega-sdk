@@ -2224,6 +2224,45 @@ TEST_F(FileServiceTests, read_succeeds)
     ASSERT_FALSE(file->info().dirty());
 }
 
+TEST_F(FileServiceTests, read_write_overlap_succeeds)
+{
+    // Generate some data for us to write to our file.
+    auto data = randomBytes(256_KiB);
+
+    // Open our file for writing.
+    auto file = mClient->fileOpen(mFileHandle);
+
+    // Make sure the file was opened.
+    ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+
+    // Make sure we don't download all of the file's data at once.
+    mClient->setDownloadSpeed(262144);
+
+    // Begin a read of the entire file.
+    ASSERT_EQ(execute(readOnce, *file, 0, mFileContent.size()).errorOr(FILE_SUCCESS), FILE_SUCCESS);
+
+    // Write two 256K ranges within our file.
+    ASSERT_EQ(execute(write, data.data(), *file, 256_KiB, 256_KiB), FILE_SUCCESS);
+    ASSERT_EQ(execute(write, data.data(), *file, 768_KiB, 256_KiB), FILE_SUCCESS);
+
+    // Wait for the file to finish downloading.
+    ASSERT_EQ(execute(fetchBarrier, *file), FILE_SUCCESS);
+
+    // We should have one contiguous range.
+    EXPECT_THAT(file->ranges(), ElementsAre(FileRange(0, 1_MiB)));
+
+    // Adjust expected content.
+    auto expected = mFileContent;
+
+    expected.replace(256_KiB, 256_KiB, data);
+    expected.replace(768_KiB, 256_KiB, data);
+
+    // Make sure the file's content is as we expect.
+    auto computed = execute(read, *file, 0, mFileContent.size());
+    ASSERT_EQ(computed.errorOr(FILE_SUCCESS), FILE_SUCCESS);
+    EXPECT_TRUE(compare(*computed, expected, 0, computed->size()));
+}
+
 TEST_F(FileServiceTests, read_write_sequence)
 {
     // Try and open our test file.
