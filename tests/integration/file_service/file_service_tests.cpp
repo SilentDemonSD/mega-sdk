@@ -629,6 +629,43 @@ TEST_F(FileServiceTests, cancel_reads_contained_within_written_range_succeeds)
     EXPECT_TRUE(compare(*computed, expected, 0, computed->size()));
 }
 
+TEST_F(FileServiceTests, cancel_reads_that_begin_after_truncated_size)
+{
+    // Open our file for writing.
+    auto file = mClient->fileOpen(mFileHandle);
+
+    // Make sure the file was opened.
+    ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+
+    // Make sure we don't download all of the file's data at once.
+    mClient->setDownloadSpeed(65536);
+
+    // Begin the download of three ranges.
+    auto waiter0 = readOnce(*file, 0, 512_KiB);
+    auto waiter1 = readOnce(*file, 512_KiB, 256_KiB);
+    auto waiter2 = readOnce(*file, 768_KiB, 256_KiB);
+
+    // Wait for each of our reads to provide some data.
+    ASSERT_NE(waiter0.wait_for(mDefaultTimeout), timeout);
+    ASSERT_NE(waiter1.wait_for(mDefaultTimeout), timeout);
+    ASSERT_NE(waiter2.wait_for(mDefaultTimeout), timeout);
+
+    // Truncate the file down to 640KiB.
+    ASSERT_EQ(execute(truncate, *file, 640_KiB), FILE_SUCCESS);
+
+    // Wait for any downloads to complete.
+    ASSERT_EQ(execute(fetchBarrier, *file), FILE_SUCCESS);
+
+    // We should have one 640KiB range.
+    ASSERT_THAT(file->ranges(), ElementsAre(FileRange(0, 640_KiB)));
+
+    // Make sure the file's content is as we expect.
+    auto computed = execute(read, *file, 0, 640_KiB);
+
+    ASSERT_EQ(computed.errorOr(FILE_SUCCESS), FILE_SUCCESS);
+    ASSERT_TRUE(compare(*computed, mFileContent, 0, 640_KiB));
+}
+
 TEST_F(FileServiceTests, cloud_file_removed_when_parent_removed)
 {
     // Create a tree we can mess with.
