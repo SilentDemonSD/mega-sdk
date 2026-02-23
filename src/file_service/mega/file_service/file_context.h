@@ -6,6 +6,7 @@
 #include <mega/common/instance_logger.h>
 #include <mega/common/lock_forward.h>
 #include <mega/common/node_key_data.h>
+#include <mega/common/task_queue.h>
 #include <mega/common/transaction_forward.h>
 #include <mega/file_service/buffer_pointer.h>
 #include <mega/file_service/file_append_request_forward.h>
@@ -227,6 +228,12 @@ class FileContext final: public std::enable_shared_from_this<FileContext>
 
     // Serializes access to mOnDisk.
     mutable std::recursive_mutex mOnDiskLock;
+
+    // Task pinning this context in memory, if any.
+    common::Task mPinTask;
+
+    // Serializes access to mPinTask.
+    std::recursive_mutex mPinTaskLock;
 
     // Tracks whether any reads or writes are in progress.
     FileReadWriteState mReadWriteState;
