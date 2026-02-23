@@ -11,6 +11,7 @@
 #include <mega/file_service/file_result.h>
 #include <mega/file_service/file_result_or.h>
 #include <mega/file_service/file_service_context_badge.h>
+#include <mega/file_service/file_service_options.h>
 #include <mega/file_service/file_touch_request.h>
 #include <mega/file_service/file_truncate_request.h>
 #include <mega/file_service/file_write_request.h>
@@ -39,7 +40,18 @@ File::File(File&& other):
     mContext(std::exchange(other.mContext, nullptr))
 {}
 
-File::~File() = default;
+File::~File()
+{
+    // File has no context to pin in memory.
+    if (!mContext)
+        return;
+
+    // Convenience.
+    auto options = mContext->options();
+
+    // Pin the context in memory for a time.
+    mContext->pinFor(options.mFileContextReleaseDelay);
+}
 
 File& File::operator=(const File& rhs)
 {
