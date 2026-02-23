@@ -29,8 +29,6 @@ File::File(FileServiceContextBadge, FileContextPtr context):
     mContext(std::move(context))
 {}
 
-File::~File() = default;
-
 File::File(const File& other):
     mInstanceLogger("File", *this, logger()),
     mContext(other.mContext)
@@ -40,6 +38,8 @@ File::File(File&& other):
     mInstanceLogger("File", *this, logger()),
     mContext(std::exchange(other.mContext, nullptr))
 {}
+
+File::~File() = default;
 
 File& File::operator=(const File& rhs)
 {
