@@ -1393,6 +1393,79 @@ TEST_F(FileServiceTests, foreign_files_are_read_only)
     EXPECT_EQ(execute(flush, *file), FILE_SUCCESS);
 }
 
+TEST_F(FileServiceTests, in_memory_pin_cancel_on_client_logout_succeeds)
+{
+    // Create a client that we can safely logout.
+    auto client = CreateClient("file_service_" + randomName());
+    ASSERT_TRUE(client);
+
+    // Log the client in.
+    ASSERT_EQ(client->login(0), API_OK);
+
+    // How long we'll pin contexts in memory.
+    auto pinDuration = std::chrono::minutes(4);
+
+    // Pin file contexts for some large period of time.
+    client->fileService().options(
+        [&]()
+        {
+            auto options = DefaultOptions;
+            options.mFileContextReleaseDelay = pinDuration;
+            return options;
+        }());
+
+    // Open a file so we have a context in memory.
+    {
+        // Open our test file for reading.
+        auto file = client->fileOpen(mFileHandle);
+
+        // Make sure the file was opened successfully.
+        ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+    }
+
+    // Note when we began logging the client out.
+    auto began = std::chrono::steady_clock::now();
+
+    // Log the client out.
+    client->logout(false);
+
+    // How long did it take for the client to log out?
+    auto elapsed = std::chrono::steady_clock::now() - began;
+
+    // Make sure we didn't have to wait for the pin to expire.
+    EXPECT_LT(elapsed, pinDuration);
+}
+
+TEST_F(FileServiceTests, in_memory_pin_succeeds)
+{
+    // How long will we pin file contexts in memory?
+    auto pinDuration = std::chrono::minutes(1);
+
+    // Let the service know how long we want it to keep contexts in memory.
+    mClient->fileService().options(
+        [&]()
+        {
+            auto options = DefaultOptions;
+            options.mFileContextReleaseDelay = pinDuration;
+            return options;
+        }());
+
+    // Open our test file.
+    auto file = mClient->fileOpen(mFileHandle);
+
+    // Make sure we could open our test file.
+    ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+
+    // Begin downloading the entire file.
+    auto waiter = readOnce(std::move(*file), 0, mFileContent.size());
+
+    // Wait for the download to complete.
+    ASSERT_NE(waiter.wait_for(mDefaultTimeout), timeout);
+
+    // Make sure our read completed successfully.
+    ASSERT_EQ(waiter.get().errorOr(FILE_SUCCESS), FILE_SUCCESS);
+}
+
 TEST_F(FileServiceTests, inactive_file_moved)
 {
     // For later reference.
