@@ -1419,7 +1419,35 @@ FileInfo FileContext::info() const
     return FileInfo(FileContextBadge(), mInfo);
 }
 
-void FileContext::pinUntil(std::chrono::steady_clock::time_point) {}
+void FileContext::pinUntil(std::chrono::steady_clock::time_point when)
+{
+    // What is the current time?
+    auto now = std::chrono::steady_clock::now();
+
+    // Acquire pin task lock.
+    std::lock_guard guard(mPinTaskLock);
+
+    // Caller doesn't actually need to pin this context.
+    if (now >= when)
+        return mPinTask.cancel(), void();
+
+    // Called when we can release our reference on this context.
+    auto callback = [context = shared_from_this(), this](auto& task)
+    {
+        // Acquire task lock.
+        std::lock_guard guard(mPinTaskLock);
+
+        // Another pin task is keeping this context in memory.
+        if (mPinTask != task)
+            return;
+
+        // Let our context know this task has completed.
+        mPinTask.reset();
+    }; // callback
+
+    // Queue our callback for later execution.
+    mPinTask = mService.executor().execute(std::move(callback), when, false);
+}
 
 FileServiceOptions FileContext::options() const
 {
