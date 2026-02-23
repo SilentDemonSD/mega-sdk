@@ -41,7 +41,7 @@ void FileRangeContext::completed(Error error)
     //
     // 2. We want to make sure that the lock we acquire immediately below is
     //    released before this instance itself is destroyed.
-    [[maybe_unused]] auto context = std::move(mIterator->second);
+    [[maybe_unused]] auto self = std::move(mIterator->second);
 
     // Acquire lock on our file's map of downloading ranges.
     std::unique_lock lock(mContext.mDownloadingLock);
