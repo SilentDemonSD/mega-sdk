@@ -692,7 +692,7 @@ void FileContext::execute(FileReadRequest& request)
 void FileContext::execute(FileReclaimRequest& request)
 {
     // Make sure no one is messing with our range maps.
-    std::lock_guard rangesLock(mDownloadingLock);
+    std::lock_guard downloadingLock(mDownloadingLock);
     std::lock_guard onDiskLock(mOnDiskLock);
 
     // Convenience.
@@ -715,6 +715,11 @@ void FileContext::execute(FileReclaimRequest& request)
         return completed(std::move(request), FILE_FAILED);
 
     // Remove all of the ranges from memory.
+    //
+    // Clearing mDownloading will cancel any downloads that are still in
+    // progress. This is safe, however, as we know that there will be no
+    // pending reads because if there were, this reclaim request would
+    // still be waiting to execute.
     mDownloading.clear();
     mOnDisk.clear();
 
