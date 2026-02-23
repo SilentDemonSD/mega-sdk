@@ -1413,6 +1413,8 @@ FileInfo FileContext::info() const
     return FileInfo(FileContextBadge(), mInfo);
 }
 
+void FileContext::pinUntil(std::chrono::steady_clock::time_point) {}
+
 FileRangeVector FileContext::ranges() const
 {
     // Get exclusive access to mOnDisk.

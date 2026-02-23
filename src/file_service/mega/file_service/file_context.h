@@ -38,6 +38,7 @@
 #include <mega/file_service/file_write_request_forward.h>
 #include <mega/types.h>
 
+#include <chrono>
 #include <functional>
 #include <list>
 #include <memory>
@@ -278,6 +279,16 @@ public:
 
     // Retrieve information about this file.
     FileInfo info() const;
+
+    // Pin this context in memory for a specified period of time.
+    template<typename Rep, typename Duration>
+    void pinFor(std::chrono::duration<Rep, Duration> period)
+    {
+        pinUntil(std::chrono::steady_clock::now() + period);
+    }
+
+    // Pin this context in memory until the specified time.
+    void pinUntil(std::chrono::steady_clock::time_point when);
 
     // What ranges of this file are currently in storage?
     FileRangeVector ranges() const;
