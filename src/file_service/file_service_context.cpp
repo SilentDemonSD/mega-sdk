@@ -1150,9 +1150,9 @@ Database& FileServiceContext::database()
     return mDatabase;
 }
 
-auto FileServiceContext::execute(std::function<void(const Task&)> function) -> Task
+TaskExecutor& FileServiceContext::executor()
 {
-    return mExecutor.execute(std::move(function), true);
+    return mExecutor;
 }
 
 auto FileServiceContext::info(FileID id) -> FileServiceResultOr<FileInfo>

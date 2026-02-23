@@ -3,6 +3,7 @@
 #include <mega/common/expected.h>
 #include <mega/common/partial_download.h>
 #include <mega/common/scoped_query.h>
+#include <mega/common/task_executor.h>
 #include <mega/common/transaction.h>
 #include <mega/file_service/buffer.h>
 #include <mega/file_service/displaced_buffer.h>
@@ -69,9 +70,12 @@ void FileRangeContext::completed(Error error)
         }
     }
 
+    // Convenience.
+    auto& executor = mContext.mService.executor();
+
     // Let any waiters know this range's download has completed.
     for (auto& callback: mCallbacks)
-        mContext.mService.execute(std::bind(std::move(callback), result));
+        executor.execute(std::bind(std::move(callback), result), true);
 }
 
 auto FileRangeContext::data(const void* buffer,

@@ -380,13 +380,17 @@ auto FileContext::completed(Request&& request, Result result, Captures&&... capt
         context->execute();
     }; // wrapper
 
+    // Convenience.
+    auto& executor = mService.executor();
+
     // Queue the user's request for completion.
-    mService.execute(std::bind(std::move(wrapper),
+    executor.execute(std::bind(std::move(wrapper),
                                swallow(std::move(request.mCallback), request.name()),
                                weak_from_this(),
                                std::placeholders::_1,
                                tag(request),
-                               std::forward<Captures>(captures)...));
+                               std::forward<Captures>(captures)...),
+                     true);
 }
 
 void FileContext::completed(FileWriteRequest&& request)
@@ -1783,11 +1787,11 @@ void FileContext::ReclaimContext::completed(ReclaimContextPtr context,
     lock.unlock();
 
     // Convenience.
-    auto& service = mContext.mService;
+    auto& executor = mContext.mService.executor();
 
     // Execute queued callbacks.
     for (auto& callback: callbacks)
-        service.execute(std::bind(std::move(callback), result));
+        executor.execute(std::bind(std::move(callback), result), true);
 }
 
 FileContext::ReclaimContext::ReclaimContext(FileContext& context):

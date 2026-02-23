@@ -8,7 +8,6 @@
 #include <mega/common/node_key_data.h>
 #include <mega/common/shared_mutex.h>
 #include <mega/common/task_executor.h>
-#include <mega/common/task_queue.h>
 #include <mega/file_service/file_context_badge_forward.h>
 #include <mega/file_service/file_context_pointer.h>
 #include <mega/file_service/file_event_emitter.h>
@@ -198,8 +197,8 @@ public:
     // Retrieve a reference to this service's database.
     common::Database& database();
 
-    // Execute a task on this service's thread pool.
-    auto execute(std::function<void(const common::Task&)> function) -> common::Task;
+    // Get a reference to this context's task executor.
+    common::TaskExecutor& executor();
 
     // Retrieve information about a file managed by this service.
     auto info(FileID id) -> FileServiceResultOr<FileInfo>;
