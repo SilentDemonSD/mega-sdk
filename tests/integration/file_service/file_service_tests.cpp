@@ -345,7 +345,12 @@ NodeHandle FileServiceTests::mRootHandle;
 
 Watchdog FileServiceTests::mWatchdog(logger());
 
-static const FileServiceOptions DefaultOptions;
+static const FileServiceOptions DefaultOptions = []()
+{
+    FileServiceOptions options;
+    options.mFileContextReleaseDelay = std::chrono::seconds(0);
+    return options;
+}();
 
 static constexpr auto MaxTestRunTime = std::chrono::minutes(15);
 static constexpr auto MaxTestSetupTime = std::chrono::minutes(15);
