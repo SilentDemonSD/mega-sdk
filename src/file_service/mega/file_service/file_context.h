@@ -290,6 +290,9 @@ public:
     // Pin this context in memory until the specified time.
     void pinUntil(std::chrono::steady_clock::time_point when);
 
+    // Return a copy of the service's current options.
+    FileServiceOptions options() const;
+
     // What ranges of this file are currently in storage?
     FileRangeVector ranges() const;
 
