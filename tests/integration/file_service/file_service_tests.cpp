@@ -585,6 +585,50 @@ TEST_F(FileServiceTests, append_succeeds)
     ASSERT_TRUE(satisfied(mDefaultTimeout, fileObserver, serviceObserver));
 }
 
+TEST_F(FileServiceTests, cancel_reads_contained_within_written_range_succeeds)
+{
+    // Generate some data for us to write to disk.
+    auto data = randomBytes(640_KiB);
+
+    // Open our file for writing.
+    auto file = mClient->fileOpen(mFileHandle);
+
+    // Make sure the file was opened.
+    ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+
+    // Make sure we don't download all of the file's data at once.
+    mClient->setDownloadSpeed(65536);
+
+    // Begin download of three disjoint ranges.
+    auto waiter0 = readOnce(*file, 0, 256_KiB);
+    auto waiter1 = readOnce(*file, 384_KiB, 128_KiB);
+    auto waiter2 = readOnce(*file, 768_KiB, 256_KiB);
+
+    // Wait for each of our reads to provide some data.
+    ASSERT_NE(waiter0.wait_for(mDefaultTimeout), timeout);
+    ASSERT_NE(waiter1.wait_for(mDefaultTimeout), timeout);
+    ASSERT_NE(waiter2.wait_for(mDefaultTimeout), timeout);
+
+    // Perform a write that touches each of our reads.
+    ASSERT_EQ(execute(write, data.data(), *file, 192_KiB, 640_KiB), FILE_SUCCESS);
+
+    // Wait for any downloads to complete.
+    ASSERT_EQ(execute(fetchBarrier, *file), FILE_SUCCESS);
+
+    // We should have one contiguous range.
+    EXPECT_THAT(file->ranges(), ElementsAre(FileRange(0, 1_MiB)));
+
+    // Computed expected content.
+    auto expected = mFileContent;
+
+    expected.replace(192_KiB, 640_KiB, data);
+
+    // Make sure the file's content is as we expect.
+    auto computed = execute(read, *file, 0, mFileContent.size());
+    ASSERT_EQ(computed.errorOr(FILE_SUCCESS), FILE_SUCCESS);
+    EXPECT_TRUE(compare(*computed, expected, 0, computed->size()));
+}
+
 TEST_F(FileServiceTests, cloud_file_removed_when_parent_removed)
 {
     // Create a tree we can mess with.

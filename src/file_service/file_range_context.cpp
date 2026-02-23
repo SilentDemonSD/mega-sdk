@@ -80,14 +80,18 @@ try
     auto* bytebuffer = static_cast<const std::uint8_t*>(buffer);
     auto& onDisk = mContext.mOnDisk;
 
+    // Acquire lock.
+    std::lock_guard guard(mContext.mLock);
+
+    // Downloaded data is outside of this range.
+    if (offset >= mIterator->first.mEnd)
+        return Abort();
+
     // Original range of our write.
-    FileRange range(offset, offset + length);
+    FileRange range(offset, std::min(offset + length, mIterator->first.mEnd));
 
     // Effective range our write.
     FileRange written(offset, offset);
-
-    // Acquire lock.
-    std::lock_guard guard(mContext.mLock);
 
     // Convenience.
     auto current = gaps(onDisk, range);
@@ -228,6 +232,38 @@ void FileRangeContext::queue(FileFetchCallback callback)
 {
     // Queue the callback for later execution.
     mCallbacks.emplace_back(std::move(callback));
+}
+
+void FileRangeContext::range(std::uint64_t begin, std::uint64_t end)
+{
+    range(FileRange(begin, end));
+}
+
+void FileRangeContext::range(const FileRange& range)
+{
+    // Range hasn't actually changed.
+    if (mIterator->first == range)
+        return;
+
+    // Keep ourselves alive.
+    auto context = std::move(mIterator->second);
+
+    // Convenience.
+    auto& downloading = mContext.mDownloading;
+
+    // Remove ourselves from our file's map of downloading ranges.
+    downloading.remove(mIterator);
+
+    [[maybe_unused]] auto added = false;
+
+    // Add ourselves back into our file's map of downloading ranges.
+    std::tie(mIterator, added) = downloading.tryAdd(range, std::move(context));
+
+    // Sanity: The context should always be placed back into the map.
+    assert(added);
+
+    // Ensure end of downloaded data is within our new range.
+    mEnd = std::min(range.mEnd, std::max(range.mBegin, mEnd));
 }
 
 bool retryable(const Error& result)

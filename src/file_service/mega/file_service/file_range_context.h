@@ -81,6 +81,10 @@ public:
 
     // Queue a callback for execution when this range has downloaded.
     void queue(FileFetchCallback callback);
+
+    // Update this context's range.
+    void range(std::uint64_t begin, std::uint64_t end);
+    void range(const FileRange& range);
 }; // FileRangeContext
 
 } // file_service

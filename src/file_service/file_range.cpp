@@ -35,7 +35,7 @@ FileRange extend(const FileRange& range, std::uint64_t adjustment)
 
 std::string toString(const FileRange& range)
 {
-    return format("[0x%" PRIu64 "-0x%" PRIu64 "]", range.mBegin, range.mEnd);
+    return format("[%" PRIu64 "-%" PRIu64 "]", range.mBegin, range.mEnd);
 }
 
 std::ostream& operator<<(std::ostream& ostream, const FileRange& range)

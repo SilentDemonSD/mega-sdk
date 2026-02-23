@@ -185,10 +185,34 @@ void FileContext::cancel(const FileRange& range)
     // Make sure we have exclusive access to mDownloading.
     std::unique_lock lock(mLock);
 
-    // What ranges does range intersect?
-    auto [begin, end] = mDownloading.find(range);
+    // Do any ranges end after range?
+    auto begin = mDownloading.endsAfter(range.mBegin);
 
-    // No ranges intersect range.
+    // No ranges end after range.
+    if (begin == mDownloading.end() || begin->first.mBegin >= range.mEnd)
+        return;
+
+    // A range overlaps the beginning of range.
+    if (begin->first.mBegin < range.mBegin && begin->first.mEnd <= range.mEnd)
+    {
+        // Bump iterator.
+        auto temp = begin++;
+
+        // Clamp the range's ending so it doesn't overlap range.
+        temp->second->range(temp->first.mBegin, range.mBegin);
+    }
+
+    // Do any ranges end after range?
+    auto end = mDownloading.endsAfter(range.mEnd);
+
+    // A range overlaps the ending of range.
+    if (end != mDownloading.end() && end->first.mBegin < range.mEnd)
+    {
+        // Bump beginning of range so it doesn't overlap range.
+        end->second->range(range.mEnd, end->first.mEnd);
+    }
+
+    // No ranges to cancel.
     if (begin == end)
         return;
 
@@ -860,6 +884,9 @@ void FileContext::execute(FileWriteRequest& request)
     // Caller hasn't passed us a valid buffer.
     if (!request.mBuffer)
         return completed(std::move(request), FILE_INVALID_ARGUMENTS);
+
+    // Cancel downloads contained within range.
+    cancel(range);
 
     // Acquire lock.
     std::lock_guard guard(mLock);
