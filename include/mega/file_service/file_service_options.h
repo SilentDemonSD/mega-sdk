@@ -14,6 +14,9 @@ namespace file_service
 
 struct FileServiceOptions
 {
+    // How long should we wait before we remove a file context from memory?
+    std::chrono::seconds mFileContextReleaseDelay{2 * 60};
+
     // How many times will we try to download a range before we give up.
     std::uint64_t mMaximumRangeRetries = 5u;
 
