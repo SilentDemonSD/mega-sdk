@@ -934,6 +934,29 @@ FileServiceContext::FileServiceContext(Client& client, const FileServiceOptions&
 
 FileServiceContext::~FileServiceContext()
 {
+    // Cancel in-memory pins that might be keeping contexts alive.
+    {
+        // So we can safely iterate over mFileContexts.
+        std::lock_guard guard(mLock);
+
+        // Cancel any in-memory pins present on our contexts.
+        for (auto i = mFileContexts.begin(); i != mFileContexts.end();)
+        {
+            // Eagerly move to the next context, if any.
+            auto context = i++->second.lock();
+
+            // Context has already been purged from memory.
+            if (!context)
+                continue;
+
+            // Some time in the distant past.
+            auto when = std::chrono::steady_clock::time_point::min();
+
+            // Cancel any in-memory pins on the context.
+            context->pinUntil(when);
+        }
+    }
+
     // Let the client know we're no longer interested in node events.
     mClient.removeEventObserver(*this);
 }
