@@ -681,8 +681,8 @@ void FileContext::execute(FileReadRequest& request)
         return;
 
     // Release the locks we can begin the download.
-    mDownloadingLock.unlock();
-    mOnDiskLock.unlock();
+    onDiskLock.unlock();
+    downloadingLock.unlock();
 
     // Begin the download.
     download->begin();
