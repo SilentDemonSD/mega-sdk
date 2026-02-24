@@ -177,7 +177,7 @@ auto FileRangeContext::failed(Error result, int retries) -> std::variant<Abort, 
         return Abort();
 
     // Retry the download.
-    return options.mRangeRetryBackoff;
+    return options.mRangeRetryBackoff * (1 << --retries);
 }
 
 FileRangeContext::FileRangeContext(Activity activity,
