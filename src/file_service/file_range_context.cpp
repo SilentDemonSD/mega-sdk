@@ -115,11 +115,18 @@ try
             break;
     }
 
-    // Couldn't write any data to disk.
+    // We didn't fill any gaps.
     if (written.mBegin == written.mEnd)
-        return Abort();
+    {
+        // Because no gaps needed to be filled.
+        if (current == end)
+            return Continue();
 
-    // Adjust effective written range.
+        // Because we couldn't write any data to the first gap.
+        return Abort();
+    }
+
+    // Extend written range if all gaps were filled.
     written = current == end ? range : written;
 
     // Convenience.
