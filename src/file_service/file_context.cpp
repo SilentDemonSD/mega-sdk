@@ -194,23 +194,17 @@ void FileContext::cancel(const FileRange& range)
 
     // A range overlaps the beginning of range.
     if (begin->first.mBegin < range.mBegin && begin->first.mEnd <= range.mEnd)
-    {
-        // Bump iterator.
-        auto temp = begin++;
-
-        // Clamp the range's ending so it doesn't overlap range.
-        temp->second->range(temp->first.mBegin, range.mBegin);
-    }
+        begin->second->range(begin->first.mBegin, range.mBegin);
 
     // Do any ranges end after range?
     auto end = mDownloading.endsAfter(range.mEnd);
 
     // A range overlaps the ending of range.
     if (end != mDownloading.end() && end->first.mBegin < range.mEnd)
-    {
-        // Bump beginning of range so it doesn't overlap range.
         end->second->range(range.mEnd, end->first.mEnd);
-    }
+
+    // Recompute begin and end;
+    std::tie(begin, end) = mDownloading.find(range);
 
     // No ranges to cancel.
     if (begin == end)
