@@ -879,8 +879,12 @@ void FileContext::execute(FileWriteRequest& request)
     if (!request.mBuffer)
         return completed(std::move(request), FILE_INVALID_ARGUMENTS);
 
-    // Cancel downloads contained within range.
-    cancel(range);
+    // Cancel any downloads contained within range when returning.
+    auto canceller = makeScopedDestructor(
+        [&]()
+        {
+            cancel(range);
+        }); // canceller
 
     // Acquire lock.
     std::lock_guard guard(mLock);
@@ -891,12 +895,12 @@ void FileContext::execute(FileWriteRequest& request)
     // Try and write the caller's content to storage.
     std::tie(length, std::ignore) = mBuffer->write(request.mBuffer, range.mBegin, length);
 
+    // Compute actual end of the written range.
+    range.mEnd = range.mBegin + length;
+
     // Couldn't write any content to storage.
     if (!length)
         return completed(std::move(request), FILE_FAILED);
-
-    // Compute actual end of the written range.
-    range.mEnd = range.mBegin + length;
 
     // Convenience.
     auto& database = mService.database();
