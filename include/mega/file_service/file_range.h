@@ -25,8 +25,8 @@ struct FileRange
         return !(*this == rhs);
     }
 
-    std::uint64_t mBegin;
-    std::uint64_t mEnd;
+    std::uint64_t mBegin{};
+    std::uint64_t mEnd{};
 }; // FileRange
 
 std::ostream& operator<<(std::ostream& ostream, const FileRange& range);
