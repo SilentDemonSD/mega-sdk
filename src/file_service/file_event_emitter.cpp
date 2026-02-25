@@ -208,14 +208,17 @@ FileEventEmitter::FileEventEmitter():
     mPendingEvents(),
     mPendingEventsLock(),
     mServiceObservers(),
-    mTerminate{false},
+    mTerminate(false),
     mWorker(std::bind(&FileEventEmitter::loop, this))
 {}
 
 FileEventEmitter::~FileEventEmitter()
 {
     // Let our worker know it's time to terminate.
-    mTerminate = true;
+    {
+        std::lock_guard guard(mPendingEventsLock);
+        mTerminate = true;
+    }
 
     // Make sure our worker's awake.
     mCV.notify_one();

@@ -66,7 +66,7 @@ class FileEventEmitter
     FileEventObserverMap mServiceObservers;
 
     // Tells mWorker when it should terminate.
-    std::atomic<bool> mTerminate;
+    bool mTerminate;
 
     // Tracks state while an event is being transmitted.
     static thread_local TransmitContext* mTransmitContext;
