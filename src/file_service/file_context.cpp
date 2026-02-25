@@ -45,7 +45,7 @@ namespace file_service
 
 using namespace common;
 
-class FileContext::FileRangeContext: private common::PartialDownloadCallback
+class FileContext::DownloadContext: private common::PartialDownloadCallback
 {
     // Called when the file range has been downloaded.
     void completed(Error result) override;
@@ -60,7 +60,7 @@ class FileContext::FileRangeContext: private common::PartialDownloadCallback
     virtual auto failed(Error result, int retries) -> std::variant<Abort, Retry> override;
 
     // Logs instance lifetime.
-    common::InstanceLogger<FileRangeContext> mInstanceLogger;
+    common::InstanceLogger<DownloadContext> mInstanceLogger;
 
     // Keeps our manager alive until we're dead.
     common::Activity mActivity;
@@ -78,12 +78,12 @@ class FileContext::FileRangeContext: private common::PartialDownloadCallback
     std::uint64_t mEnd;
 
     // Where are we in our manager's map of contexts?
-    FileRangeMap<FileRangeContextPtr>::Iterator mIterator;
+    FileRangeMap<DownloadContextPtr>::Iterator mIterator;
 
 public:
-    FileRangeContext(common::Activity activity,
-                     FileContext& context,
-                     FileRangeMap<FileRangeContextPtr>::Iterator iterator);
+    DownloadContext(common::Activity activity,
+                    FileContext& context,
+                    FileRangeMap<DownloadContextPtr>::Iterator iterator);
 
     // Cancel this range's download.
     void cancel();
@@ -100,7 +100,7 @@ public:
     // Update this context's range.
     void range(std::uint64_t begin, std::uint64_t end);
     void range(const FileRange& range);
-}; // FileRangeContext
+}; // DownloadContext
 
 class FileContext::FetchContext
 {
@@ -267,7 +267,7 @@ void FileContext::cancel(const FileRange& range)
         return;
 
     // Tracks any downloads in progress.
-    std::vector<FileRangeContextPtr> contexts;
+    std::vector<DownloadContextPtr> contexts;
 
     // Tracks how many downloads are still in progress.
     std::atomic<std::size_t> count{0};
@@ -760,7 +760,7 @@ void FileContext::execute(FileReadRequest& request)
     assert(added);
 
     // Instantiate a context so manage the range's download.
-    i->second = std::make_shared<FileRangeContext>(mActivities.begin(), *this, i);
+    i->second = std::make_shared<DownloadContext>(mActivities.begin(), *this, i);
 
     // Queue the read for later completion.
     mPendingReadRequests.emplace(std::move(request));
@@ -1607,7 +1607,7 @@ void FileContext::write(FileWriteRequest request)
     executeOrQueue(std::move(request));
 }
 
-void FileContext::FileRangeContext::completed(Error error)
+void FileContext::DownloadContext::completed(Error error)
 {
     // Get a reference to our context.
     //
@@ -1644,10 +1644,10 @@ void FileContext::FileRangeContext::completed(Error error)
         executor.execute(std::bind(std::move(callback), result), true);
 }
 
-auto FileContext::FileRangeContext::data(const void* buffer,
-                                         std::uint64_t offset,
-                                         std::uint64_t length,
-                                         const Speeds&) -> std::variant<Abort, Continue>
+auto FileContext::DownloadContext::data(const void* buffer,
+                                        std::uint64_t offset,
+                                        std::uint64_t length,
+                                        const Speeds&) -> std::variant<Abort, Continue>
 try
 {
     // Convenience.
@@ -1737,7 +1737,7 @@ catch (std::runtime_error&)
     return Abort();
 }
 
-auto FileContext::FileRangeContext::failed(Error result, int retries) -> std::variant<Abort, Retry>
+auto FileContext::DownloadContext::failed(Error result, int retries) -> std::variant<Abort, Retry>
 {
     // Failure isn't due to a retryable error.
     if (!retryable(result))
@@ -1754,12 +1754,11 @@ auto FileContext::FileRangeContext::failed(Error result, int retries) -> std::va
     return options.mRangeRetryBackoff * (1 << --retries);
 }
 
-FileContext::FileRangeContext::FileRangeContext(
-    Activity activity,
-    FileContext& context,
-    FileRangeMap<FileRangeContextPtr>::Iterator iterator):
+FileContext::DownloadContext::DownloadContext(Activity activity,
+                                              FileContext& context,
+                                              FileRangeMap<DownloadContextPtr>::Iterator iterator):
     PartialDownloadCallback(),
-    mInstanceLogger("FileRangeContext", *this, logger()),
+    mInstanceLogger("DownloadContext", *this, logger()),
     mActivity(std::move(activity)),
     mCallbacks(),
     mContext(context),
@@ -1768,14 +1767,14 @@ FileContext::FileRangeContext::FileRangeContext(
     mIterator(iterator)
 {}
 
-void FileContext::FileRangeContext::cancel()
+void FileContext::DownloadContext::cancel()
 {
     // Download's alive so cancel it.
     if (auto download = mDownload)
         download->cancel();
 }
 
-auto FileContext::FileRangeContext::download() -> PartialDownloadPtr
+auto FileContext::DownloadContext::download() -> PartialDownloadPtr
 {
     // Sanity.
     assert(!mDownload);
@@ -1803,23 +1802,23 @@ auto FileContext::FileRangeContext::download() -> PartialDownloadPtr
     return mDownload;
 }
 
-std::uint64_t FileContext::FileRangeContext::end() const
+std::uint64_t FileContext::DownloadContext::end() const
 {
     return mEnd;
 }
 
-void FileContext::FileRangeContext::queue(FileFetchCallback callback)
+void FileContext::DownloadContext::queue(FileFetchCallback callback)
 {
     // Queue the callback for later execution.
     mCallbacks.emplace_back(std::move(callback));
 }
 
-void FileContext::FileRangeContext::range(std::uint64_t begin, std::uint64_t end)
+void FileContext::DownloadContext::range(std::uint64_t begin, std::uint64_t end)
 {
     range(FileRange(begin, end));
 }
 
-void FileContext::FileRangeContext::range(const FileRange& range)
+void FileContext::DownloadContext::range(const FileRange& range)
 {
     // Range hasn't actually changed.
     if (mIterator->first == range)

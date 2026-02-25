@@ -55,11 +55,11 @@ namespace file_service
 
 class FileContext final: public std::enable_shared_from_this<FileContext>
 {
+    // Tracks state necessary for download.
+    class DownloadContext;
+
     // Tracks state necessary for fetch.
     class FetchContext;
-
-    // Tracks state necessary to download.
-    class FileRangeContext;
 
     // Tracks state necessary for flush.
     class FlushContext;
@@ -68,8 +68,8 @@ class FileContext final: public std::enable_shared_from_this<FileContext>
     class ReclaimContext;
 
     // Convenience.
+    using DownloadContextPtr = std::shared_ptr<DownloadContext>;
     using FetchContextPtr = std::shared_ptr<FetchContext>;
-    using FileRangeContextPtr = std::shared_ptr<FileRangeContext>;
     using FlushContextPtr = std::shared_ptr<FlushContext>;
     using FlushContextWeakPtr = std::weak_ptr<FlushContext>;
     using ReclaimContextPtr = std::shared_ptr<ReclaimContext>;
@@ -210,7 +210,7 @@ class FileContext final: public std::enable_shared_from_this<FileContext>
     FileBufferPtr mBuffer;
 
     // What ranges are currently being downloaded?
-    FileRangeMap<FileRangeContextPtr> mDownloading;
+    FileRangeMap<DownloadContextPtr> mDownloading;
 
     // How we get and set our file's attributes.
     FileInfoContextPtr mInfo;
