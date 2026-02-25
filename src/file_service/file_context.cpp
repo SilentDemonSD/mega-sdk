@@ -785,8 +785,14 @@ void FileContext::execute(FileReadRequest& request)
 // When this request is executed, any pending downloads will have completed.
 void FileContext::execute(FileReclaimRequest& request)
 {
+    // Cancel any pending downloads.
+    cancel(FileRange(0, mInfo->size()));
+
     // Make sure no one is messing with our range maps.
     std::lock_guard guard(mLock);
+
+    // Sanity: All downloads should be complete.
+    assert(mDownloading.empty());
 
     // Convenience.
     auto& database = mService.database();
@@ -807,13 +813,7 @@ void FileContext::execute(FileReclaimRequest& request)
     if (!mBuffer->truncate(0))
         return completed(std::move(request), FILE_FAILED);
 
-    // Remove all of the ranges from memory.
-    //
-    // Clearing mDownloading will cancel any downloads that are still in
-    // progress. This is safe, however, as we know that there will be no
-    // pending reads because if there were, this reclaim request would
-    // still be waiting to execute.
-    mDownloading.clear();
+    // Remove all written ranges from memory.
     mOnDisk.clear();
 
     // Update the file's size.
