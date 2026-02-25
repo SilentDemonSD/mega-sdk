@@ -473,31 +473,14 @@ auto FileContext::completed(Request&& request, Result result, Captures&&... capt
     // Called to complete the user's request.
     auto wrapper = [=](auto& callback, auto& cookie, auto&, auto& tag, auto&&...) mutable
     {
-        // Are we passing a file result?
-        if constexpr (std::is_same_v<FileResult, Result>)
-        {
-            // Determine the callback's concrete type.
-            using Callback = decltype(callback);
+        // Determine the callback's concrete type.
+        using Callback = std::remove_reference_t<decltype(callback)>;
 
-            // Check if we have to pass result as an unexpected.
-            if constexpr (std::is_invocable_v<Callback, FileResult>)
-                callback(result);
-            else
-                callback(unexpected(result));
-        }
+        // Pass result as is when possible otherwise pass it as an unexpected.
+        if constexpr (std::is_invocable_v<Callback, Result>)
+            std::exchange(callback, Callback())(result);
         else
-        {
-            // Pass the result as is.
-            callback(result);
-        }
-
-        // Ensure callback is deallocated.
-        //
-        // This is necessary as it might contain a reference to this file.
-        //
-        // If we don't deallocate the callback here, we could encounter a
-        // deadlock below when the context variable goes out of scope.
-        callback = nullptr;
+            std::exchange(callback, Callback())(unexpected(result));
 
         // Check if our context is still alive.
         auto context = cookie.lock();
