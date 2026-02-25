@@ -35,6 +35,9 @@ struct ServiceOptions
     // How long should we wait before we remove a file context from memory?
     std::chrono::seconds mFileContextReleaseDelay{2 * 60};
 
+    // Reads less than or equal to this value will be downloaded immediately.
+    std::uint64_t mImmediateDownloadThreshold = 1ul << 20;
+
     // How many times will we try to download a range before we give up.
     std::uint64_t mMaximumRangeRetries = 5u;
 
