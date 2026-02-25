@@ -45,7 +45,7 @@ namespace file_service
 
 using namespace common;
 
-class FileContext::DownloadContext: private common::PartialDownloadCallback
+class FileContext::DownloadContext: private PartialDownloadCallback
 {
     // Called when the file range has been downloaded.
     void completed(Error result) override;
@@ -60,10 +60,10 @@ class FileContext::DownloadContext: private common::PartialDownloadCallback
     virtual auto failed(Error result, int retries) -> std::variant<Abort, Retry> override;
 
     // Logs instance lifetime.
-    common::InstanceLogger<DownloadContext> mInstanceLogger;
+    InstanceLogger<DownloadContext> mInstanceLogger;
 
     // Keeps our manager alive until we're dead.
-    common::Activity mActivity;
+    Activity mActivity;
 
     // Callbacks to execute when this range's fetch completes.
     std::vector<FileFetchCallback> mCallbacks;
@@ -72,7 +72,7 @@ class FileContext::DownloadContext: private common::PartialDownloadCallback
     FileContext& mContext;
 
     // The download that's retrieving this file range's data.
-    common::PartialDownloadPtr mDownload;
+    PartialDownloadPtr mDownload;
 
     // Where does our downloaded data currently end?
     std::uint64_t mEnd;
@@ -81,7 +81,7 @@ class FileContext::DownloadContext: private common::PartialDownloadCallback
     FileRangeMap<DownloadContextPtr>::Iterator mIterator;
 
 public:
-    DownloadContext(common::Activity activity,
+    DownloadContext(Activity activity,
                     FileContext& context,
                     FileRangeMap<DownloadContextPtr>::Iterator iterator);
 
@@ -89,7 +89,7 @@ public:
     void cancel();
 
     // Create a download this range.
-    auto download() -> common::PartialDownloadPtr;
+    auto download() -> PartialDownloadPtr;
 
     // Where does our downloaded data currently end?
     std::uint64_t end() const;
@@ -108,7 +108,7 @@ class FileContext::FetchContext
     void completed(FileResult result);
 
     // Logs instance lifetime.
-    common::InstanceLogger<FetchContext> mInstanceLogger;
+    InstanceLogger<FetchContext> mInstanceLogger;
 
     // Keep mContext alive as long as we are alive.
     Activity mActivity;
@@ -147,7 +147,7 @@ class FileContext::FlushContext
     void uploaded(FlushContextPtr& context, ErrorOr<UploadResult> result);
 
     // Logs instance lifetime.
-    common::InstanceLogger<FlushContext> mInstanceLogger;
+    InstanceLogger<FlushContext> mInstanceLogger;
 
     // Keep mContext alive as long as we are alive.
     Activity mActivity;
@@ -188,7 +188,7 @@ class FileContext::ReclaimContext
     void completed(ReclaimContextPtr context, Lock&& lock, FileResultOr<std::uint64_t> result);
 
     // Logs instance lifetime.
-    common::InstanceLogger<ReclaimContext> mInstanceLogger;
+    InstanceLogger<ReclaimContext> mInstanceLogger;
 
     // Keep mContext alive as long as we are alive.
     Activity mActivity;
