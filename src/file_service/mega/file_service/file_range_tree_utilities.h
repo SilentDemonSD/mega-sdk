@@ -26,13 +26,13 @@ class FileRangeGapIterator
     using KeyFunctionType = GetKeyFunctionTypeT<Container>;
 
     // The range we're currently referencing.
-    ConstIterator mIterator;
+    ConstIterator mIterator{};
 
     // The last gap we detected.
-    FileRange mGap;
+    FileRange mGap{};
 
     // The range we're iterating over.
-    FileRange mRange;
+    FileRange mRange{};
 
     // Detect the next gap.
     void detect()
