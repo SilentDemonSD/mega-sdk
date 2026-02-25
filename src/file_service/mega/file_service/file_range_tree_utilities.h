@@ -98,7 +98,7 @@ public:
         mRange(range)
     {
         // Can't find any gaps in a range of zero length.
-        if (mRange.mBegin == mRange.mEnd)
+        if (mRange.mBegin >= mRange.mEnd)
             return;
 
         // Detect the first gap in mRange.
