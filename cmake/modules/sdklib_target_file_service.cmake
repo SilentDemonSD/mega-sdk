@@ -102,9 +102,6 @@ target_sources(SDKlib PRIVATE
                       src/file_service/mega/file_service/file_info_context.h
                       src/file_service/mega/file_service/file_info_context_badge.h
                       src/file_service/mega/file_service/file_info_context_badge_forward.h
-                      src/file_service/mega/file_service/file_range_context.h
-                      src/file_service/mega/file_service/file_range_context_forward.h
-                      src/file_service/mega/file_service/file_range_context_pointer.h
                       src/file_service/mega/file_service/file_range_map.h
                       src/file_service/mega/file_service/file_range_set.h
                       src/file_service/mega/file_service/file_range_traits.h
@@ -156,7 +153,6 @@ target_sources(SDKlib PRIVATE
                       src/file_service/file_info.cpp
                       src/file_service/file_info_context.cpp
                       src/file_service/file_range.cpp
-                      src/file_service/file_range_context.cpp
                       src/file_service/file_read_request_set.cpp
                       src/file_service/file_read_write_state.cpp
                       src/file_service/file_result.cpp

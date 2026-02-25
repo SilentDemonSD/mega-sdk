@@ -21,7 +21,6 @@
 #include <mega/file_service/file_forward.h>
 #include <mega/file_service/file_info_context_pointer.h>
 #include <mega/file_service/file_info_forward.h>
-#include <mega/file_service/file_range_context_pointer.h>
 #include <mega/file_service/file_range_forward.h>
 #include <mega/file_service/file_range_map.h>
 #include <mega/file_service/file_range_set.h>
@@ -41,6 +40,7 @@
 #include <mega/types.h>
 
 #include <chrono>
+#include <cstdint>
 #include <functional>
 #include <list>
 #include <memory>
@@ -58,7 +58,8 @@ class FileContext final: public std::enable_shared_from_this<FileContext>
     // Tracks state necessary for fetch.
     class FetchContext;
 
-    friend class FileRangeContext;
+    // Tracks state necessary to download.
+    class FileRangeContext;
 
     // Tracks state necessary for flush.
     class FlushContext;
@@ -68,6 +69,7 @@ class FileContext final: public std::enable_shared_from_this<FileContext>
 
     // Convenience.
     using FetchContextPtr = std::shared_ptr<FetchContext>;
+    using FileRangeContextPtr = std::shared_ptr<FileRangeContext>;
     using FlushContextPtr = std::shared_ptr<FlushContext>;
     using FlushContextWeakPtr = std::weak_ptr<FlushContext>;
     using ReclaimContextPtr = std::shared_ptr<ReclaimContext>;
