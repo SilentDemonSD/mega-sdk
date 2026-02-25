@@ -269,8 +269,11 @@ class FileContext final: public std::enable_shared_from_this<FileContext>
     // The service that manages this context.
     FileServiceContext& mService;
 
-    // Keeps us alive until all of our ranges have died.
-    common::ActivityMonitor mActivities;
+    // Keeps us alive until all of our downloads have completed.
+    common::ActivityMonitor mDownloadMonitor;
+
+    // Keeps us alive until all non-download operations have completed.
+    common::ActivityMonitor mMonitor;
 
 public:
     FileContext(common::Activity activity,

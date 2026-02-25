@@ -763,7 +763,7 @@ void FileContext::execute(FileReadRequest& request)
     assert(added);
 
     // Instantiate a context so manage the range's download.
-    i->second = std::make_shared<DownloadContext>(mActivities.begin(), *this, i);
+    i->second = std::make_shared<DownloadContext>(mDownloadMonitor.begin(), *this, i);
 
     // Queue the read for later completion.
     mPendingReadRequests.emplace(std::move(request));
@@ -859,11 +859,9 @@ void FileContext::execute(FileRemoveRequest& request)
     }; // removed
 
     // Ask the client to remove our file.
-    mService.client().remove(std::bind(std::move(removed),
-                                       mActivities.begin(),
-                                       std::move(request),
-                                       std::placeholders::_1),
-                             handle);
+    mService.client().remove(
+        std::bind(std::move(removed), mMonitor.begin(), std::move(request), std::placeholders::_1),
+        handle);
 }
 
 void FileContext::execute(FileTouchRequest& request)
@@ -1405,7 +1403,8 @@ FileContext::FileContext(Activity activity,
     mRequests(),
     mRequestsLock(),
     mService(service),
-    mActivities()
+    mDownloadMonitor(),
+    mMonitor()
 {}
 
 FileContext::~FileContext()
@@ -1444,57 +1443,8 @@ void FileContext::fetchBarrier(FileFetchBarrierCallback callback)
     // Sanity.
     assert(callback);
 
-    // Acquire lock.
-    std::unique_lock lock(mLock);
-
-    // True if a download is in progress.
-    auto fetching = [](const auto& entry)
-    {
-        return entry.second != nullptr;
-    }; // fetching
-
-    // How many fetches are in progress?
-    auto count = std::count_if(mDownloading.begin(), mDownloading.end(), fetching);
-
-    // No fetches are in progress.
-    if (!count)
-    {
-        // Release range lock.
-        lock.unlock();
-
-        // Invoke user callback.
-        return callback();
-    }
-
-    // To avoid copying state needlessly.
-    struct BarrierContext
-    {
-        BarrierContext(FileFetchBarrierCallback callback, std::size_t count):
-            mCallback(std::move(callback)),
-            mCount{count}
-        {}
-
-        FileFetchBarrierCallback mCallback;
-        std::atomic<std::size_t> mCount;
-    }; // BarrierContext
-
-    // Instantiate barrier context.
-    auto context = std::make_shared<BarrierContext>(std::move(callback), count);
-
-    // Called when a fetch has completed.
-    auto fetched = [context](FileResult)
-    {
-        // Invoke the user's callback when all fetches have completed.
-        if (context->mCount.fetch_sub(1) == 1)
-            context->mCallback();
-    }; // fetched
-
-    // Make sure fetched is called when each fetch has completed.
-    for (const auto& entry: mDownloading)
-    {
-        if (entry.second)
-            entry.second->queue(fetched);
-    }
+    // Execute callback when all downloads have completed.
+    mDownloadMonitor.whenIdle(std::move(callback));
 }
 
 void FileContext::flush(FileFlushRequest request)
@@ -1870,7 +1820,7 @@ void FileContext::FetchContext::completed(FileResult result)
 
 FileContext::FetchContext::FetchContext(FileContext& context, FileFetchRequest request):
     mInstanceLogger("FetchContext", *this, logger()),
-    mActivity(context.mActivities.begin()),
+    mActivity(context.mMonitor.begin()),
     mContext(context),
     mRequests()
 {
@@ -2034,7 +1984,7 @@ void FileContext::FlushContext::uploaded(FlushContextPtr& context, ErrorOr<Uploa
 
 FileContext::FlushContext::FlushContext(FileContext& context, FileFlushRequest request):
     mInstanceLogger("FlushContext", *this, logger()),
-    mActivity(context.mActivities.begin()),
+    mActivity(context.mMonitor.begin()),
     mContext(context),
     mHandle(context.mInfo->handle()),
     mLocation(context.mInfo->location().value()),
@@ -2150,7 +2100,7 @@ void FileContext::ReclaimContext::completed(ReclaimContextPtr context,
 
 FileContext::ReclaimContext::ReclaimContext(FileContext& context):
     mInstanceLogger("ReclaimContext", *this, logger()),
-    mActivity(context.mActivities.begin()),
+    mActivity(context.mMonitor.begin()),
     mAllocatedSize(context.mInfo->allocatedSize()),
     mCallbacks(),
     mContext(context)
