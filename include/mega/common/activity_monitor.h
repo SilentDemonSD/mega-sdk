@@ -1,10 +1,12 @@
 #pragma once
 
+#include <mega/common/activity_monitor_forward.h>
+
 #include <condition_variable>
 #include <cstddef>
+#include <functional>
+#include <list>
 #include <mutex>
-
-#include <mega/common/activity_monitor_forward.h>
 
 namespace mega
 {
@@ -45,6 +47,9 @@ class ActivityMonitor
 {
     friend class Activity;
 
+    // The functions we should call when all activities have completed.
+    std::list<std::function<void()>> mCallbacks;
+
     // Signalled when all activity has completed.
     std::condition_variable mCompleted;
 
@@ -67,6 +72,9 @@ public:
 
     // Wait until all activities have completed.
     void waitUntilIdle();
+
+    // Execute callback when all activities have completed.
+    void whenIdle(std::function<void()> callback);
 }; // ActivityMonitor
 
 } // common

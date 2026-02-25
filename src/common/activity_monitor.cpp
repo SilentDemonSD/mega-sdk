@@ -44,17 +44,39 @@ Activity::Activity(Activity&& other)
 
 Activity::~Activity()
 {
+    // Activity isn't in progress.
     if (!mMonitor)
         return;
 
-    std::lock_guard<std::mutex> guard(mMonitor->mLock);
+    // Convenience.
+    using CallbackList = decltype(mMonitor->mCallbacks);
 
-    assert(mMonitor->mProcessing);
+    // Figure out what callbacks we have to invoke, if any.
+    auto callbacks = [&]()
+    {
+        // Acquire monitor lock.
+        std::lock_guard guard(mMonitor->mLock);
 
-    --mMonitor->mProcessing;
+        // Sanity: At least one activity should be in progress.
+        assert(mMonitor->mProcessing);
 
-    if (!mMonitor->mProcessing)
+        // One or more activites are still in progress.
+        if (--mMonitor->mProcessing)
+            return CallbackList();
+
+        // Take ownership of our monitor's list of callbacks.
+        auto callbacks = std::exchange(mMonitor->mCallbacks, {});
+
+        // Wake any threads waiting for our monitor to become idle.
         mMonitor->mCompleted.notify_all();
+
+        // Pass callbacks to our caller.
+        return callbacks;
+    }();
+
+    // Invoke callbacks, if any.
+    for (; !callbacks.empty(); callbacks.pop_front())
+        callbacks.front()();
 }
 
 Activity& Activity::operator=(const Activity& rhs)
@@ -111,6 +133,19 @@ void ActivityMonitor::waitUntilIdle()
     std::unique_lock<std::mutex> lock(mLock);
 
     mCompleted.wait(lock, [&]() { return !mProcessing; });
+}
+
+void ActivityMonitor::whenIdle(std::function<void()> callback)
+{
+    // Sanity.
+    assert(callback);
+
+    // One or more activities are in progress.
+    if (std::unique_lock lock(mLock); mProcessing)
+        return mCallbacks.emplace_back(std::move(callback)), void();
+
+    // No activities were in progress.
+    callback();
 }
 
 } // common
