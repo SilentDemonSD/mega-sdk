@@ -471,7 +471,7 @@ auto FileContext::completed(Request&& request, Result result, Captures&&... capt
     static_assert(std::is_rvalue_reference_v<decltype(request)>);
 
     // Called to complete the user's request.
-    auto callback = [=](auto& callback, auto& cookie, auto&, auto& tag, auto&&...) mutable
+    auto wrapper = [=](auto& callback, auto& cookie, auto&, auto& tag, auto&&...) mutable
     {
         // Are we passing a file result?
         if constexpr (std::is_same_v<FileResult, Result>)
@@ -511,10 +511,10 @@ auto FileContext::completed(Request&& request, Result result, Captures&&... capt
 
         // See if we can't execute any queued requests.
         context->execute();
-    }; // callback
+    }; // wrapper
 
     // Queue the user's request for completion.
-    mService.execute(std::bind(std::move(callback),
+    mService.execute(std::bind(std::move(wrapper),
                                swallow(std::move(request.mCallback), request.name()),
                                weak_from_this(),
                                std::placeholders::_1,
