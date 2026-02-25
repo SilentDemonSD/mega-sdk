@@ -30,9 +30,6 @@ namespace file_service
 
 using namespace common;
 
-// Check if result is a retryable error.
-static bool retryable(const Error& result);
-
 void FileRangeContext::completed(Error error)
 {
     // Get a reference to our context.
@@ -271,20 +268,6 @@ void FileRangeContext::range(const FileRange& range)
 
     // Ensure end of downloaded data is within our new range.
     mEnd = std::min(range.mEnd, std::max(range.mBegin, mEnd));
-}
-
-bool retryable(const Error& result)
-{
-    // Client's being torn down or the download has been cancelled.
-    if (result == API_EINCOMPLETE)
-        return false;
-
-    // File's been taken down because it breached our terms and conditions.
-    if (result == API_ETOOMANY && result.hasExtraInfo())
-        return false;
-
-    // Retry all other failures.
-    return true;
 }
 
 } // file_service

@@ -104,6 +104,7 @@ target_sources(SDKlib PRIVATE
                       src/common/logger.cpp
                       src/common/node_event_type.cpp
                       src/common/normalized_path.cpp
+                      src/common/partial_download_callback.cpp
                       src/common/pending_callbacks.cpp
                       src/common/query.cpp
                       src/common/scoped_query.cpp

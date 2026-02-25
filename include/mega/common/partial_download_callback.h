@@ -19,6 +19,9 @@ class PartialDownloadCallback
 protected:
     PartialDownloadCallback() = default;
 
+    // Check if result is a retryable error.
+    virtual bool retryable(const Error& result);
+
 public:
     // Indicates the download should be aborted.
     struct Abort
