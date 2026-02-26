@@ -210,7 +210,11 @@ class FileContext final: public std::enable_shared_from_this<FileContext>
     FileBufferPtr mBuffer;
 
     // What ranges are currently being downloaded?
-    FileRangeMap<DownloadContextPtr> mDownloading;
+    struct
+    {
+        // Tracks all downloads in progress.
+        FileRangeMap<DownloadContextPtr> mDownloading;
+    } mDownloading;
 
     // How we get and set our file's attributes.
     FileInfoContextPtr mInfo;

@@ -249,10 +249,10 @@ void FileContext::cancel(const FileRange& range)
     assert(mPendingReadRequests.empty());
 
     // Do any ranges end after range?
-    auto begin = mDownloading.endsAfter(range.mBegin);
+    auto begin = mDownloading.mDownloading.endsAfter(range.mBegin);
 
     // No ranges end after range.
-    if (begin == mDownloading.end() || begin->first.mBegin >= range.mEnd)
+    if (begin == mDownloading.mDownloading.end() || begin->first.mBegin >= range.mEnd)
         return;
 
     // A range overlaps the beginning of range.
@@ -260,14 +260,14 @@ void FileContext::cancel(const FileRange& range)
         begin->second->range(begin->first.mBegin, range.mBegin);
 
     // Do any ranges end after range?
-    auto end = mDownloading.endsAfter(range.mEnd);
+    auto end = mDownloading.mDownloading.endsAfter(range.mEnd);
 
     // A range overlaps the ending of range.
-    if (end != mDownloading.end() && end->first.mBegin < range.mEnd)
+    if (end != mDownloading.mDownloading.end() && end->first.mBegin < range.mEnd)
         end->second->range(range.mEnd, end->first.mEnd);
 
     // Recompute begin and end;
-    std::tie(begin, end) = mDownloading.find(range);
+    std::tie(begin, end) = mDownloading.mDownloading.find(range);
 
     // No ranges to cancel.
     if (begin == end)
@@ -353,17 +353,17 @@ void FileContext::cancel()
     // means that the client servicing those downloads may be executing
     // within us or about to execute within us.
 
-    // Get a snapshot of our ranges.
-    auto ranges = [&]()
+    // What downloads are in progress?
+    auto downloading = [&]()
     {
         std::lock_guard guard(mLock);
         return mDownloading;
     }();
 
-    // Cancel any downloads in progress.
-    for (const auto& [_, context]: ranges)
+    // Cancel all downloads in progress.
+    for (auto* downloads: {&downloading.mDownloading})
     {
-        if (context)
+        for (const auto& [_, context]: *downloads)
             context->cancel();
     }
 
@@ -728,7 +728,8 @@ void FileContext::execute(FileReadRequest& request)
     }
 
     // The read's contained within an existing range that is downloading.
-    if (auto i = mDownloading.endsAfter(begin); i != mDownloading.end() && i->first.mBegin <= begin)
+    if (auto i = mDownloading.mDownloading.endsAfter(begin);
+        i != mDownloading.mDownloading.end() && i->first.mBegin <= begin)
     {
         // Wher does the range's downloaded data end?
         auto max = i->second->end();
@@ -745,7 +746,7 @@ void FileContext::execute(FileReadRequest& request)
     }
 
     // Add a new range.
-    auto [i, added] = mDownloading.tryAdd(
+    auto [i, added] = mDownloading.mDownloading.tryAdd(
         [&]()
         {
             // We'd overlap a range already on disk.
@@ -754,8 +755,8 @@ void FileContext::execute(FileReadRequest& request)
                 return FileRange(range.mBegin, i->mBegin);
 
             // We'd overlap a range that's already being downloaded.
-            if (auto i = mDownloading.endsAfter(range.mEnd);
-                i != mDownloading.end() && i->first.mBegin < range.mEnd)
+            if (auto i = mDownloading.mDownloading.endsAfter(range.mEnd);
+                i != mDownloading.mDownloading.end() && i->first.mBegin < range.mEnd)
                 return FileRange(range.mBegin, i->first.mBegin);
 
             // Read doesn't overlap any existing range.
@@ -767,7 +768,10 @@ void FileContext::execute(FileReadRequest& request)
     assert(added);
 
     // Instantiate a context so manage the range's download.
-    i->second = std::make_shared<DownloadContext>(mDownloadMonitor.begin(), *this, mDownloading, i);
+    i->second = std::make_shared<DownloadContext>(mDownloadMonitor.begin(),
+                                                  *this,
+                                                  mDownloading.mDownloading,
+                                                  i);
 
     // Queue the read for later completion.
     mPendingReadRequests.emplace(std::move(request));
@@ -796,7 +800,7 @@ void FileContext::execute(FileReclaimRequest& request)
     std::lock_guard guard(mLock);
 
     // Sanity: All downloads should be complete.
-    assert(mDownloading.empty());
+    assert(mDownloading.mDownloading.empty());
 
     // Convenience.
     auto& database = mService.database();
