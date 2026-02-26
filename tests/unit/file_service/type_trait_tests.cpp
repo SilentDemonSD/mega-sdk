@@ -96,7 +96,7 @@ static_assert(!IsEqualityComparableV<std::pair<int, Unrelated>>);
 
 template<typename Provided, typename Expected>
 constexpr auto SelectFirstResultIsV =
-    std::is_same_v<std::invoke_result_t<SelectFirst, Provided>, Expected>;
+    std::is_same_v<std::invoke_result_t<Select<0>, Provided>, Expected>;
 
 // Convenience.
 using IntPair = std::pair<int, int>;

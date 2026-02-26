@@ -20,7 +20,7 @@ struct KeyFunctionB
 }; // KeyFunctionD
 
 static_assert(IsValidKeyFunctionV<Identity, const FileRange>);
-static_assert(IsValidKeyFunctionV<SelectFirst, std::pair<const FileRange, int>>);
+static_assert(IsValidKeyFunctionV<Select<0>, std::pair<const FileRange, int>>);
 
 static_assert(!IsValidKeyFunctionV<KeyFunctionA, const FileRange>);
 static_assert(!IsValidKeyFunctionV<KeyFunctionB, const FileRange>);
