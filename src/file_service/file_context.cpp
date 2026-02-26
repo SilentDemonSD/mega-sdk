@@ -240,44 +240,57 @@ void FileContext::addRange(const FileRange& range, Transaction& transaction)
     query.execute();
 }
 
-void FileContext::cancel(const FileRange& range)
+auto FileContext::cancel(const FileRangeMap<DownloadContextPtr>& downloading,
+                         const FileRange& range) -> std::list<DownloadContextPtr>
 {
-    // Acquire context lock.
-    std::unique_lock lock(mLock);
-
-    // Make sure there are no pending read requests.
-    assert(mPendingReadRequests.empty());
-
     // Do any ranges end after range?
-    auto begin = mDownloading.mDownloading.endsAfter(range.mBegin);
+    auto begin = downloading.endsAfter(range.mBegin);
 
     // No ranges end after range.
-    if (begin == mDownloading.mDownloading.end() || begin->first.mBegin >= range.mEnd)
-        return;
+    if (begin == downloading.end() || begin->first.mBegin >= range.mEnd)
+        return {};
 
     // A range overlaps the beginning of range.
     if (begin->first.mBegin < range.mBegin && begin->first.mEnd <= range.mEnd)
         begin->second->range(begin->first.mBegin, range.mBegin);
 
     // Do any ranges end after range?
-    auto end = mDownloading.mDownloading.endsAfter(range.mEnd);
+    auto end = downloading.endsAfter(range.mEnd);
 
     // A range overlaps the ending of range.
-    if (end != mDownloading.mDownloading.end() && end->first.mBegin < range.mEnd)
+    if (end != downloading.end() && end->first.mBegin < range.mEnd)
         end->second->range(range.mEnd, end->first.mEnd);
 
     // Recompute begin and end;
-    std::tie(begin, end) = mDownloading.mDownloading.find(range);
+    std::tie(begin, end) = downloading.find(range);
 
-    // No ranges to cancel.
-    if (begin == end)
+    std::list<DownloadContextPtr> downloads;
+
+    // Populate a list of the downloads that need to be cancelled.
+    std::transform(begin, end, std::back_inserter(downloads), Select<1>());
+
+    // Let our caller know which downloads need to be cancelled.
+    return downloads;
+}
+
+void FileContext::cancel(const FileRange& range)
+{
+    // Make sure we have exclusive access to mDownloading.
+    std::unique_lock lock(mLock);
+
+    // Tracks which downloads we need to cancel.
+    std::list<DownloadContextPtr> downloads;
+
+    // Figure out which downloads we need to cancel, if any.
+    for (auto* map: {&mDownloading.mDownloading})
+        downloads.splice(downloads.end(), cancel(*map, range));
+
+    // No downloads need to be cancelled.
+    if (downloads.empty())
         return;
 
-    // Tracks any downloads in progress.
-    std::vector<DownloadContextPtr> contexts;
-
     // Tracks how many downloads are still in progress.
-    std::atomic<std::size_t> count{0};
+    std::atomic<std::size_t> count{downloads.size()};
 
     // So we know when all downloads have completed.
     std::promise<void> notifier;
@@ -290,42 +303,18 @@ void FileContext::cancel(const FileRange& range)
             notifier.set_value();
     }; // completed
 
-    // Figure out which range downloads are in progress.
-    for (; begin != end; ++begin)
-    {
-        // Convenience.
-        auto context = begin->second;
+    // Make sure each download calls our callback when it completes.
+    for (auto& download: downloads)
+        download->queue(completed);
 
-        // Range doesn't have a download in progress.
-        if (!context)
-            continue;
-
-        // Invoke our callback when the range's download completes.
-        context->queue(completed);
-
-        // Latch the context so we can cancel its download later.
-        contexts.emplace_back(context);
-    }
-
-    // No range downloads need to be cancelled.
-    if (contexts.empty())
-        return;
-
-    // Track how many downloads are in progress.
-    count += contexts.size();
-
-    // Release ranges lock.
+    // Release lock.
     //
-    // Any ranges that were waiting on the lock will now complete.
-    //
-    // NOTE: As this function is only called while processing a write
-    // request, we can be assured that no ranges will be added after this
-    // lock is released.
+    // Any downloads that were waiting on the lock will now complete.
     lock.unlock();
 
-    // Cancel any range downloads still in progress.
-    for (auto& context: contexts)
-        context->cancel();
+    // Cancel any downloads still in progress.
+    for (auto& download: downloads)
+        download->cancel();
 
     // Wait for range downloads to complete.
     notifier.get_future().get();

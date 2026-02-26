@@ -77,7 +77,10 @@ class FileContext final: public std::enable_shared_from_this<FileContext>
     // Add a range to the database.
     void addRange(const FileRange& range, common::Transaction& transaction);
 
-    // Cancel any reads intersect the specified range.
+    // Cancel all downloads contained within the specified range.
+    auto cancel(const FileRangeMap<DownloadContextPtr>& downloading,
+                const FileRange& range) -> std::list<DownloadContextPtr>;
+
     void cancel(const FileRange& range);
 
     // Cancel a pending request.
