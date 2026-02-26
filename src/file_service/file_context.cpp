@@ -273,8 +273,14 @@ auto FileContext::cancel(const FileRangeMap<DownloadContextPtr>& downloading,
     return downloads;
 }
 
-void FileContext::cancel(const FileRange& range)
+auto FileContext::cancel(const FileRange& range) -> std::future<void>
 {
+    // So we can tell our caller when all downloads have completed.
+    auto notifier = makeSharedPromise<void>();
+
+    // So our caller can wait until all downloads have completed.
+    auto waiter = notifier->get_future();
+
     // Make sure we have exclusive access to mDownloading.
     std::unique_lock lock(mLock);
 
@@ -287,20 +293,17 @@ void FileContext::cancel(const FileRange& range)
 
     // No downloads need to be cancelled.
     if (downloads.empty())
-        return;
+        return notifier->set_value(), std::move(waiter);
 
     // Tracks how many downloads are still in progress.
-    std::atomic<std::size_t> count{downloads.size()};
-
-    // So we know when all downloads have completed.
-    std::promise<void> notifier;
+    auto count = std::make_shared<std::atomic_size_t>(downloads.size());
 
     // Called when a download has completed.
-    auto completed = [&](auto)
+    auto completed = [count, notifier](auto)
     {
         // All downloads have completed.
-        if (count.fetch_sub(1) == 1)
-            notifier.set_value();
+        if (count->fetch_sub(1) == 1)
+            notifier->set_value();
     }; // completed
 
     // Make sure each download calls our callback when it completes.
@@ -316,8 +319,8 @@ void FileContext::cancel(const FileRange& range)
     for (auto& download: downloads)
         download->cancel();
 
-    // Wait for range downloads to complete.
-    notifier.get_future().get();
+    // Return waiter to our caller.
+    return waiter;
 }
 
 void FileContext::cancel(FileRequest& request)

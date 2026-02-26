@@ -42,6 +42,7 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <future>
 #include <list>
 #include <memory>
 #include <mutex>
@@ -81,7 +82,7 @@ class FileContext final: public std::enable_shared_from_this<FileContext>
     auto cancel(const FileRangeMap<DownloadContextPtr>& downloading,
                 const FileRange& range) -> std::list<DownloadContextPtr>;
 
-    void cancel(const FileRange& range);
+    auto cancel(const FileRange& range) -> std::future<void>;
 
     // Cancel a pending request.
     void cancel(FileRequest& request);
