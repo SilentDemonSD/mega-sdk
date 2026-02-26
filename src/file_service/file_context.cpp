@@ -345,64 +345,30 @@ void FileContext::cancel()
     // means that the client servicing those downloads may be executing
     // within us or about to execute within us.
 
-    // What downloads are in progress?
-    auto downloading = [&]()
-    {
-        std::lock_guard guard(mLock);
-        return mDownloading;
-    }();
-
     // Cancel all downloads in progress.
-    for (auto* downloads: {&downloading.mDownloading})
-    {
-        for (const auto& [_, context]: *downloads)
-            context->cancel();
-    }
+    cancel(FileRange(0, mInfo->size()));
 
     // Cancel the flush if necessary.
-    {
-        std::unique_lock lock(mFlushContextLock);
-
-        if (mFlushContext)
-            mFlushContext->cancel(mFlushContext, std::move(lock));
-    }
+    if (std::unique_lock lock(mFlushContextLock); mFlushContext)
+        mFlushContext->cancel(mFlushContext, std::move(lock));
 
     // Cancel reclamation if necessary.
-    {
-        std::unique_lock lock(mReclaimContextLock);
-
-        if (mReclaimContext)
-            mReclaimContext->cancel(mReclaimContext, std::move(lock));
-    }
+    if (std::unique_lock lock(mReclaimContextLock); mReclaimContext)
+        mReclaimContext->cancel(mReclaimContext, std::move(lock));
 
     // Latch the request queue.
-    auto requests = [this]()
+    auto requests = [&]()
     {
-        // Make sure no one else is messing with our request queue.
         std::lock_guard guard(mRequestsLock);
-
-        // Latch the request queue.
-        auto requests = std::exchange(mRequests, FileRequestList());
-
-        // Make sure the queue's in a sane state.
-        mRequests.clear();
-
-        // Return queue to caller.
-        return requests;
+        return std::exchange(mRequests, FileRequestList());
     }();
 
     // Cancel any pending requests.
     //
     // We know this won't cause any other requests to be queued as we know
     // there are no live references to this instance.
-    while (!requests.empty())
-    {
-        // Cancel the request.
+    for (; !requests.empty(); requests.pop_front())
         cancel(requests.front());
-
-        // Remove the request from our queue.
-        requests.pop_front();
-    }
 }
 
 void FileContext::completed(BufferPtr buffer, FileReadRequest&& request)
