@@ -74,15 +74,19 @@ class FileContext::DownloadContext: private PartialDownloadCallback
     // The download that's retrieving this file range's data.
     PartialDownloadPtr mDownload;
 
+    // Which of our file's download maps are present in?
+    FileRangeMap<DownloadContextPtr>& mDownloading;
+
     // Where does our downloaded data currently end?
     std::uint64_t mEnd;
 
-    // Where are we in our manager's map of contexts?
+    // What is our position in mMap?
     FileRangeMap<DownloadContextPtr>::Iterator mIterator;
 
 public:
     DownloadContext(Activity activity,
                     FileContext& context,
+                    FileRangeMap<DownloadContextPtr>& downloading,
                     FileRangeMap<DownloadContextPtr>::Iterator iterator);
 
     // Cancel this range's download.
@@ -763,7 +767,7 @@ void FileContext::execute(FileReadRequest& request)
     assert(added);
 
     // Instantiate a context so manage the range's download.
-    i->second = std::make_shared<DownloadContext>(mDownloadMonitor.begin(), *this, i);
+    i->second = std::make_shared<DownloadContext>(mDownloadMonitor.begin(), *this, mDownloading, i);
 
     // Queue the read for later completion.
     mPendingReadRequests.emplace(std::move(request));
@@ -1581,7 +1585,7 @@ void FileContext::DownloadContext::completed(Error error)
     FileRange range(mEnd, mIterator->first.mEnd);
 
     // Remove ourselves from our file's map of downloading ranges.
-    mContext.mDownloading.remove(mIterator);
+    mDownloading.remove(mIterator);
 
     // Translate SDK error code to a file result.
     auto result = fileResultFromError(error);
@@ -1710,6 +1714,7 @@ auto FileContext::DownloadContext::failed(Error result, int retries) -> std::var
 
 FileContext::DownloadContext::DownloadContext(Activity activity,
                                               FileContext& context,
+                                              FileRangeMap<DownloadContextPtr>& downloading,
                                               FileRangeMap<DownloadContextPtr>::Iterator iterator):
     PartialDownloadCallback(),
     mInstanceLogger("DownloadContext", *this, logger()),
@@ -1717,6 +1722,7 @@ FileContext::DownloadContext::DownloadContext(Activity activity,
     mCallbacks(),
     mContext(context),
     mDownload(),
+    mDownloading(downloading),
     mEnd(iterator->first.mBegin),
     mIterator(iterator)
 {}
@@ -1781,16 +1787,13 @@ void FileContext::DownloadContext::range(const FileRange& range)
     // Keep ourselves alive.
     auto context = std::move(mIterator->second);
 
-    // Convenience.
-    auto& downloading = mContext.mDownloading;
-
     // Remove ourselves from our file's map of downloading ranges.
-    downloading.remove(mIterator);
+    mDownloading.remove(mIterator);
 
     [[maybe_unused]] auto added = false;
 
     // Add ourselves back into our file's map of downloading ranges.
-    std::tie(mIterator, added) = downloading.tryAdd(range, std::move(context));
+    std::tie(mIterator, added) = mDownloading.tryAdd(range, std::move(context));
 
     // Sanity: The context should always be placed back into the map.
     assert(added);
