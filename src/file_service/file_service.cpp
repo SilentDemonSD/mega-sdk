@@ -123,7 +123,9 @@ auto FileService::options() -> FileServiceResultOr<FileServiceOptions>
     return mContext->options();
 }
 
-auto FileService::initialize(Client& client, const FileServiceOptions& options) -> FileServiceResult
+auto FileService::initialize(Client& client,
+                             const FileServiceOptions& serviceOptions,
+                             const ReclaimOptions& reclaimOptions) -> FileServiceResult
 try
 {
     UniqueLock guard(mContextLock);
@@ -135,7 +137,7 @@ try
         return FILE_SERVICE_ALREADY_INITIALIZED;
     }
 
-    mContext = std::make_unique<FileServiceContext>(client, options);
+    mContext = std::make_unique<FileServiceContext>(client, serviceOptions, reclaimOptions);
 
     FSInfo1("File Service initialized");
 
@@ -150,7 +152,7 @@ catch (std::runtime_error& exception)
 
 auto FileService::initialize(Client& client) -> FileServiceResult
 {
-    return initialize(client, FileServiceOptions());
+    return initialize(client, FileServiceOptions(), ReclaimOptions());
 }
 
 auto FileService::purge() -> FileServiceResult
@@ -171,6 +173,28 @@ void FileService::reclaim(ReclaimCallback callback)
         return callback(FILE_SERVICE_UNINITIALIZED);
 
     return mContext->reclaim(std::move(callback));
+}
+
+auto FileService::reclaimOptions(const ReclaimOptions& options) -> FileServiceResult
+{
+    SharedLock guard(mContextLock);
+
+    if (!mContext)
+        return FILE_SERVICE_UNINITIALIZED;
+
+    mContext->reclaimOptions(options);
+
+    return FILE_SERVICE_SUCCESS;
+}
+
+auto FileService::reclaimOptions() -> FileServiceResultOr<ReclaimOptions>
+{
+    SharedLock guard(mContextLock);
+
+    if (!mContext)
+        return unexpected(FILE_SERVICE_UNINITIALIZED);
+
+    return mContext->reclaimOptions();
 }
 
 auto FileService::removeObserver(FileEventObserverID id) -> FileServiceResult

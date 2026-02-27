@@ -168,7 +168,7 @@ public:
 
 static Database createDatabase(const LocalPath& databasePath);
 
-static bool reclamationEnabled(const FileServiceOptions& options);
+static bool reclamationEnabled(const ReclaimOptions& options);
 
 template<typename Lock>
 FileID FileServiceContext::allocateID([[maybe_unused]] Lock&& lock, Transaction& transaction)
@@ -625,14 +625,14 @@ void FileServiceContext::reclaimTaskCallback(Activity& activity,
     auto reschedule = [activity = std::move(activity), exchange, this]()
     {
         // Get the service's current options.
-        auto options = this->options();
+        auto reclaimOptions = this->reclaimOptions();
 
         // Reclamation has been disabled.
-        if (!reclamationEnabled(options))
+        if (!reclamationEnabled(reclaimOptions))
             return exchange(Task());
 
         // When should the next reclamation occur?
-        auto when = steady_clock::now() + options.mReclaimPeriod;
+        auto when = steady_clock::now() + mReclaimOptions.mPeriod;
 
         // Keep exchange below simple.
         auto callback = std::bind(&FileServiceContext::reclaimTaskCallback,
@@ -664,10 +664,10 @@ auto FileServiceContext::reclaimable() -> FileServiceResultOr<FileIDVector>
 try
 {
     // Get our hands on our current options.
-    auto options = this->options();
+    auto reclaimOptions = this->reclaimOptions();
 
     // Convenience.
-    auto sizeThreshold = options.mReclaimSizeThreshold;
+    auto sizeThreshold = mReclaimOptions.mSizeThreshold;
 
     // No quota? No need to reclaim anything.
     if (!sizeThreshold)
@@ -690,7 +690,7 @@ try
     auto query = transaction.query(mQueries.mGetReclaimableFiles);
 
     // Retrieve access time threshold.
-    auto threshold = options.mReclaimAgeThreshold;
+    auto threshold = reclaimOptions.mAgeThreshold;
 
     // Compute maximum reclaimable access time.
     auto accessed = system_clock::now() - threshold;
@@ -877,7 +877,9 @@ void FileServiceContext::updated(NodeEventQueue& events)
     EventProcessor (*this)(events);
 }
 
-FileServiceContext::FileServiceContext(Client& client, const FileServiceOptions& options):
+FileServiceContext::FileServiceContext(Client& client,
+                                       const FileServiceOptions& options,
+                                       const ReclaimOptions& reclaimOptions):
     NodeEventObserver(),
     mInstanceLogger("FileServiceContext", *this, logger()),
     mClient(client),
@@ -892,6 +894,7 @@ FileServiceContext::FileServiceContext(Client& client, const FileServiceOptions&
     mOptionsLock(),
     mReclaimContext(),
     mReclaimContextLock(),
+    mReclaimOptions(reclaimOptions),
     mReclaimTask(),
     mReclaimTaskLock(),
     mEventEmitter(),
@@ -905,15 +908,15 @@ FileServiceContext::FileServiceContext(Client& client, const FileServiceOptions&
     purgeRemovedFiles();
 
     // User hasn't specified any storage quota.
-    if (!mOptions.mReclaimSizeThreshold)
+    if (!mReclaimOptions.mSizeThreshold)
         return;
 
     // Assume user's specified an initial reclamation delay.
-    auto delay = mOptions.mReclaimDelay;
+    auto delay = mReclaimOptions.mDelay;
 
     // User hasn't specified an initial reclamation delay.
     if (!delay.count())
-        delay = mOptions.mReclaimPeriod;
+        delay = mReclaimOptions.mPeriod;
 
     // User hasn't specified a reclamation period.
     if (!delay.count())
@@ -1322,58 +1325,11 @@ catch (std::runtime_error& exception)
 
 void FileServiceContext::options(const FileServiceOptions& options)
 {
-    // Set later to prevent modification to our options.
-    SharedLock readLock(mOptionsLock, std::defer_lock);
-
-    // Keeps track of our original reclamation period.
-    seconds oldPeriod;
+    // Make sure no one else is modifying our options.
+    UniqueLock writeLock(mOptionsLock);
 
     // Update our options.
-    {
-        // Make sure no one else is modifying our options.
-        UniqueLock writeLock(mOptionsLock);
-
-        // Latch current reclamation period.
-        oldPeriod = mOptions.mReclaimPeriod;
-
-        // Update our options.
-        mOptions = options;
-
-        // Let other threads read our options.
-        readLock = writeLock.to_shared_lock();
-    }
-
-    // Acquire task lock.
-    UniqueLock taskLock(mReclaimTaskLock);
-
-    // Caller wants to disable periodic reclamation.
-    if (!reclamationEnabled(options))
-        return mReclaimTask.abort(), void();
-
-    // Convenience.
-    auto newPeriod = options.mReclaimPeriod;
-
-    // Caller isn't changing reclamation period.
-    if (newPeriod == oldPeriod)
-        return;
-
-    // Periodic reclamation is already scheduled.
-    //
-    // Send it a cancellation so it reschedules itself.
-    if (mReclaimTask)
-        return mReclaimTask.cancel(), void();
-
-    // When should we perform the reclamation?
-    auto when = steady_clock::now() + newPeriod;
-
-    // Schedule a reclamation for some time in the future.
-    mReclaimTask = mExecutor.execute(std::bind(&FileServiceContext::reclaimTaskCallback,
-                                               this,
-                                               mActivities.begin(),
-                                               when,
-                                               std::placeholders::_1),
-                                     when,
-                                     true);
+    mOptions = options;
 }
 
 FileServiceOptions FileServiceContext::options()
@@ -1486,6 +1442,71 @@ void FileServiceContext::removeObserver(FileEventObserverID id)
 void FileServiceContext::removeObserver(FileID id, FileEventObserverID observerID)
 {
     mEventEmitter.removeObserver(id, observerID);
+}
+
+void FileServiceContext::reclaimOptions(const ReclaimOptions& options)
+{
+    // Set later to prevent modification to our options.
+    SharedLock readLock(mOptionsLock, std::defer_lock);
+
+    // Keeps track of our original reclamation period.
+    seconds oldPeriod;
+
+    // Update our options.
+    {
+        // Make sure no one else is modifying our options.
+        UniqueLock writeLock(mOptionsLock);
+
+        // Latch current reclamation period.
+        oldPeriod = mReclaimOptions.mPeriod;
+
+        // Update our options.
+        mReclaimOptions = options;
+
+        // Let other threads read our options.
+        readLock = writeLock.to_shared_lock();
+    }
+
+    // Acquire task lock.
+    UniqueLock taskLock(mReclaimTaskLock);
+
+    // Caller wants to disable periodic reclamation.
+    if (!reclamationEnabled(options))
+        return mReclaimTask.abort(), void();
+
+    // Convenience.
+    auto newPeriod = options.mPeriod;
+
+    // Caller isn't changing reclamation period.
+    if (newPeriod == oldPeriod)
+        return;
+
+    // Periodic reclamation is already scheduled.
+    //
+    // Send it a cancellation so it reschedules itself.
+    if (mReclaimTask)
+        return mReclaimTask.cancel(), void();
+
+    // When should we perform the reclamation?
+    auto when = steady_clock::now() + newPeriod;
+
+    // Schedule a reclamation for some time in the future.
+    mReclaimTask = mExecutor.execute(std::bind(&FileServiceContext::reclaimTaskCallback,
+                                               this,
+                                               mActivities.begin(),
+                                               when,
+                                               std::placeholders::_1),
+                                     when,
+                                     true);
+}
+
+ReclaimOptions FileServiceContext::reclaimOptions()
+{
+    // Make sure no one else is modifying our options.
+    SharedLock guard(mOptionsLock);
+
+    // Return current options to our caller.
+    return mReclaimOptions;
 }
 
 void FileServiceContext::removeFromIndex(FileContextBadge, FileID id)
@@ -1882,7 +1903,7 @@ void FileServiceContext::ReclaimContext::reclaimBatch(ReclaimContextPtr context,
     }
 
     // How many files should we reclaim at once?
-    auto batchSize = mService.options().mReclaimBatchSize;
+    auto batchSize = mService.reclaimOptions().mBatchSize;
 
     // Reclaim one or more files.
     while (mNumPending < batchSize && !mIDs.empty())
@@ -1979,10 +2000,9 @@ Database createDatabase(const LocalPath& databasePath)
     return database;
 }
 
-bool reclamationEnabled(const FileServiceOptions& options)
+bool reclamationEnabled(const ReclaimOptions& options)
 {
-    return options.mReclaimBatchSize && options.mReclaimPeriod.count() &&
-           options.mReclaimSizeThreshold;
+    return options.mBatchSize && options.mPeriod.count() && options.mSizeThreshold;
 }
 
 } // file_service

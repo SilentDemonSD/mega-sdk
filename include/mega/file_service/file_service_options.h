@@ -12,6 +12,24 @@ namespace mega
 namespace file_service
 {
 
+struct ReclaimOptions
+{
+    // How long shouldn't we access a file before we can reclaim it?
+    std::chrono::hours mAgeThreshold{3 * 24};
+
+    // How many files should we reclaim at a time?
+    std::size_t mBatchSize = 4u;
+
+    // How long after startup should we wait until we reclaim space?
+    std::chrono::seconds mDelay{30 * 60};
+
+    // How often should we try to reclaim space?
+    std::chrono::seconds mPeriod{2 * 60 * 60};
+
+    // How many bytes can the service store before it needs to reclaim space?
+    std::uint64_t mSizeThreshold{0};
+};
+
 struct FileServiceOptions
 {
     // How long should we wait before we remove a file context from memory?
@@ -22,21 +40,6 @@ struct FileServiceOptions
 
     // How long should we wait between retries?
     common::deciseconds mRangeRetryBackoff{20};
-
-    // How long shouldn't we access a file before we can reclaim it?
-    std::chrono::hours mReclaimAgeThreshold{3 * 24};
-
-    // How many files should we reclaim at a time?
-    std::size_t mReclaimBatchSize = 4u;
-
-    // How long after startup should we wait until we reclaim space?
-    std::chrono::seconds mReclaimDelay{30 * 60};
-
-    // How often should we try to reclaim space?
-    std::chrono::seconds mReclaimPeriod{2 * 60 * 60};
-
-    // How many bytes can the service store before it needs to reclaim space?
-    std::uint64_t mReclaimSizeThreshold{0};
 }; // FileServiceOptions
 
 } // file_service

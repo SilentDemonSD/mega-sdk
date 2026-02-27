@@ -143,7 +143,7 @@ class FileServiceContext: common::NodeEventObserver
     // Specifies various metrics that control how the service behaves.
     FileServiceOptions mOptions;
 
-    // Serializes access to mOptions.
+    // Serializes access to mOptions and mReclaimOptions
     common::SharedMutex mOptionsLock;
 
     // Tracks any reclaim in progress.
@@ -151,6 +151,9 @@ class FileServiceContext: common::NodeEventObserver
 
     // Serializes access to mReclaimContext.
     std::mutex mReclaimContextLock;
+
+    // Specifies Reclaim options
+    ReclaimOptions mReclaimOptions;
 
     // Tracks any scheduled reclamation.
     common::Task mReclaimTask;
@@ -174,7 +177,9 @@ class FileServiceContext: common::NodeEventObserver
     common::TaskExecutor mExecutor;
 
 public:
-    FileServiceContext(common::Client& client, const FileServiceOptions& options);
+    FileServiceContext(common::Client& client,
+                       const FileServiceOptions& options,
+                       const ReclaimOptions& reclaimOptions);
 
     ~FileServiceContext();
 
@@ -233,6 +238,12 @@ public:
 
     // Remove an observer from a specific file.
     void removeObserver(FileID id, FileEventObserverID observerID);
+
+    // Update the file service's reclaim options.
+    void reclaimOptions(const ReclaimOptions& options);
+
+    // Retrieve the file service's current reclaim options.
+    ReclaimOptions reclaimOptions();
 
     // Remove a file context from our index.
     void removeFromIndex(FileContextBadge badge, FileID id);

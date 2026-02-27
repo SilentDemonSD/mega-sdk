@@ -57,7 +57,9 @@ public:
     auto info(FileID id) -> FileServiceResultOr<FileInfo>;
 
     // Initialize the file service.
-    auto initialize(common::Client& client, const FileServiceOptions& options) -> FileServiceResult;
+    auto initialize(common::Client& client,
+                    const FileServiceOptions& serviceOptions,
+                    const ReclaimOptions& reclaimOptions) -> FileServiceResult;
 
     auto initialize(common::Client& client) -> FileServiceResult;
 
@@ -82,6 +84,12 @@ public:
 
     // Reclaim storage space.
     void reclaim(ReclaimCallback callback);
+
+    // Update the file service's reclaim options.
+    auto reclaimOptions(const ReclaimOptions& options) -> FileServiceResult;
+
+    // Retrieve the file service's current reclaim options.
+    auto reclaimOptions() -> FileServiceResultOr<ReclaimOptions>;
 
     // Remove a previously added file observer.
     auto removeObserver(FileEventObserverID id) -> FileServiceResult;
