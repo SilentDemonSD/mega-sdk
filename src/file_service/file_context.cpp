@@ -238,8 +238,11 @@ void FileContext::addRange(const FileRange& range, Transaction& transaction)
 
 void FileContext::cancel(const FileRange& range)
 {
-    // Make sure we have exclusive access to mDownloading.
+    // Acquire context lock.
     std::unique_lock lock(mLock);
+
+    // Make sure there are no pending read requests.
+    assert(mPendingReadRequests.empty());
 
     // Do any ranges end after range?
     auto begin = mDownloading.endsAfter(range.mBegin);
