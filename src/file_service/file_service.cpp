@@ -101,30 +101,30 @@ auto FileService::open(FileID id) -> FileServiceResultOr<File>
     return mContext->open(id);
 }
 
-auto FileService::options(const FileServiceOptions& options) -> FileServiceResult
+auto FileService::serviceOptions(const ServiceOptions& serviceOptions) -> FileServiceResult
 {
     SharedLock guard(mContextLock);
 
     if (!mContext)
         return FILE_SERVICE_UNINITIALIZED;
 
-    mContext->options(options);
+    mContext->serviceOptions(serviceOptions);
 
     return FILE_SERVICE_SUCCESS;
 }
 
-auto FileService::options() -> FileServiceResultOr<FileServiceOptions>
+auto FileService::serviceOptions() -> FileServiceResultOr<ServiceOptions>
 {
     SharedLock guard(mContextLock);
 
     if (!mContext)
         return unexpected(FILE_SERVICE_UNINITIALIZED);
 
-    return mContext->options();
+    return mContext->serviceOptions();
 }
 
 auto FileService::initialize(Client& client,
-                             const FileServiceOptions& serviceOptions,
+                             const ServiceOptions& serviceOptions,
                              const ReclaimOptions& reclaimOptions) -> FileServiceResult
 try
 {
@@ -152,7 +152,7 @@ catch (std::runtime_error& exception)
 
 auto FileService::initialize(Client& client) -> FileServiceResult
 {
-    return initialize(client, FileServiceOptions(), ReclaimOptions());
+    return initialize(client, ServiceOptions(), ReclaimOptions());
 }
 
 auto FileService::purge() -> FileServiceResult

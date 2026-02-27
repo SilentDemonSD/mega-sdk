@@ -1537,9 +1537,9 @@ void FileContext::pinUntil(std::chrono::steady_clock::time_point when)
     mPinTask = mService.executor().execute(std::move(callback), when, false);
 }
 
-FileServiceOptions FileContext::options() const
+ServiceOptions FileContext::options() const
 {
-    return mService.options();
+    return mService.serviceOptions();
 }
 
 FileRangeVector FileContext::ranges() const
@@ -1748,7 +1748,7 @@ auto FileContext::DownloadContext::failed(Error result, int retries) -> std::var
         return Abort();
 
     // Convenience.
-    auto options = mContext.mService.options();
+    auto options = mContext.mService.serviceOptions();
 
     // Or if we've already retried the download too many times.
     if (static_cast<std::uint64_t>(retries) >= options.mMaximumRangeRetries)

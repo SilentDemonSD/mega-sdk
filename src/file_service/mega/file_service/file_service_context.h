@@ -141,9 +141,9 @@ class FileServiceContext: common::NodeEventObserver
     common::SharedMutex mLock;
 
     // Specifies various metrics that control how the service behaves.
-    FileServiceOptions mOptions;
+    ServiceOptions mServiceOptions;
 
-    // Serializes access to mOptions and mReclaimOptions
+    // Serializes access to mServiceOptions and mReclaimOptions
     common::SharedMutex mOptionsLock;
 
     // Tracks any reclaim in progress.
@@ -178,7 +178,7 @@ class FileServiceContext: common::NodeEventObserver
 
 public:
     FileServiceContext(common::Client& client,
-                       const FileServiceOptions& options,
+                       const ServiceOptions& serviceOptions,
                        const ReclaimOptions& reclaimOptions);
 
     ~FileServiceContext();
@@ -215,11 +215,11 @@ public:
     auto open(NodeHandle parent, const std::string& name) -> FileServiceResultOr<File>;
     auto open(FileID id) -> FileServiceResultOr<File>;
 
-    // Update the file service's options.
-    void options(const FileServiceOptions& options);
+    // Update the service's options.
+    void serviceOptions(const ServiceOptions& serviceOptions);
 
-    // Retrieve the file service's current options.
-    FileServiceOptions options();
+    // Retrieve the service's current options.
+    ServiceOptions serviceOptions();
 
     // Find out where the service is storing the specified file.
     LocalPath path(FileID id) const;

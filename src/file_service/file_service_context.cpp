@@ -878,7 +878,7 @@ void FileServiceContext::updated(NodeEventQueue& events)
 }
 
 FileServiceContext::FileServiceContext(Client& client,
-                                       const FileServiceOptions& options,
+                                       const ServiceOptions& serviceOptions,
                                        const ReclaimOptions& reclaimOptions):
     NodeEventObserver(),
     mInstanceLogger("FileServiceContext", *this, logger()),
@@ -890,7 +890,7 @@ FileServiceContext::FileServiceContext(Client& client,
     mInfoContextRemoved(),
     mInfoContexts(),
     mLock(),
-    mOptions(options),
+    mServiceOptions(serviceOptions),
     mOptionsLock(),
     mReclaimContext(),
     mReclaimContextLock(),
@@ -1323,22 +1323,22 @@ catch (std::runtime_error& exception)
     return unexpected(FILE_SERVICE_UNEXPECTED);
 }
 
-void FileServiceContext::options(const FileServiceOptions& options)
+void FileServiceContext::serviceOptions(const ServiceOptions& serviceOptions)
 {
     // Make sure no one else is modifying our options.
     UniqueLock writeLock(mOptionsLock);
 
     // Update our options.
-    mOptions = options;
+    mServiceOptions = serviceOptions;
 }
 
-FileServiceOptions FileServiceContext::options()
+ServiceOptions FileServiceContext::serviceOptions()
 {
     // Make sure no one else is modifying our options.
     SharedLock guard(mOptionsLock);
 
     // Return current options to our caller.
-    return mOptions;
+    return mServiceOptions;
 }
 
 LocalPath FileServiceContext::path(FileID id) const

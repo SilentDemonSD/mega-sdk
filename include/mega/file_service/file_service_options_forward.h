@@ -7,7 +7,7 @@ namespace file_service
 
 struct ReclaimOptions;
 
-struct FileServiceOptions;
+struct ServiceOptions;
 
 } // file_service
 } // mega

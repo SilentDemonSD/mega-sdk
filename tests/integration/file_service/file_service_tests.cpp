@@ -345,9 +345,9 @@ NodeHandle FileServiceTests::mRootHandle;
 
 Watchdog FileServiceTests::mWatchdog(logger());
 
-static const FileServiceOptions DefaultOptions = []()
+static const ServiceOptions DefaultOptions = []()
 {
-    FileServiceOptions options;
+    ServiceOptions options;
     options.mFileContextReleaseDelay = std::chrono::seconds(0);
     return options;
 }();
@@ -1496,7 +1496,7 @@ TEST_F(FileServiceTests, in_memory_pin_cancel_on_client_logout_succeeds)
     auto pinDuration = std::chrono::minutes(4);
 
     // Pin file contexts for some large period of time.
-    client->fileService().options(
+    client->fileService().serviceOptions(
         [&]()
         {
             auto options = DefaultOptions;
@@ -1532,7 +1532,7 @@ TEST_F(FileServiceTests, in_memory_pin_succeeds)
     auto pinDuration = std::chrono::minutes(1);
 
     // Let the service know how long we want it to keep contexts in memory.
-    mClient->fileService().options(
+    mClient->fileService().serviceOptions(
         [&]()
         {
             auto options = DefaultOptions;
@@ -2437,7 +2437,7 @@ TEST_F(FileServiceTests, reclaim_all_succeeds)
     // Disable readahead.
     //
     // This is necessary to ensure we read only as much as specified.
-    mClient->fileService().options(DefaultOptions);
+    mClient->fileService().serviceOptions(DefaultOptions);
 
     // Tracks total space allocated for our files.
     std::uint64_t totalAllocated = 0;
@@ -2584,8 +2584,8 @@ TEST_F(FileServiceTests, reclaim_cancel_on_file_destruction_succeeds)
 
 TEST_F(FileServiceTests, reclaim_concurrent_succeeds)
 {
-    // Disable reclamation.
-    mClient->fileService().options(DefaultOptions);
+    // Disable readahead and reclamation.
+    mClient->fileService().serviceOptions(DefaultOptions);
     mClient->fileService().reclaimOptions(DisableReclaim);
 
     // Open our test file.
@@ -2681,7 +2681,7 @@ TEST_F(FileServiceTests, reclaim_periodic_succeeds)
     std::vector<File> files;
 
     // Disable reclamation.
-    mClient->fileService().options(DefaultOptions);
+    mClient->fileService().serviceOptions(DefaultOptions);
     auto reclaimOptions = DisableReclaim;
     mClient->fileService().reclaimOptions(reclaimOptions);
 
@@ -3878,7 +3878,7 @@ void FileServiceTests::SetUp()
     SingleClientTest::SetUp();
 
     // Make sure the service's options are in a known state.
-    mClient->fileService().options(DefaultOptions);
+    mClient->fileService().serviceOptions(DefaultOptions);
 
     // Make sure the service contains no lingering data.
     ASSERT_EQ(mClient->fileService().purge(), FILE_SERVICE_SUCCESS);

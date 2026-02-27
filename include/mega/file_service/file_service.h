@@ -58,7 +58,7 @@ public:
 
     // Initialize the file service.
     auto initialize(common::Client& client,
-                    const FileServiceOptions& serviceOptions,
+                    const ServiceOptions& serviceOptions,
                     const ReclaimOptions& reclaimOptions) -> FileServiceResult;
 
     auto initialize(common::Client& client) -> FileServiceResult;
@@ -68,10 +68,10 @@ public:
     auto open(FileID id) -> FileServiceResultOr<File>;
 
     // Update the file service's options.
-    auto options(const FileServiceOptions& options) -> FileServiceResult;
+    auto serviceOptions(const ServiceOptions& serviceOptions) -> FileServiceResult;
 
     // Retrieve the file service's current options.
-    auto options() -> FileServiceResultOr<FileServiceOptions>;
+    auto serviceOptions() -> FileServiceResultOr<ServiceOptions>;
 
     // Purge all files from storage.
     //

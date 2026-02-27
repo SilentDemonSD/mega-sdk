@@ -314,7 +314,7 @@ public:
     void pinUntil(std::chrono::steady_clock::time_point when);
 
     // Return a copy of the service's current options.
-    FileServiceOptions options() const;
+    ServiceOptions options() const;
 
     // What ranges of this file are currently in storage?
     FileRangeVector ranges() const;

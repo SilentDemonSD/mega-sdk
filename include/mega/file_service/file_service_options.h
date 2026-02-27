@@ -30,7 +30,7 @@ struct ReclaimOptions
     std::uint64_t mSizeThreshold{0};
 };
 
-struct FileServiceOptions
+struct ServiceOptions
 {
     // How long should we wait before we remove a file context from memory?
     std::chrono::seconds mFileContextReleaseDelay{2 * 60};
@@ -40,7 +40,7 @@ struct FileServiceOptions
 
     // How long should we wait between retries?
     common::deciseconds mRangeRetryBackoff{20};
-}; // FileServiceOptions
+}; // ServiceOptions
 
 } // file_service
 } // mega
