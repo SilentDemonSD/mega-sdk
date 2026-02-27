@@ -19,6 +19,7 @@
  * program.
  */
 
+#include "mega/file_service/file_service_options.h"
 #define _LARGE_FILES
 
 #define _GNU_SOURCE 1
@@ -29515,6 +29516,27 @@ void MegaApiImpl::getDiscountCodeInformation(const char* discountCode,
     waiter->notify();
 }
 
+MegaFileServiceReclaimOptions* MegaApiImpl::fileServiceGetReclaimOptions()
+{
+    const auto options = client->mFileService.reclaimOptions();
+    if (!options)
+        return nullptr;
+
+    return new MegaFileServiceReclaimOptionsPrivate(*options);
+}
+
+void MegaApiImpl::fileServiceSetReclaimOptions(const MegaFileServiceReclaimOptions* options)
+{
+    if (!options)
+        return;
+
+    auto* optionsImpl = dynamic_cast<const MegaFileServiceReclaimOptionsPrivate*>(options);
+    if (!optionsImpl)
+        return;
+
+    client->mFileService.reclaimOptions(optionsImpl->getOptions());
+}
+
 /* END MEGAAPIIMPL */
 
 int TransferQueue::getLastPushedTag() const
@@ -42250,6 +42272,78 @@ double MegaDiscountCodeInfoPrivate::getLocalDiscountedTotalPriceNet() const
 double MegaDiscountCodeInfoPrivate::getLocalDiscountedMonthlyPriceNet() const
 {
     return mDiscountCodeInfo.localDiscountedMonthlyPriceNet;
+}
+
+MegaFileServiceReclaimOptionsPrivate::MegaFileServiceReclaimOptionsPrivate() = default;
+
+MegaFileServiceReclaimOptionsPrivate::MegaFileServiceReclaimOptionsPrivate(
+    const file_service::ReclaimOptions& options):
+    mReclaim(options)
+{}
+
+MegaFileServiceReclaimOptionsPrivate::MegaFileServiceReclaimOptionsPrivate(
+    const MegaFileServiceReclaimOptionsPrivate&) = default;
+
+MegaFileServiceReclaimOptionsPrivate::~MegaFileServiceReclaimOptionsPrivate() = default;
+
+MegaFileServiceReclaimOptions* MegaFileServiceReclaimOptionsPrivate::copy() const
+{
+    return new MegaFileServiceReclaimOptionsPrivate(*this);
+}
+
+int MegaFileServiceReclaimOptionsPrivate::getReclaimAgeThreshold() const
+{
+    return static_cast<int>(mReclaim.mAgeThreshold.count());
+}
+
+void MegaFileServiceReclaimOptionsPrivate::setReclaimAgeThreshold(int ageThreshold)
+{
+    mReclaim.mAgeThreshold = std::chrono::hours(ageThreshold);
+}
+
+std::size_t MegaFileServiceReclaimOptionsPrivate::getReclaimBatchSize() const
+{
+    return mReclaim.mBatchSize;
+}
+
+void MegaFileServiceReclaimOptionsPrivate::setReclaimBatchSize(std::size_t batchSize)
+{
+    mReclaim.mBatchSize = batchSize;
+}
+
+uint64_t MegaFileServiceReclaimOptionsPrivate::getReclaimDelay() const
+{
+    return static_cast<uint64_t>(mReclaim.mDelay.count());
+}
+
+void MegaFileServiceReclaimOptionsPrivate::setReclaimDelay(uint64_t seconds)
+{
+    mReclaim.mDelay = std::chrono::seconds(seconds);
+}
+
+uint64_t MegaFileServiceReclaimOptionsPrivate::getReclaimPeriod() const
+{
+    return static_cast<uint64_t>(mReclaim.mPeriod.count());
+}
+
+void MegaFileServiceReclaimOptionsPrivate::setReclaimPeriod(uint64_t seconds)
+{
+    mReclaim.mPeriod = std::chrono::seconds(seconds);
+}
+
+int64_t MegaFileServiceReclaimOptionsPrivate::getReclaimSizeThreshold() const
+{
+    return static_cast<int64_t>(mReclaim.mSizeThreshold);
+}
+
+void MegaFileServiceReclaimOptionsPrivate::setReclaimSizeThreshold(int64_t bytes)
+{
+    mReclaim.mSizeThreshold = static_cast<std::uint64_t>(bytes);
+}
+
+file_service::ReclaimOptions MegaFileServiceReclaimOptionsPrivate::getOptions() const
+{
+    return mReclaim;
 }
 
 std::unique_ptr<FileSystemAccess> createFSA()

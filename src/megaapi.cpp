@@ -6415,6 +6415,16 @@ void MegaApi::getDiscountCodeInformation(const char* discountCode, MegaRequestLi
     pImpl->getDiscountCodeInformation(discountCode, listener);
 }
 
+MegaFileServiceReclaimOptions* MegaApi::fileServiceGetReclaimOptions()
+{
+    return pImpl->fileServiceGetReclaimOptions();
+}
+
+void MegaApi::fileServiceSetReclaimOptions(const MegaFileServiceReclaimOptions* options)
+{
+    pImpl->fileServiceSetReclaimOptions(options);
+}
+
 /* END MEGAAPI */
 
 MegaHashSignature::MegaHashSignature(const char *base64Key)
@@ -8845,5 +8855,14 @@ double MegaDiscountCodeInfo::getLocalDiscountedTotalPriceNet() const
 double MegaDiscountCodeInfo::getLocalDiscountedMonthlyPriceNet() const
 {
     return 0;
+}
+
+MegaFileServiceReclaimOptions::MegaFileServiceReclaimOptions() = default;
+
+MegaFileServiceReclaimOptions::~MegaFileServiceReclaimOptions() = default;
+
+MegaFileServiceReclaimOptions* MegaFileServiceReclaimOptions::create()
+{
+    return new MegaFileServiceReclaimOptionsPrivate();
 }
 }

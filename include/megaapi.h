@@ -130,6 +130,7 @@ class MegaNodeTree;
 class MegaCompleteUploadData;
 class MegaNotificationList;
 class MegaCancelSubscriptionReasonList;
+class MegaFileServiceReclaimOptions;
 
 #if defined(SWIG)
     #define MEGA_DEPRECATED
@@ -24888,6 +24889,28 @@ class MegaApi
          */
         void getDiscountCodeInformation(const char* code, MegaRequestListener* listener = nullptr);
 
+        /**
+         * @brief Get the options for reclaiming storage used by MEGA's file services.
+         *
+         * The returned options are a snapshot of the current state of the file service reclaim
+         * options. Modifying the returned object won't have any effect on the actual options used
+         * by the file services.
+         *
+         * The caller takes ownership of the returned value and should use delete to release the
+         * memory when it's no longer needed.
+         */
+        MegaFileServiceReclaimOptions* fileServiceGetReclaimOptions();
+
+        /**
+         * @brief Set the options for reclaiming storage used by MEGA's file services.
+         *
+         * The provided options will be applied to the file services, and they will affect how the
+         * file services reclaim storage.
+         *
+         * @param options Options to set for reclaiming storage used by MEGA's file services.
+         */
+        void fileServiceSetReclaimOptions(const MegaFileServiceReclaimOptions* options);
+
     protected:
         MegaApiImpl *pImpl = nullptr;
         friend class MegaApiImpl;
@@ -27947,6 +27970,82 @@ public:
     virtual MegaCancelSubscriptionReasonList* copy() const = 0;
     virtual ~MegaCancelSubscriptionReasonList() = default;
 };
+
+class MegaFileServiceReclaimOptions
+{
+protected:
+    MegaFileServiceReclaimOptions();
+
+public:
+    virtual ~MegaFileServiceReclaimOptions();
+
+    /**
+     * @brief
+     * Create a copy of this instance.
+     *
+     * @return
+     * A copy of this instance.
+     */
+    virtual MegaFileServiceReclaimOptions* copy() const = 0;
+
+    /**
+     * @brief
+     * Create a new instance.
+     *
+     * @return
+     * A new instance.
+     */
+    static MegaFileServiceReclaimOptions* create();
+
+    virtual int getReclaimAgeThreshold() const = 0;
+
+    virtual void setReclaimAgeThreshold(int ageThreshold) = 0;
+
+    virtual std::size_t getReclaimBatchSize() const = 0;
+
+    virtual void setReclaimBatchSize(std::size_t batchSize) = 0;
+
+    /**
+     * @brief
+     * Get the reclaim delay.
+     *
+     * @return
+     * The reclaim delay in seconds. How long after startup should we wait until we reclaim space?
+     */
+    virtual uint64_t getReclaimDelay() const = 0;
+
+    /**
+     * @brief
+     * Set the reclaim delay.
+     *
+     * @param seconds
+     * How long after startup should we wait until we reclaim space?
+     */
+    virtual void setReclaimDelay(uint64_t seconds) = 0;
+
+    /**
+     * @brief
+     * Get the reclaim period.
+     *
+     * @return
+     * The reclaim period in seconds. How long should we wait between consecutive reclaims?
+     */
+    virtual uint64_t getReclaimPeriod() const = 0;
+
+    /**
+     * @brief
+     * Set the reclaim period.
+     *
+     * @param seconds
+     * How long should we wait between consecutive reclaims?
+     */
+    virtual void setReclaimPeriod(uint64_t seconds) = 0;
+
+    virtual int64_t getReclaimSizeThreshold() const = 0;
+
+    virtual void setReclaimSizeThreshold(int64_t bytes) = 0;
+
+}; // MegaFileServiceReclaimOptions
 }
 
 #endif //MEGAAPI_H

@@ -25,6 +25,7 @@
 #include "mega.h"
 #include "mega/command.h"
 #include "mega/file_service/file_callbacks.h"
+#include "mega/file_service/file_service_options.h"
 #include "mega/file_service/file_stream_result.h"
 #include "mega/filesystem.h"
 #include "mega/gfx/external.h"
@@ -4890,6 +4891,10 @@ public:
 
         void getDiscountCodeInformation(const char* discountCode, MegaRequestListener* listener);
 
+        MegaFileServiceReclaimOptions* fileServiceGetReclaimOptions();
+
+        void fileServiceSetReclaimOptions(const MegaFileServiceReclaimOptions* options);
+
     private:
         void init(MegaApi* publicApi,
                   std::unique_ptr<GfxProc> gfxproc,
@@ -6837,6 +6842,46 @@ public:
 private:
     DiscountCodeInfoExtended mDiscountCodeInfo;
 };
+
+class MegaFileServiceReclaimOptionsPrivate: public MegaFileServiceReclaimOptions
+{
+private:
+    file_service::ReclaimOptions mReclaim;
+
+protected:
+    MegaFileServiceReclaimOptionsPrivate(const MegaFileServiceReclaimOptionsPrivate&);
+
+public:
+    MegaFileServiceReclaimOptionsPrivate(const file_service::ReclaimOptions& options);
+
+    MegaFileServiceReclaimOptionsPrivate();
+
+    ~MegaFileServiceReclaimOptionsPrivate() override;
+
+    MegaFileServiceReclaimOptions* copy() const override;
+
+    int getReclaimAgeThreshold() const override;
+
+    void setReclaimAgeThreshold(int ageThreshold) override;
+
+    std::size_t getReclaimBatchSize() const override;
+
+    void setReclaimBatchSize(std::size_t batchSize) override;
+
+    uint64_t getReclaimDelay() const override;
+
+    void setReclaimDelay(uint64_t seconds) override;
+
+    uint64_t getReclaimPeriod() const override;
+
+    void setReclaimPeriod(uint64_t seconds) override;
+
+    int64_t getReclaimSizeThreshold() const override;
+
+    void setReclaimSizeThreshold(int64_t bytes) override;
+
+    file_service::ReclaimOptions getOptions() const;
+}; // MegaFileServiceReclaimOptionsPrivate
 
 std::unique_ptr<FileSystemAccess> createFSA();
 }
