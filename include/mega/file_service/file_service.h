@@ -82,8 +82,8 @@ public:
     // references have been dropped.
     auto purge() -> FileServiceResult;
 
-    // Reclaim storage space.
-    void reclaim(ReclaimCallback callback);
+    // Start a background task to reclaim storage space immediately
+    auto reclaim(ReclaimCallback callback) -> FileServiceResult;
 
     // Update the file service's reclaim options.
     auto reclaimOptions(const ReclaimOptions& options) -> FileServiceResult;

@@ -165,14 +165,20 @@ auto FileService::purge() -> FileServiceResult
     return mContext->purge();
 }
 
-void FileService::reclaim(ReclaimCallback callback)
+auto FileService::reclaim(ReclaimCallback callback) -> FileServiceResult
 {
     SharedLock guard(mContextLock);
 
     if (!mContext)
-        return callback(FILE_SERVICE_UNINITIALIZED);
+        return FILE_SERVICE_UNINITIALIZED;
 
-    return mContext->reclaim(std::move(callback));
+    mContext->execute(
+        [this, callback = std::move(callback)](const common::Task&)
+        {
+            mContext->reclaim(std::move(callback));
+        });
+
+    return FILE_SERVICE_SUCCESS;
 }
 
 auto FileService::reclaimOptions(const ReclaimOptions& options) -> FileServiceResult
