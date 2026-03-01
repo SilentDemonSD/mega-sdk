@@ -45,6 +45,10 @@ namespace file_service
 
 using namespace common;
 
+using std::chrono::duration_cast;
+using std::chrono::milliseconds;
+using std::chrono::steady_clock;
+
 class FileContext::DownloadContext: private PartialDownloadCallback
 {
     // Called when the file range has been downloaded.
@@ -1422,10 +1426,10 @@ FileInfo FileContext::info() const
     return FileInfo(FileContextBadge(), mInfo);
 }
 
-void FileContext::pinUntil(std::chrono::steady_clock::time_point when)
+void FileContext::pinUntil(steady_clock::time_point when)
 {
     // What is the current time?
-    auto now = std::chrono::steady_clock::now();
+    auto now = steady_clock::now();
 
     // Acquire pin task lock.
     std::lock_guard guard(mPinTaskLock);
