@@ -255,6 +255,32 @@ public:
         return end();
     }
 
+    // Return an iterator to the node that contains position, if any.
+    Iterator contains(std::uint64_t position)
+    {
+        // Does any range end after position?
+        auto iterator = endsAfter(position);
+
+        // No range ends after position.
+        if (!iterator)
+            return {};
+
+        // Convenience.
+        KeyFunctionType key;
+
+        // Range begins after position.
+        if (key(*iterator).mBegin > position)
+            return {};
+
+        // Range contains position.
+        return iterator.nodePointer();
+    }
+
+    ConstIterator contains(std::uint64_t position) const
+    {
+        return const_cast<FileRangeTree&>(*this).contains(position);
+    }
+
     // Return a reverse iterator to the last node in the tree.
     ConstReverseIterator crbegin() const
     {
