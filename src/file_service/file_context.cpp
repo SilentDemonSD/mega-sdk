@@ -69,6 +69,9 @@ class FileContext::DownloadContext: private PartialDownloadCallback
     // Keeps our manager alive until we're dead.
     Activity mActivity;
 
+    // Tracks the average speed of our download.
+    std::optional<Speeds> mAverageSpeed;
+
     // Callbacks to execute when this range's fetch completes.
     std::vector<FileFetchCallback> mCallbacks;
 
@@ -1570,7 +1573,7 @@ void FileContext::DownloadContext::completed(Error error)
 auto FileContext::DownloadContext::data(const void* buffer,
                                         std::uint64_t offset,
                                         std::uint64_t length,
-                                        const Speeds&) -> std::variant<Abort, Continue>
+                                        const Speeds& speed) -> std::variant<Abort, Continue>
 try
 {
     // Convenience.
@@ -1583,6 +1586,9 @@ try
     // Downloaded data is outside of this range.
     if (offset >= mIterator->first.mEnd)
         return Abort();
+
+    // Update the download's average speed.
+    mAverageSpeed = speed;
 
     // Original range of our write.
     FileRange range(offset, std::min(offset + length, mIterator->first.mEnd));
@@ -1684,6 +1690,7 @@ FileContext::DownloadContext::DownloadContext(Activity activity,
     PartialDownloadCallback(),
     mInstanceLogger("DownloadContext", *this, logger()),
     mActivity(std::move(activity)),
+    mAverageSpeed(),
     mCallbacks(),
     mContext(context),
     mDownload(),
