@@ -25,6 +25,11 @@ struct FileRange
         return !(*this == rhs);
     }
 
+    bool contains(std::uint64_t position) const
+    {
+        return position >= mBegin && position < mEnd;
+    }
+
     std::uint64_t mBegin{};
     std::uint64_t mEnd{};
 }; // FileRange
