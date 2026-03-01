@@ -99,6 +99,9 @@ public:
     // Cancel this range's download.
     void cancel();
 
+    // How far is position from the end of our downloaded data?
+    std::uint64_t distance(std::uint64_t position) const;
+
     // Create a download this range.
     auto download() -> PartialDownloadPtr;
 
@@ -1704,6 +1707,18 @@ void FileContext::DownloadContext::cancel()
     // Download's alive so cancel it.
     if (auto download = mDownload)
         download->cancel();
+}
+
+std::uint64_t FileContext::DownloadContext::distance(std::uint64_t position) const
+{
+    // Acquire lock.
+    std::lock_guard guard(mContext.mLock);
+
+    // Sanity: Position should always be within the download's range.
+    assert(mIterator->first.contains(position));
+
+    // Return position's distance from mEnd.
+    return position - mEnd;
 }
 
 auto FileContext::DownloadContext::download() -> PartialDownloadPtr
