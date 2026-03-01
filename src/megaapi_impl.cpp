@@ -19,7 +19,6 @@
  * program.
  */
 
-#include "mega/file_service/file_service_options.h"
 #define _LARGE_FILES
 
 #define _GNU_SOURCE 1
@@ -34,6 +33,8 @@
 #include "mega/file_service/file_callbacks.h"
 #include "mega/file_service/file_id.h"
 #include "mega/file_service/file_service_context.h"
+#include "mega/file_service/file_service_options.h"
+#include "mega/file_service/file_service_result.h"
 #include "mega/file_service/file_stream_result.h"
 #include "mega/file_service/utility.h"
 #include "mega/logging.h"
@@ -29535,6 +29536,32 @@ void MegaApiImpl::fileServiceSetReclaimOptions(const MegaFileServiceReclaimOptio
         return;
 
     client->mFileService.reclaimOptions(optionsImpl->getOptions());
+}
+
+void MegaApiImpl::fileServiceReclaim(MegaRequestListener* listener)
+{
+    auto request =
+        std::make_unique<MegaRequestPrivate>(MegaRequest::TYPE_FILE_SERVICE_RECLAIM, listener);
+
+    // Reclaim result callback
+    auto callback =
+        [this, r = request.get()](file_service::FileServiceResultOr<std::uint64_t> result)
+    {
+        auto error = std::make_unique<MegaErrorPrivate>(result ? API_OK : API_EINTERNAL);
+        r->setTotalBytes(static_cast<long long>(result.valueOr(0)));
+        this->fireOnRequestFinish(r, std::move(error));
+    };
+
+    request->performRequest = [this, callback = std::move(callback)]()
+    {
+        // Start a reclaim task
+        const auto ret = this->client->mFileService.reclaim(std::move(callback));
+        // Started successfully or not
+        return ret == file_service::FILE_SERVICE_SUCCESS ? API_OK : API_EINTERNAL;
+    };
+
+    requestQueue.push(std::move(request));
+    waiter->notify();
 }
 
 /* END MEGAAPIIMPL */

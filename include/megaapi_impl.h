@@ -4895,6 +4895,8 @@ public:
 
         void fileServiceSetReclaimOptions(const MegaFileServiceReclaimOptions* options);
 
+        void fileServiceReclaim(MegaRequestListener* listener);
+
     private:
         void init(MegaApi* publicApi,
                   std::unique_ptr<GfxProc> gfxproc,

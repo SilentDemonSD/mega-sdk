@@ -5454,7 +5454,8 @@ class MegaRequest
             TYPE_GET_SUBSCRIPTION_CANCELLATION_DETAILS = 209,
             TYPE_GET_DISCOUNT_CODE_INFORMATION = 210,
             TYPE_GET_RECENT_ACTION_BY_ID = 211,
-            TOTAL_OF_REQUEST_TYPES = 212,
+            TYPE_FILE_SERVICE_RECLAIM = 212,
+            TOTAL_OF_REQUEST_TYPES = 213,
         };
 
         virtual ~MegaRequest();
@@ -24910,6 +24911,20 @@ class MegaApi
          * @param options Options to set for reclaiming storage used by MEGA's file services.
          */
         void fileServiceSetReclaimOptions(const MegaFileServiceReclaimOptions* options);
+
+        /**
+         * @brief Trigger the file services to reclaim storage according to the current options.
+         *
+         * The associated request type with this request is MegaRequest::TYPE_FILE_SERVICE_RECLAIM.
+         *
+         * Valid data in the MegaRequest object received in onRequestFinish when the error code
+         * is MegaError::API_OK:
+         * - MegaRequest::getTotalBytes - Returns the number of bytes that were reclaimed.
+         *
+         * If the request fails, the MegaError code in onRequestFinish can be:
+         * - MegaError::API_EINTERNAL - If the reclaim process failed to run.
+         */
+        void fileServiceReclaim(MegaRequestListener* listener);
 
     protected:
         MegaApiImpl *pImpl = nullptr;

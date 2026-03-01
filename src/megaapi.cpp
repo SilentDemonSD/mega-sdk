@@ -6425,6 +6425,11 @@ void MegaApi::fileServiceSetReclaimOptions(const MegaFileServiceReclaimOptions* 
     pImpl->fileServiceSetReclaimOptions(options);
 }
 
+void MegaApi::fileServiceReclaim(MegaRequestListener* listener)
+{
+    pImpl->fileServiceReclaim(listener);
+}
+
 /* END MEGAAPI */
 
 MegaHashSignature::MegaHashSignature(const char *base64Key)
