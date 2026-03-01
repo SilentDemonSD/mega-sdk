@@ -114,6 +114,9 @@ public:
     // Update this context's range.
     void range(std::uint64_t begin, std::uint64_t end);
     void range(const FileRange& range);
+
+    // How long until we can satisfy a read at position?
+    milliseconds timeUntil(std::uint64_t position) const;
 }; // DownloadContext
 
 class FileContext::FetchContext
@@ -1787,6 +1790,32 @@ void FileContext::DownloadContext::range(const FileRange& range)
 
     // Ensure end of downloaded data is within our new range.
     mEnd = std::min(range.mEnd, std::max(range.mBegin, mEnd));
+}
+
+milliseconds FileContext::DownloadContext::timeUntil(std::uint64_t position) const
+{
+    // Acquire lock.
+    std::lock_guard guard(mContext.mLock);
+
+    // Sanity: position should always be within the download's range.
+    assert(mIterator->first.contains(position));
+
+    // mEnd has already overtaken position.
+    if (mRange.mEnd > position)
+        return milliseconds(0);
+
+    // Can't estimate time as we have no speed statistics.
+    if (!mAverageSpeed || !mAverageSpeed->mOverallMean)
+        return milliseconds::max();
+
+    // How much data do we need to download before mEnd overtakes position?
+    auto remaining = (position - mRange.mEnd) + 1;
+
+    // Estimate how long it'll take to download remaining data.
+    auto estimated = (remaining * 1000) / mAverageSpeed->mOverallMean;
+
+    // Return estimated download time to our caller.
+    return milliseconds(estimated);
 }
 
 void FileContext::FetchContext::completed(FileResult result)
