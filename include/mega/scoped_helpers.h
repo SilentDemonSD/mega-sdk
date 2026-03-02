@@ -14,17 +14,15 @@ class ScopedDestructor
     std::function<void()> mDestructor;
 
 public:
+    ScopedDestructor() = default;
+
     ScopedDestructor(std::function<void()> destructor):
         mDestructor(std::move(destructor))
     {}
 
-    ScopedDestructor(ScopedDestructor&& other) noexcept
-    {
-        mDestructor = std::move(other.mDestructor);
-        // final status of the source of the moved is not guaranteed by standard beyond staying in a
-        // valid state, and Apple clang actually leaves the previous value
-        other.mDestructor = nullptr;
-    }
+    ScopedDestructor(ScopedDestructor&& other) noexcept:
+        mDestructor(std::exchange(other.mDestructor, nullptr))
+    {}
 
     ScopedDestructor(const ScopedDestructor& other) = delete;
 
@@ -34,18 +32,32 @@ public:
             mDestructor();
     }
 
+    // True if destructor is engaged.
+    explicit operator bool() const
+    {
+        return mDestructor != nullptr;
+    }
+
+    // True if destructor isn't engaged.
+    bool operator!() const
+    {
+        return mDestructor == nullptr;
+    }
+
     ScopedDestructor& operator=(ScopedDestructor&& rhs) noexcept
     {
-        mDestructor = std::move(rhs.mDestructor);
-        // final status of the source of the moved is not guaranteed by standard beyond staying in a
-        // valid state, and Apple clang actually leaves the previous value
-        rhs.mDestructor = nullptr;
+        if (this != &rhs)
+            mDestructor = std::exchange(rhs.mDestructor, nullptr);
 
         return *this;
     }
 
     ScopedDestructor& operator=(const ScopedDestructor& rhs) = delete;
 
+    ScopedDestructor& operator=(std::function<void()> rhs)
+    {
+        return mDestructor = std::move(rhs), *this;
+    }
 }; // ScopedDestructor
 
 // Returns an object that executes function when destroyed.
