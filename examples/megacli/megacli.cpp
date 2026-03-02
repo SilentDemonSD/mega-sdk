@@ -5219,7 +5219,7 @@ static void exec_fileserviceread(autocomplete::ACState& state)
 static void exec_fileserviceReclaimOptions(autocomplete::ACState& state)
 {
     using std::stoul;
-    using std::chrono::hours;
+    using std::chrono::minutes;
     using std::chrono::seconds;
 
     auto parseReclaimOptions = [&](file_service::ReclaimOptions& options)
@@ -5237,7 +5237,7 @@ static void exec_fileserviceReclaimOptions(autocomplete::ACState& state)
         state.extractflagparam("-size-threshold", sizeThreshold);
 
         if (!ageThreshold.empty())
-            options.mAgeThreshold = hours(stoul(ageThreshold));
+            options.mAgeThreshold = minutes(stoul(ageThreshold));
 
         if (!batchSize.empty())
             options.mBatchSize = stoul(batchSize);
@@ -5278,7 +5278,7 @@ static void exec_fileserviceReclaimOptions(autocomplete::ACState& state)
 
     // Print reclaim options.
     conlock(std::cout) << "Reclaim options:\n"
-                       << "Age Threshold: " << options->mAgeThreshold.count() << "h\n"
+                       << "Age Threshold: " << options->mAgeThreshold.count() << "m\n"
                        << "Batch Size: " << options->mBatchSize << "\n"
                        << "Delay: " << options->mDelay.count() << "s\n"
                        << "Period: " << options->mPeriod.count() << "s\n"
@@ -5962,7 +5962,7 @@ autocomplete::ACN autocompleteSyntax()
     p->Add(exec_fileserviceReclaimOptions,
            sequence(text("file-service"),
                     text("reclaimoptions"),
-                    opt(sequence(flag("-age-threshold"), wholenumber("hours", 3 * 24))),
+                    opt(sequence(flag("-age-threshold"), wholenumber("munites", 3 * 24 * 60))),
                     opt(sequence(flag("-batch-size"), wholenumber("count", 4))),
                     opt(sequence(flag("-delay"), wholenumber("seconds", 30 * 60))),
                     opt(sequence(flag("-period"), wholenumber("seconds", 2 * 60 * 60))),

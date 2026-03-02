@@ -42325,7 +42325,7 @@ int MegaFileServiceReclaimOptionsPrivate::getReclaimAgeThreshold() const
 
 void MegaFileServiceReclaimOptionsPrivate::setReclaimAgeThreshold(int ageThreshold)
 {
-    mReclaim.mAgeThreshold = std::chrono::hours(ageThreshold);
+    mReclaim.mAgeThreshold = std::chrono::minutes(ageThreshold);
 }
 
 std::size_t MegaFileServiceReclaimOptionsPrivate::getReclaimBatchSize() const

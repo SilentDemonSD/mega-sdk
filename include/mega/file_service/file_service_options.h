@@ -15,7 +15,7 @@ namespace file_service
 struct ReclaimOptions
 {
     // How long shouldn't we access a file before we can reclaim it?
-    std::chrono::hours mAgeThreshold{3 * 24};
+    std::chrono::minutes mAgeThreshold{3 * 24 * 60};
 
     // How many files should we reclaim at a time?
     std::size_t mBatchSize = 4u;
