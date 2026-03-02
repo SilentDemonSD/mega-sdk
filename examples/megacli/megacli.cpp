@@ -97,15 +97,19 @@ namespace fs = std::filesystem;
 #include <mega/file_service/file_service_result_or.h>
 
 using namespace mega;
-using std::cout;
 using std::cerr;
+using std::cout;
+using std::dec;
 using std::endl;
 using std::flush;
+using std::hex;
 using std::ifstream;
 using std::ofstream;
 using std::setw;
-using std::hex;
-using std::dec;
+using std::stol;
+using std::stoul;
+using std::chrono::minutes;
+using std::chrono::seconds;
 
 MegaClient* client;
 MegaClient* clientFolder;
@@ -5218,10 +5222,6 @@ static void exec_fileserviceread(autocomplete::ACState& state)
 
 static void exec_fileserviceReclaimOptions(autocomplete::ACState& state)
 {
-    using std::stoul;
-    using std::chrono::minutes;
-    using std::chrono::seconds;
-
     auto parseReclaimOptions = [&](file_service::ReclaimOptions& options)
     {
         std::string ageThreshold;
@@ -5249,7 +5249,7 @@ static void exec_fileserviceReclaimOptions(autocomplete::ACState& state)
             options.mPeriod = seconds(stoul(period));
 
         if (!sizeThreshold.empty())
-            options.mSizeThreshold = stoul(sizeThreshold);
+            options.mSizeThreshold = stol(sizeThreshold);
 
         return !ageThreshold.empty() || !batchSize.empty() || !delay.empty() || !period.empty() ||
                !sizeThreshold.empty();
@@ -5282,7 +5282,7 @@ static void exec_fileserviceReclaimOptions(autocomplete::ACState& state)
                        << "Batch Size: " << options->mBatchSize << "\n"
                        << "Delay: " << options->mDelay.count() << "s\n"
                        << "Period: " << options->mPeriod.count() << "s\n"
-                       << "Size Threshold: " << options->mSizeThreshold << "B" << std::endl;
+                       << "Size Threshold (BYTES): " << options->mSizeThreshold << std::endl;
 }
 
 static void exec_fileserviceReclaim(autocomplete::ACState&)

@@ -670,7 +670,7 @@ try
     auto sizeThreshold = mReclaimOptions.mSizeThreshold;
 
     // No quota? No need to reclaim anything.
-    if (!sizeThreshold)
+    if (sizeThreshold < 0)
         return FileIDVector();
 
     // So we have exclusive access to the database.
@@ -680,7 +680,7 @@ try
     auto transaction = mDatabase.transaction();
 
     // Figure out how much storage we're currently using.
-    auto used = storageUsed(lock, transaction);
+    auto used = static_cast<int64_t>(storageUsed(lock, transaction));
 
     // No need to reclaim any storage.
     if (sizeThreshold >= used)
@@ -706,7 +706,7 @@ try
     {
         // Latch the file's ID and allocated size.
         auto id = query.field("id").get<FileID>();
-        auto size = query.field("allocated_size").get<std::uint64_t>();
+        auto size = query.field("allocated_size").get<std::int64_t>();
 
         // Add the ID to our vector.
         ids.emplace_back(id);
@@ -908,7 +908,7 @@ FileServiceContext::FileServiceContext(Client& client,
     purgeRemovedFiles();
 
     // User hasn't specified any storage quota.
-    if (!mReclaimOptions.mSizeThreshold)
+    if (mReclaimOptions.mSizeThreshold < 0)
         return;
 
     // Assume user's specified an initial reclamation delay.
@@ -2002,7 +2002,7 @@ Database createDatabase(const LocalPath& databasePath)
 
 bool reclamationEnabled(const ReclaimOptions& options)
 {
-    return options.mBatchSize && options.mPeriod.count() && options.mSizeThreshold;
+    return options.mBatchSize && options.mPeriod.count() && options.mSizeThreshold >= 0;
 }
 
 } // file_service

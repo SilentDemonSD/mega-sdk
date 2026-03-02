@@ -358,7 +358,7 @@ static const ReclaimOptions DisableReclaim = {
     DefaultReclaimOptions.mBatchSize,
     DefaultReclaimOptions.mDelay,
     DefaultReclaimOptions.mPeriod,
-    0 // mSizeThreshold
+    -1 // mSizeThreshold
 };
 
 static constexpr auto MaxTestRunTime = std::chrono::minutes(15);
@@ -2494,7 +2494,7 @@ TEST_F(FileServiceTests, reclaim_all_succeeds)
 
     ReclaimOptions reclaimOptions{};
     // Let the service know it should store no more than 544K.
-    reclaimOptions.mSizeThreshold = 544_KiB;
+    reclaimOptions.mSizeThreshold = static_cast<int64_t>(544_KiB);
 
     // Reclaim files that haven't been accessed for three hours.
     reclaimOptions.mAgeThreshold = std::chrono::hours(3);
@@ -2721,7 +2721,7 @@ TEST_F(FileServiceTests, reclaim_periodic_succeeds)
     // Enable storage reclamation.
     reclaimOptions.mAgeThreshold = hours(0);
     reclaimOptions.mPeriod = seconds(15);
-    reclaimOptions.mSizeThreshold = 512_KiB;
+    reclaimOptions.mSizeThreshold = static_cast<int64_t>(512_KiB);
 
     mClient->fileService().reclaimOptions(reclaimOptions);
 
@@ -2733,7 +2733,7 @@ TEST_F(FileServiceTests, reclaim_periodic_succeeds)
             auto used = mClient->fileService().storageUsed();
 
             // Have we fallen below the reclamation threshold?
-            return used && *used <= reclaimOptions.mSizeThreshold;
+            return used && static_cast<std::int64_t>(*used) <= reclaimOptions.mSizeThreshold;
         },
         minutes(5)));
 
@@ -2741,7 +2741,7 @@ TEST_F(FileServiceTests, reclaim_periodic_succeeds)
     auto usedAfter = mClient->fileService().storageUsed();
     ASSERT_EQ(usedAfter.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
     EXPECT_LT(*usedAfter, *usedBefore);
-    EXPECT_GE(reclaimOptions.mSizeThreshold, *usedAfter);
+    EXPECT_GE(reclaimOptions.mSizeThreshold, static_cast<std::int64_t>(*usedAfter));
 }
 
 TEST_F(FileServiceTests, reclaim_single_succeeds)

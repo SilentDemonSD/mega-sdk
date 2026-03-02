@@ -42365,7 +42365,7 @@ int64_t MegaFileServiceReclaimOptionsPrivate::getReclaimSizeThreshold() const
 
 void MegaFileServiceReclaimOptionsPrivate::setReclaimSizeThreshold(int64_t bytes)
 {
-    mReclaim.mSizeThreshold = static_cast<std::uint64_t>(bytes);
+    mReclaim.mSizeThreshold = bytes;
 }
 
 file_service::ReclaimOptions MegaFileServiceReclaimOptionsPrivate::getOptions() const
