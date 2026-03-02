@@ -92,6 +92,7 @@ namespace fs = std::filesystem;
 #include <mega/file_service/file_info.h>
 #include <mega/file_service/file_result.h>
 #include <mega/file_service/file_result_or.h>
+#include <mega/file_service/file_service_options.h>
 #include <mega/file_service/file_service_result.h>
 #include <mega/file_service/file_service_result_or.h>
 
@@ -5215,6 +5216,75 @@ static void exec_fileserviceread(autocomplete::ACState& state)
     Reader(std::move(*file), offset, length).read();
 }
 
+static void exec_fileserviceReclaimOptions(autocomplete::ACState& state)
+{
+    using std::stoul;
+    using std::chrono::hours;
+    using std::chrono::seconds;
+
+    auto parseReclaimOptions = [&](file_service::ReclaimOptions& options)
+    {
+        std::string ageThreshold;
+        std::string batchSize;
+        std::string delay;
+        std::string period;
+        std::string sizeThreshold;
+
+        state.extractflagparam("-age-threshold", ageThreshold);
+        state.extractflagparam("-batch-size", batchSize);
+        state.extractflagparam("-delay", delay);
+        state.extractflagparam("-period", period);
+        state.extractflagparam("-size-threshold", sizeThreshold);
+
+        if (!ageThreshold.empty())
+            options.mAgeThreshold = hours(stoul(ageThreshold));
+
+        if (!batchSize.empty())
+            options.mBatchSize = stoul(batchSize);
+
+        if (!delay.empty())
+            options.mDelay = seconds(stoul(delay));
+
+        if (!period.empty())
+            options.mPeriod = seconds(stoul(period));
+
+        if (!sizeThreshold.empty())
+            options.mSizeThreshold = stoul(sizeThreshold);
+
+        return !ageThreshold.empty() || !batchSize.empty() || !delay.empty() || !period.empty() ||
+               !sizeThreshold.empty();
+    };
+
+    // Try and retrieve current reclaim options.
+    auto options = client->mFileService.reclaimOptions();
+    if (!options)
+    {
+        conlock(std::cerr) << "Couldn't retrieve reclaim options: " << toString(options.error())
+                           << std::endl;
+        return;
+    }
+
+    // Update reclaim options if the user specified any flags.
+    if (parseReclaimOptions(*options))
+    {
+        const auto result = client->mFileService.reclaimOptions(*options);
+        if (result != file_service::FILE_SERVICE_SUCCESS)
+        {
+            conlock(std::cerr) << "Couldn't set reclaim options: " << toString(result) << std::endl;
+            return;
+        }
+        conlock(std::cout) << "Reclaim options updated." << std::endl;
+    }
+
+    // Print reclaim options.
+    conlock(std::cout) << "Reclaim options:\n"
+                       << "Age Threshold: " << options->mAgeThreshold.count() << "h\n"
+                       << "Batch Size: " << options->mBatchSize << "\n"
+                       << "Delay: " << options->mDelay.count() << "s\n"
+                       << "Period: " << options->mPeriod.count() << "s\n"
+                       << "Size Threshold: " << options->mSizeThreshold << "B" << std::endl;
+}
+
 autocomplete::ACN autocompleteSyntax()
 {
     using namespace autocomplete;
@@ -5859,6 +5929,15 @@ autocomplete::ACN autocompleteSyntax()
                     either(sequence(flag("-id"), param("id")),
                            sequence(flag("-path"), remoteFSFile(client, &cwd))),
                     opt(sequence(param("offset"), opt(param("length"))))));
+
+    p->Add(exec_fileserviceReclaimOptions,
+           sequence(text("file-service"),
+                    text("reclaimoptions"),
+                    opt(sequence(flag("-age-threshold"), wholenumber("hours", 3 * 24))),
+                    opt(sequence(flag("-batch-size"), wholenumber("count", 4))),
+                    opt(sequence(flag("-delay"), wholenumber("seconds", 30 * 60))),
+                    opt(sequence(flag("-period"), wholenumber("seconds", 2 * 60 * 60))),
+                    opt(sequence(flag("-size-threshold"), wholenumber("seconds", 0)))));
 
     return autocompleteTemplate = std::move(p);
 }
