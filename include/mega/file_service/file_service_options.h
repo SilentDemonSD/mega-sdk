@@ -38,6 +38,13 @@ struct ServiceOptions
     // Reads less than or equal to this value will be downloaded immediately.
     std::uint64_t mImmediateDownloadThreshold = 1ul << 20;
 
+    // What boundary should new ranges be aligned on?
+    //
+    // Note that this value is expressed as a power of two.
+    //
+    // I.e. An value of 10 here means align at a 1K boundary.
+    std::uint64_t mJumpBackwardAlignment = 24;
+
     // How many times will we try to download a range before we give up.
     std::uint64_t mMaximumRangeRetries = 5u;
 
