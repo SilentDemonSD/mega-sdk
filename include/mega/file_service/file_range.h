@@ -41,6 +41,8 @@ struct FileRange
 
 std::ostream& operator<<(std::ostream& ostream, const FileRange& range);
 
+FileRange clamp(const FileRange& range, std::uint64_t begin, std::uint64_t end);
+
 FileRange combine(const FileRange& lhs, const FileRange& rhs);
 
 FileRange extend(const FileRange& range, std::uint64_t adjustment);

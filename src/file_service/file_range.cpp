@@ -17,6 +17,17 @@ FileRange::FileRange(std::uint64_t begin, std::uint64_t end):
     mEnd(std::max(begin, end))
 {}
 
+FileRange clamp(const FileRange& range, std::uint64_t begin, std::uint64_t end)
+{
+    // Sanity: begin must be less than or equal to end.
+    assert(begin <= end);
+
+    auto begin_ = std::max(std::min(range.mBegin, end), begin);
+    auto end_ = std::max(std::min(range.mEnd, end), begin);
+
+    return FileRange(begin_, end_);
+}
+
 FileRange combine(const FileRange& lhs, const FileRange& rhs)
 {
     auto begin = std::min(lhs.mBegin, rhs.mBegin);
