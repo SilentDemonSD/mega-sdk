@@ -30,6 +30,11 @@ struct FileRange
         return position >= mBegin && position < mEnd;
     }
 
+    std::uint64_t length() const
+    {
+        return mEnd - mBegin;
+    }
+
     std::uint64_t mBegin{};
     std::uint64_t mEnd{};
 }; // FileRange
