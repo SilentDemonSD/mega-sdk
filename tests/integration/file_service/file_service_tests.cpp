@@ -132,6 +132,7 @@ using common::testing::Watchdog;
 using ::mega::AutoFileHandle;
 using ::testing::AnyOf;
 using ::testing::ElementsAre;
+using ::testing::IsSupersetOf;
 using testing::observe;
 using ::testing::UnorderedElementsAreArray;
 
@@ -2167,6 +2168,209 @@ TEST_F(FileServiceTests, read_foreign_succeeds)
     ASSERT_TRUE(compare(*computed, mFileContent, 0, mFileContent.size()));
 }
 
+TEST_F(FileServiceTests, read_jump_backwards_succeeds)
+{
+    // Try and open our test file.
+    auto file = mClient->fileOpen(mFileHandle);
+
+    // Make sure we could open our test file.
+    ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+
+    // Make sure our downlodas don't complete too quickly.
+    mClient->setDownloadSpeed(16384);
+
+    // Treat reads larger than 64K as a large read.
+    mClient->fileService().serviceOptions(
+        [&]()
+        {
+            auto options = DefaultOptions;
+
+            // Don't align large reads on any boundary.
+            options.mJumpBackwardAlignment = 0;
+
+            // Don't begin a large read's range earlier than specified.
+            options.mJumpBackwardDistance = 0;
+
+            // Consider any read more than 128K ahead to be a "jump."
+            options.mJumpForwardDistance = 1ul << 17;
+
+            // Consider reads larger than 64KiB "large."
+            options.mImmediateDownloadThreshold = 1ul << 16;
+
+            return options;
+        }());
+
+    // Begin a large read from the middle of the file.
+    auto waiter0 = read(*file, 512_KiB, 64_KiB + 1);
+
+    // Begin a couple small reads throughout the file.
+    auto waiter1 = read(*file, 480_KiB, 4_KiB);
+    auto waiter2 = read(*file, 472_KiB, 4_KiB);
+
+    // Begin a new large read from earlier in the file.
+    auto waiter3 = read(*file, 472_KiB, 64_KiB + 1);
+
+    // Wait for our small reads to complete.
+    ASSERT_NE(waiter1.wait_for(mDefaultTimeout), timeout);
+    ASSERT_NE(waiter2.wait_for(mDefaultTimeout), timeout);
+
+    // Make sure our small reads completed successfully.
+    auto result1 = waiter1.get();
+    auto result2 = waiter2.get();
+
+    EXPECT_EQ(result1.errorOr(FILE_SUCCESS), FILE_SUCCESS);
+    EXPECT_EQ(result2.errorOr(FILE_SUCCESS), FILE_SUCCESS);
+
+    EXPECT_TRUE(result1 && compare(*result1, mFileContent, 480_KiB, 4_KiB));
+    EXPECT_TRUE(result2 && compare(*result2, mFileContent, 472_KiB, 4_KiB));
+
+    // Let the client download as quickly as it can.
+    mClient->setDownloadSpeed(0);
+
+    // Wait for our large reads to complete.
+    ASSERT_NE(waiter0.wait_for(mDefaultTimeout), timeout);
+    ASSERT_NE(waiter3.wait_for(mDefaultTimeout), timeout);
+
+    // Make sure our large reads completed successfully.
+    auto result0 = waiter0.get();
+    auto result3 = waiter3.get();
+
+    EXPECT_EQ(result0.errorOr(FILE_SUCCESS), FILE_SUCCESS);
+    EXPECT_EQ(result3.errorOr(FILE_SUCCESS), FILE_SUCCESS);
+
+    EXPECT_TRUE(result0 && compare(*result0, mFileContent, 512_KiB, 64_KiB + 1));
+    EXPECT_TRUE(result3 && compare(*result3, mFileContent, 472_KiB, 64_KiB + 1));
+
+    // Wait for all downloads to complete.
+    ASSERT_EQ(execute(fetchBarrier, *file), FILE_SUCCESS);
+
+    // We should have one large contiguous range.
+    EXPECT_THAT(file->ranges(), ElementsAre(FileRange(472_KiB, mFileContent.size())));
+}
+
+TEST_F(FileServiceTests, read_jump_forward_succeeds)
+{
+    // Try and open our test file.
+    auto file = mClient->fileOpen(mFileHandle);
+
+    // Make sure we could open our test file.
+    ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+
+    // Make sure our downlodas don't complete too quickly.
+    mClient->setDownloadSpeed(16384);
+
+    // Treat reads larger than 64K as a large read.
+    mClient->fileService().serviceOptions(
+        [&]()
+        {
+            auto options = DefaultOptions;
+
+            // Don't align large reads on any boundary.
+            options.mJumpBackwardAlignment = 0;
+
+            // Don't begin a large read's range earlier than specified.
+            options.mJumpBackwardDistance = 0;
+
+            // Consider any read more than 128K ahead to be a "jump."
+            options.mJumpForwardDistance = 1ul << 17;
+
+            // Consider reads larger than 64KiB "large."
+            options.mImmediateDownloadThreshold = 1ul << 16;
+
+            return options;
+        }());
+
+    // Begin a large read from the start of the file.
+    auto waiter0 = read(*file, 0, 64_KiB + 1);
+
+    // Begin several small reads throughout the file.
+    auto waiter1 = read(*file, 256_KiB, 4_KiB);
+    auto waiter2 = read(*file, 384_KiB, 4_KiB);
+
+    // Begin a new large read from later in the file.
+    auto waiter3 = read(*file, 128_KiB + 1, 64_KiB + 1);
+
+    // Wait for our earlier reads to complete.
+    ASSERT_NE(waiter0.wait_for(mDefaultTimeout), timeout);
+    ASSERT_NE(waiter1.wait_for(mDefaultTimeout), timeout);
+    ASSERT_NE(waiter2.wait_for(mDefaultTimeout), timeout);
+
+    // Our first read should be considered cancelled.
+    //
+    // This is because we "jumped" forward in the file and the original read
+    // couldn't be satisfied by any remaining downloads.
+    EXPECT_EQ(waiter0.get().errorOr(FILE_SUCCESS), FILE_CANCELLED);
+
+    // Both of our small reads should've succeeeded.
+    auto result1 = waiter1.get();
+    auto result2 = waiter2.get();
+
+    EXPECT_EQ(result1.errorOr(FILE_SUCCESS), FILE_SUCCESS);
+    EXPECT_EQ(result2.errorOr(FILE_SUCCESS), FILE_SUCCESS);
+
+    EXPECT_TRUE(!result1 || compare(*result1, mFileContent, 256_KiB, 4_KiB));
+    EXPECT_TRUE(!result2 || compare(*result2, mFileContent, 384_KiB, 4_KiB));
+
+    // Let the client download as fast as it likes.
+    mClient->setDownloadSpeed(0);
+
+    // Wait for our second large read to complete.
+    ASSERT_NE(waiter3.wait_for(mDefaultTimeout), timeout);
+
+    // Our second large read should've succeeded.
+    auto result3 = waiter3.get();
+
+    ASSERT_EQ(result3.errorOr(FILE_SUCCESS), FILE_SUCCESS);
+    ASSERT_TRUE(compare(*result3, mFileContent, 128_KiB + 1, 64_KiB + 1));
+
+    // Wait for any downloads to complete.
+    ASSERT_EQ(execute(fetchBarrier, *file), FILE_SUCCESS);
+
+    // We should have one large contiguous range.
+    ASSERT_THAT(file->ranges(), ElementsAre(FileRange(128_KiB + 1, mFileContent.size())));
+}
+
+TEST_F(FileServiceTests, read_large_succeeds)
+{
+    // Try and open our test file.
+    auto file = mClient->fileOpen(mFileHandle);
+
+    // Make sure we could open our test file.
+    ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+
+    // Treat reads larger than 128KiB as a large read.
+    mClient->fileService().serviceOptions(
+        [&]()
+        {
+            auto options = DefaultOptions;
+
+            // Don't align range to any boundary.
+            options.mJumpBackwardAlignment = 0;
+
+            // Don't begin the range earlier than specified.
+            options.mJumpBackwardDistance = 0;
+
+            // Consider reads larger than 128K as "large."
+            options.mImmediateDownloadThreshold = 1ul << 17;
+            return options;
+        }());
+
+    // Kick off a single large read.
+    auto result = execute(readOnce, *file, 32_KiB, 128_KiB + 1);
+
+    // Make sure our read succeeded.
+    ASSERT_EQ(result.errorOr(FILE_SUCCESS), FILE_SUCCESS);
+
+    // And returned valid data.
+    ASSERT_TRUE(compare(*result, mFileContent, 32_KiB, result->size()));
+
+    // Wait for the read's range to finish downloading.
+    ASSERT_EQ(execute(fetchBarrier, *file), FILE_SUCCESS);
+
+    // Make sure the file's ranges match what we've downloaded.
+    ASSERT_THAT(file->ranges(), ElementsAre(FileRange(32_KiB, mFileContent.size())));
+}
+
 TEST_F(FileServiceTests, read_removed_file_succeeds)
 {
     // Create a file for us to play with.
@@ -2199,6 +2403,139 @@ TEST_F(FileServiceTests, read_removed_file_succeeds)
     // Reading new data should fail.
     data1 = execute(read, *file, 256_KiB, 256_KiB);
     ASSERT_EQ(data1.errorOr(FILE_SUCCESS), FILE_REMOVED);
+}
+
+TEST_F(FileServiceTests, read_small_during_large_succeeds)
+{
+    // Open our test file.
+    auto file = mClient->fileOpen(mFileHandle);
+
+    // Make sure we could open our test file.
+    ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+
+    // Make sure our small reads complete before large.
+    mClient->setDownloadSpeed(4096);
+
+    // Consider all reads larger than 64_KiB as large.
+    mClient->fileService().serviceOptions(
+        [&]()
+        {
+            auto options = DefaultOptions;
+
+            // Align large ranges on a 16 byte boundary.
+            options.mJumpBackwardAlignment = 4;
+
+            // Begin large ranges 24 bytes earlier than their read.
+            options.mJumpBackwardDistance = 24;
+
+            // Any read larger than 64KiB is large.
+            options.mImmediateDownloadThreshold = 1ul << 16;
+
+            return options;
+        }());
+
+    // Kick off a large read.
+    auto waiter0 = read(*file, 48, 64_KiB + 1);
+
+    // Kick off several small reads.
+    auto waiter1 = read(*file, 64_KiB, 4_KiB);
+    auto waiter2 = read(*file, 72_KiB, 4_KiB);
+    auto waiter3 = read(*file, 1016_KiB, 4_KiB);
+
+    // Wait for our small reads to complete.
+    ASSERT_NE(waiter1.wait_for(mDefaultTimeout), timeout);
+    ASSERT_NE(waiter2.wait_for(mDefaultTimeout), timeout);
+    ASSERT_NE(waiter3.wait_for(mDefaultTimeout), timeout);
+
+    // Make sure each small read succeeded.
+    auto result1 = waiter1.get();
+    auto result2 = waiter2.get();
+    auto result3 = waiter3.get();
+
+    ASSERT_EQ(result1.errorOr(FILE_SUCCESS), FILE_SUCCESS);
+    ASSERT_EQ(result2.errorOr(FILE_SUCCESS), FILE_SUCCESS);
+    ASSERT_EQ(result3.errorOr(FILE_SUCCESS), FILE_SUCCESS);
+
+    // Make sure each small read received valid data.
+    ASSERT_TRUE(compare(*result1, mFileContent, 64_KiB, 4_KiB));
+    ASSERT_TRUE(compare(*result2, mFileContent, 72_KiB, 4_KiB));
+    ASSERT_TRUE(compare(*result3, mFileContent, 1016_KiB, 4_KiB));
+
+    // Make sure our small reads have been cached.
+    ASSERT_THAT(
+        file->ranges(),
+        IsSupersetOf(
+            {FileRange(64_KiB, 68_KiB), FileRange(72_KiB, 76_KiB), FileRange(1016_KiB, 1020_KiB)}));
+
+    // Wait for our large read to complete.
+    ASSERT_NE(waiter0.wait_for(mDefaultTimeout), timeout);
+
+    // Make sure our large read succeeded.
+    auto result0 = waiter0.get();
+
+    ASSERT_EQ(result0.errorOr(FILE_SUCCESS), FILE_SUCCESS);
+
+    // Make sure the large read received valid data.
+    ASSERT_TRUE(compare(*result0, mFileContent, 48, 64_KiB + 1));
+
+    // Let the client download as fast as it can.
+    mClient->setDownloadSpeed(0);
+
+    // Wait until all downloads have completed.
+    //
+    // Necessary as our large read will have begun a download for all of hte
+    // file's data from 16 bytes forward.
+    ASSERT_EQ(execute(fetchBarrier, *file), FILE_SUCCESS);
+
+    // Make sure a single contiguous range is in the cache.
+    ASSERT_THAT(file->ranges(), ElementsAre(FileRange(16, mFileContent.size())));
+}
+
+TEST_F(FileServiceTests, read_small_succeeds)
+{
+    // Open our test file.
+    auto file = mClient->fileOpen(mFileHandle);
+
+    // Make sure we could open our test file.
+    ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+
+    // Consider all reads less than or equal to 64KiB as small.
+    mClient->fileService().serviceOptions(
+        [&]()
+        {
+            auto options = DefaultOptions;
+            options.mImmediateDownloadThreshold = 1ul << 16;
+            return options;
+        }());
+
+    // Perform several small reads in parallel.
+    auto waiter0 = read(*file, 0, 64_KiB);
+    auto waiter1 = read(*file, 96_KiB, 64_KiB);
+    auto waiter2 = read(*file, 192_KiB, 64_KiB);
+
+    // Wait for all of the reads to complete.
+    ASSERT_NE(waiter0.wait_for(mDefaultTimeout), timeout);
+    ASSERT_NE(waiter1.wait_for(mDefaultTimeout), timeout);
+    ASSERT_NE(waiter2.wait_for(mDefaultTimeout), timeout);
+
+    // Make sure all of the reads succeeded.
+    auto result0 = waiter0.get();
+    auto result1 = waiter1.get();
+    auto result2 = waiter2.get();
+
+    ASSERT_EQ(result0.errorOr(FILE_SUCCESS), FILE_SUCCESS);
+    ASSERT_EQ(result1.errorOr(FILE_SUCCESS), FILE_SUCCESS);
+    ASSERT_EQ(result2.errorOr(FILE_SUCCESS), FILE_SUCCESS);
+
+    // Make sure each read got what it expected.
+    ASSERT_TRUE(compare(*result0, mFileContent, 0, 64_KiB));
+    ASSERT_TRUE(compare(*result1, mFileContent, 96_KiB, 64_KiB));
+    ASSERT_TRUE(compare(*result2, mFileContent, 192_KiB, 64_KiB));
+
+    // Make sure the file's ranges match what we've downloaded.
+    EXPECT_THAT(
+        file->ranges(),
+        ElementsAre(FileRange(0, 64_KiB), FileRange(96_KiB, 160_KiB), FileRange(192_KiB, 256_KiB)));
 }
 
 TEST_F(FileServiceTests, read_succeeds)

@@ -47,6 +47,7 @@ using namespace common;
 
 using std::chrono::duration_cast;
 using std::chrono::milliseconds;
+using std::chrono::seconds;
 using std::chrono::steady_clock;
 
 class FileContext::DownloadContext: private PartialDownloadCallback
@@ -84,11 +85,11 @@ class FileContext::DownloadContext: private PartialDownloadCallback
     // Which of our file's download maps are present in?
     FileRangeMap<DownloadContextPtr>& mDownloading;
 
-    // Where does our downloaded data currently end?
-    std::uint64_t mEnd;
-
     // What is our position in mMap?
     FileRangeMap<DownloadContextPtr>::Iterator mIterator;
+
+    // What range has this context downloaded?
+    FileRange mRange;
 
 public:
     DownloadContext(Activity activity,
@@ -114,6 +115,9 @@ public:
     // Update this context's range.
     void range(std::uint64_t begin, std::uint64_t end);
     void range(const FileRange& range);
+
+    // Mark this download as having been replaced.
+    void replaced(const DownloadContextPtr& self);
 
     // How long until we can satisfy a read at position?
     milliseconds timeUntil(std::uint64_t position) const;
@@ -660,103 +664,218 @@ void FileContext::execute(FileFlushRequest request)
 
 void FileContext::execute(FileReadRequest& request)
 {
-    // The range the user wants to read.
-    auto range = request.mRange;
-
-    // The file's current size.
-    auto size = mInfo->size();
-
-    // Convenience.
-    auto& [begin, end] = range;
-
-    // Make sure the user's read doesn't extend beyond the end of the file.
-    end = std::min(end, size);
-
-    // Make sure the user's read doesn't end before it begins.
-    end = std::max(begin, end);
-
-    // Make sure the request's range has been clamped.
-    request.mRange = range;
+    // Make sure the user's read is within the file.
+    request.mRange = clamp(request.mRange, 0, mInfo->size());
 
     // The user doesn't actually need to read anything.
-    if (begin == end)
+    if (request.mRange.empty())
         return completed(mBuffer, std::move(request));
 
     // Update the file's access time.
     mInfo->accessed(now());
 
+    // Get a snapshot of the current service options.
+    const auto options = mService.serviceOptions();
+
+    // Convenience.
+    const auto backwardAlignment = options.mJumpBackwardAlignment;
+    const auto backwardDistance = options.mJumpBackwardDistance;
+    const auto forwardDistance = options.mJumpForwardDistance;
+    const auto immediateThreshold = options.mImmediateDownloadThreshold;
+    const auto waitThreshold = seconds(1);
+
+    // Cancels a download, if needed, when exiting this function.
+    ScopedDestructor canceller;
+
+    // Begins a download, if needed, when exiting this function.
+    ScopedDestructor downloader;
+
     // Acquire lock.
     std::unique_lock lock(mLock);
 
-    // The read's contained within an existing range on disk.
-    if (auto i = mOnDisk.endsAfter(begin); i != mOnDisk.end() && i->mBegin <= begin)
+    // Add a download for a given range to the specified map.
+    auto addDownload = [&](auto& map, const auto& range)
     {
-        // Clamp the read so it stays within the range.
-        request.mRange.mEnd = std::min(i->mEnd, request.mRange.mEnd);
+        // Where will our download be located in map?
+        auto [iterator, added] = map.tryAdd(range, nullptr);
 
-        // The read can be completely or partially satisfied by the range.
-        return completed(displace(mBuffer, begin), std::move(request));
-    }
+        // Sanity: Adding should always succeed as ranges never overlap.
+        assert(added);
 
-    // The read's contained within an existing range that is downloading.
-    if (auto i = mDownloading.mLarge.endsAfter(begin);
-        i != mDownloading.mLarge.end() && i->first.mBegin <= begin)
-    {
-        // Wher does the range's downloaded data end?
-        auto max = i->second->end();
+        // Instantiate a download context for range.
+        auto context =
+            std::make_shared<DownloadContext>(mDownloadMonitor.begin(), *this, map, iterator);
 
-        // Can't yet satisfy the read.
-        if (begin >= max)
-            return mPendingReadRequests.emplace(std::move(request)), void();
+        // Make sure our context's linked into map.
+        iterator->second = context;
 
-        // Clamp the read so it stays within range.
-        request.mRange.mEnd = std::min(request.mRange.mEnd, max);
+        // Try and create a download for our range.
+        auto download = context->download();
 
-        // The range can completely or partially satisfy the read.
-        return completed(displace(mBuffer, begin), std::move(request));
-    }
+        // Couldn't create a download for our range.
+        if (!download)
+            return download;
 
-    // Add a new range.
-    auto [i, added] = mDownloading.mLarge.tryAdd(
-        [&]()
+        // Sanity: We should only begin one download for any given request.
+        assert(!downloader);
+
+        // Make sure we begin our download.
+        downloader = [download]()
         {
-            // We'd overlap a range already on disk.
-            if (auto i = mOnDisk.endsAfter(range.mBegin);
-                i != mOnDisk.end() && i->mBegin < range.mEnd)
-                return FileRange(range.mBegin, i->mBegin);
+            download->begin();
+        };
 
-            // We'd overlap a range that's already being downloaded.
-            if (auto i = mDownloading.mLarge.endsAfter(range.mEnd);
-                i != mDownloading.mLarge.end() && i->first.mBegin < range.mEnd)
-                return FileRange(range.mBegin, i->first.mBegin);
+        // Return download to our caller.
+        return download;
+    }; // addDownload
 
-            // Read doesn't overlap any existing range.
-            return range;
-        }(),
-        nullptr);
+    // Complete request if it can be satisfied by data on disk.
+    auto completeIfOnDisk = [this](auto& request)
+    {
+        // Convenience.
+        auto& range = request.mRange;
+
+        // Can any range on disk partially satisfy request?
+        auto iterator = mOnDisk.contains(range.mBegin);
+
+        // No range on disk can partially satisfy request.
+        if (iterator == mOnDisk.end())
+            return false;
+
+        // Clamp request's range as needed.
+        range.mEnd = std::min(iterator->mEnd, range.mEnd);
+
+        // Queue the request for completion.
+        completed(displace(mBuffer, range.mBegin), std::move(request));
+
+        // Let our caller know the request was completed.
+        return true;
+    }; // completeIfOnDisk
+
+    // True if range is covered by a download in map.
+    auto downloading = [&](auto& map, auto& range)
+    {
+        DownloadContextPtr download;
+
+        // Does any download in map contain request's beginning?
+        auto iterator = map.contains(range.mBegin);
+
+        // A download contains request's beginning.
+        if (iterator != map.end())
+            download = iterator->second;
+
+        // Return download if any to our caller.
+        return download;
+    }; // downloading
+
+    // True if request is a jump.
+    auto isJump = [&](auto& request) -> DownloadContextPtr
+    {
+        // Request isn't a jump candidate.
+        if (!request.mIsJumpCandidate)
+            return nullptr;
+
+        // Request isn't a large read.
+        if (request.mRange.length() <= immediateThreshold)
+            return nullptr;
+
+        auto iterator = mDownloading.mLarge.begin();
+
+        // No large range download is in progress.
+        if (iterator == mDownloading.mLarge.end())
+            return nullptr;
+
+        // Convenience.
+        auto context = iterator->second;
+
+        // Request begins before our large read.
+        if (request.mRange.mBegin < iterator->first.mBegin)
+            return context;
+
+        // How far is request from the end of the large read's data?
+        auto distance = context->distance(request.mRange.mBegin);
+
+        // Request begins before the large read's data ends.
+        if (distance <= forwardDistance)
+            return nullptr;
+
+        // Request begins after the large read's downloaded data.
+        return context;
+    }; // isJump
+
+    // Queue a request for later completion.
+    auto queueRequest = [this](auto&& request)
+    {
+        mPendingReadRequests.emplace(request);
+    }; // queueRequest
+
+    // Sanity: We should only ever have one large download at most.
+    assert(mDownloading.mLarge.size() <= 1);
+
+    // Request is a jump.
+    if (auto context = isJump(request))
+    {
+        // Mark download as being replaced.
+        // This will remove it from mDownloading.mLarge.
+        context->replaced(context);
+
+        // Cancel the download when we exit this function.
+        canceller = [context]()
+        {
+            context->cancel();
+        };
+    }
+
+    // Convenience.
+    auto range = request.mRange;
+
+    // We should begin a download for the file's remaining data.
+    if (mDownloading.mLarge.empty() && range.length() > immediateThreshold)
+    {
+        // Request can't be satisfied by data on disk.
+        if (!completeIfOnDisk(request))
+            queueRequest(std::move(request));
+
+        // Extend range to the left if possible.
+        range.mBegin -= std::min(backwardDistance, range.mBegin);
+
+        // Round down to the nearest boundary.
+        range.mBegin &= ~((UINT64_C(1) << backwardAlignment) - 1);
+
+        // Extend range to the end the file.
+        range.mEnd = mInfo->size();
+
+        // Try and download the file's remaining data.
+        addDownload(mDownloading.mLarge, range);
+
+        // Nothing left to do.
+        return;
+    }
 
     // Sanity.
-    assert(added);
+    assert(range.length() <= immediateThreshold);
 
-    // Instantiate a context so manage the range's download.
-    i->second =
-        std::make_shared<DownloadContext>(mDownloadMonitor.begin(), *this, mDownloading.mLarge, i);
-
-    // Queue the read for later completion.
-    mPendingReadRequests.emplace(std::move(request));
-
-    // Try and create a download for the range.
-    auto download = i->second->download();
-
-    // Couldn't create a download for range.
-    if (!download)
+    // We can satisfy all or part of the caller's read.
+    if (completeIfOnDisk(request))
         return;
 
-    // Release our lock so we can begin the download.
-    lock.unlock();
+    // Sanity: Range should match the request's range.
+    assert(range == request.mRange);
 
-    // Begin the download.
-    download->begin();
+    // Queue request for later completion.
+    queueRequest(std::move(request));
+
+    // Request can be satisfied by an existing large download.
+    if (auto download = downloading(mDownloading.mLarge, range);
+        download && download->timeUntil(range.mBegin) <= waitThreshold)
+        return;
+
+    // Request can be satisfied by an existing small download.
+    if (downloading(mDownloading.mSmall, range))
+        return;
+
+    // Try and add a small download that'll cover request.
+    addDownload(mDownloading.mSmall, range);
 }
 
 // When this request is executed, any pending downloads will have completed.
@@ -1062,12 +1181,35 @@ void FileContext::executed(FileWriteRequestTag)
 
 void FileContext::failed(const FileRange& range, FileResult result)
 {
-    dispatch(
-        [&](auto, auto& request)
-        {
-            completed(std::move(request), result);
-        },
-        range);
+    auto current = mPendingReadRequests.lower_bound(range.mBegin);
+    auto end = mPendingReadRequests.upper_bound(range.mEnd);
+
+    // Iterate over each pending read within range.
+    while (current != end)
+    {
+        // Keeps logic simple.
+        auto iterator = current++;
+
+        // Convenience.
+        auto begin = iterator->mRange.mBegin;
+
+        // Request can be satisfied by a large download.
+        if (mDownloading.mLarge.contains(begin))
+            continue;
+
+        // Request can be satisfied by a small download.
+        if (mDownloading.mSmall.contains(begin))
+            continue;
+
+        // Dirty but necessary.
+        auto& request = const_cast<FileReadRequest&>(*iterator);
+
+        // Fail the request.
+        completed(std::move(request), result);
+
+        // Remove read from our set of pending reads.
+        mPendingReadRequests.erase(iterator);
+    }
 }
 
 auto FileContext::grow(std::uint64_t newSize, std::uint64_t oldSize)
@@ -1541,37 +1683,32 @@ void FileContext::write(FileWriteRequest request)
 
 void FileContext::DownloadContext::completed(Error error)
 {
-    // Get a reference to our context.
-    //
-    // We're doing this here for two reasons:
-    //
-    // 1. We want to make sure this instance is kept alive until we've
-    //    finished processing this donwload's completion.
-    //
-    // 2. We want to make sure that the lock we acquire immediately below is
-    //    released before this instance itself is destroyed.
-    [[maybe_unused]] auto self = std::move(mIterator->second);
+    // Used to keep this context alive until we exit this function.
+    DownloadContextPtr self;
 
     // Acquire lock.
     std::lock_guard guard(mContext.mLock);
 
-    // What part of our original range do we still need to download?
-    FileRange range(mEnd, mIterator->first.mEnd);
+    // Download hasn't been replaced.
+    if (mIterator != mDownloading.end())
+    {
+        // Keep this context alive until we exit this function.
+        self = std::move(mIterator->second);
 
-    // Remove ourselves from our file's map of downloading ranges.
-    mDownloading.remove(mIterator);
+        // Remove ourselves from our file's map of downloading ranges.
+        mDownloading.remove(mIterator);
+    }
 
     // Translate SDK error code to a file result.
     auto result = fileResultFromError(error);
 
-    // Download didn't complete successfully.
-    if (result != FILE_SUCCESS)
-        mContext.failed(range, result);
+    // Fail reads that can't be satisfied.
+    mContext.failed(mRange, result);
 
     // Convenience.
     auto& executor = mContext.mService.executor();
 
-    // Let any waiters know this range's download has completed.
+    // Let any waiters know this download has completed.
     for (auto& callback: mCallbacks)
         executor.execute(std::bind(std::move(callback), result), true);
 }
@@ -1588,6 +1725,10 @@ try
 
     // Acquire lock.
     std::lock_guard guard(mContext.mLock);
+
+    // Downloads been cancelled.
+    if (mIterator == mDownloading.end())
+        return Abort();
 
     // Downloaded data is outside of this range.
     if (offset >= mIterator->first.mEnd)
@@ -1654,7 +1795,7 @@ try
     transaction.commit();
 
     // Bump end of written range.
-    mEnd = written.mEnd;
+    mRange.mEnd = written.mEnd;
 
     // Dispatch requests we can now satisfy.
     mContext.completed(written);
@@ -1701,8 +1842,8 @@ FileContext::DownloadContext::DownloadContext(Activity activity,
     mContext(context),
     mDownload(),
     mDownloading(downloading),
-    mEnd(iterator->first.mBegin),
-    mIterator(iterator)
+    mIterator(iterator),
+    mRange(iterator->first.mBegin, iterator->first.mBegin)
 {}
 
 void FileContext::DownloadContext::cancel()
@@ -1717,16 +1858,19 @@ std::uint64_t FileContext::DownloadContext::distance(std::uint64_t position) con
     // Acquire lock.
     std::lock_guard guard(mContext.mLock);
 
+    // Sanity: Method should only be called on an active download.
+    assert(mIterator != mDownloading.end());
+
     // Sanity: Position should always be within the download's range.
     assert(mIterator->first.contains(position));
 
     // Return position's distance from mEnd.
-    return position - mEnd;
+    return position - mRange.mEnd;
 }
 
 auto FileContext::DownloadContext::download() -> PartialDownloadPtr
 {
-    // Sanity.
+    // Sanity: Downloads should only be created once.
     assert(!mDownload);
 
     // Convenience.
@@ -1754,7 +1898,7 @@ auto FileContext::DownloadContext::download() -> PartialDownloadPtr
 
 std::uint64_t FileContext::DownloadContext::end() const
 {
-    return mEnd;
+    return mRange.mEnd;
 }
 
 void FileContext::DownloadContext::queue(FileFetchCallback callback)
@@ -1770,6 +1914,9 @@ void FileContext::DownloadContext::range(std::uint64_t begin, std::uint64_t end)
 
 void FileContext::DownloadContext::range(const FileRange& range)
 {
+    // Sanity: Method should only be called on an active download.
+    assert(mIterator != mDownloading.end());
+
     // Range hasn't actually changed.
     if (mIterator->first == range)
         return;
@@ -1789,13 +1936,31 @@ void FileContext::DownloadContext::range(const FileRange& range)
     assert(added);
 
     // Ensure end of downloaded data is within our new range.
-    mEnd = std::min(range.mEnd, std::max(range.mBegin, mEnd));
+    mRange.mEnd = std::min(range.mEnd, std::max(range.mBegin, mRange.mEnd));
+}
+
+void FileContext::DownloadContext::replaced([[maybe_unused]] const DownloadContextPtr& self)
+{
+    // Sanity: This context must be referenced.
+    assert(self.get() == this);
+
+    // Sanity: This method should only be called on an active download.
+    assert(mIterator != mDownloading.end());
+
+    // Remove this download from its map.
+    mDownloading.remove(mIterator);
+
+    // End iterator is a sentinel that this download has been replaced.
+    mIterator = mDownloading.end();
 }
 
 milliseconds FileContext::DownloadContext::timeUntil(std::uint64_t position) const
 {
     // Acquire lock.
     std::lock_guard guard(mContext.mLock);
+
+    // Sanity: Method should only be called for an active download.
+    assert(mIterator != mDownloading.end());
 
     // Sanity: position should always be within the download's range.
     assert(mIterator->first.contains(position));
