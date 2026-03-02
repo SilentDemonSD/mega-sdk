@@ -45,6 +45,9 @@ struct ServiceOptions
     // I.e. An value of 10 here means align at a 1K boundary.
     std::uint64_t mJumpBackwardAlignment = 24;
 
+    // How far should we extend the beginning of a new range?
+    std::uint64_t mJumpBackwardDistance = UINT64_C(1) << 24;
+
     // How many times will we try to download a range before we give up.
     std::uint64_t mMaximumRangeRetries = 5u;
 
