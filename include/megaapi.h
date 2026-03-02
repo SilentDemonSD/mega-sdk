@@ -28012,12 +28012,43 @@ public:
      */
     static MegaFileServiceReclaimOptions* create();
 
+    /**
+     * @brief
+     * Get the reclaim age threshold.
+     *
+     * @return
+     * The reclaim age threshold in minutes. How old should the files be before they are considered
+     * for reclamation?
+     */
     virtual int getReclaimAgeThreshold() const = 0;
 
+    /**
+     * @brief
+     * Set the reclaim age threshold.
+     *
+     * @param ageThreshold
+     * The reclaim age threshold in minutes. How old should the files be before they are considered
+     * for reclamation?
+     */
     virtual void setReclaimAgeThreshold(int ageThreshold) = 0;
 
+    /**
+     * @brief
+     * Get the reclaim batch size.
+     *
+     * @return
+     * The reclaim batch size. How many files should be processed in each batch of reclaim process?
+     */
     virtual std::size_t getReclaimBatchSize() const = 0;
 
+    /**
+     * @brief
+     * Set the reclaim batch size.
+     *
+     * @param batchSize
+     * The reclaim batch size. How many files should be processed in each batch of reclaim process?
+     * This size is rarely needed to be changed.
+     */
     virtual void setReclaimBatchSize(std::size_t batchSize) = 0;
 
     /**
@@ -28056,8 +28087,32 @@ public:
      */
     virtual void setReclaimPeriod(uint64_t seconds) = 0;
 
+    /**
+     * @brief
+     * Returns the configured reclaim trigger threshold.
+     *
+     * @return
+     * The threshold in bytes that, when the used space exceeds it (and other
+     * required conditions are satisfied), may trigger a reclaim operation.
+     * Reclaiming stops once usage falls below this threshold.
+     *
+     * - 0  : No minimum threshold (reclaim may run immediately).
+     * - -1 : Automatic reclamation is disabled.
+     */
     virtual int64_t getReclaimSizeThreshold() const = 0;
 
+    /**
+     * @brief
+     * Sets the reclaim trigger threshold.
+     *
+     * @param bytes
+     * The threshold in bytes that, when exceeded by the used space (and other
+     * required conditions are satisfied), may trigger a reclaim operation.
+     * Reclaiming stops once usage falls below this threshold.
+     *
+     * - 0  : No minimum threshold (reclaim may run immediately).
+     * - -1 : Automatic reclamation is disabled.
+     */
     virtual void setReclaimSizeThreshold(int64_t bytes) = 0;
 
 }; // MegaFileServiceReclaimOptions
