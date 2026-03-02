@@ -5285,6 +5285,35 @@ static void exec_fileserviceReclaimOptions(autocomplete::ACState& state)
                        << "Size Threshold: " << options->mSizeThreshold << "B" << std::endl;
 }
 
+static void exec_fileserviceReclaim(autocomplete::ACState&)
+{
+    using file_service::FileServiceResultOr;
+    const auto result = client->mFileService.reclaim(
+        [](FileServiceResultOr<std::uint64_t> reclaimResult)
+        {
+            if (!reclaimResult)
+            {
+                conlock(std::cerr)
+                    << "Reclaim process failed: " << file_service::toString(reclaimResult.error())
+                    << std::endl;
+                return;
+            }
+
+            conlock(std::cout) << "Reclaim process completed. Reclaimed " << *reclaimResult
+                               << " bytes." << std::endl;
+        });
+
+    if (result == file_service::FILE_SERVICE_SUCCESS)
+    {
+        conlock(std::cout) << "Reclaim process initiated." << std::endl;
+    }
+    else
+    {
+        conlock(std::cerr) << "Couldn't initiate reclaim process: " << toString(result)
+                           << std::endl;
+    }
+}
+
 autocomplete::ACN autocompleteSyntax()
 {
     using namespace autocomplete;
@@ -5938,6 +5967,7 @@ autocomplete::ACN autocompleteSyntax()
                     opt(sequence(flag("-delay"), wholenumber("seconds", 30 * 60))),
                     opt(sequence(flag("-period"), wholenumber("seconds", 2 * 60 * 60))),
                     opt(sequence(flag("-size-threshold"), wholenumber("seconds", 0)))));
+    p->Add(exec_fileserviceReclaim, sequence(text("file-service"), text("reclaim")));
 
     return autocompleteTemplate = std::move(p);
 }
