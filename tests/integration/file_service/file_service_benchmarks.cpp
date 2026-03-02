@@ -280,7 +280,8 @@ public:
                             offset,
                             std::placeholders::_1),
                   offset,
-                  length);
+                  length,
+                  true);
     }
 }; // BenchmarkReadRequestContext
 

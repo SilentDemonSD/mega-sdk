@@ -5211,7 +5211,7 @@ static void exec_fileserviceread(autocomplete::ACState& state)
         // Kick off the read.
         void read()
         {
-            mFile.read(*this, mOffset, mLength - mOffset);
+            mFile.read(*this, mOffset, mLength - mOffset, true);
         }
     }; // Reader
 

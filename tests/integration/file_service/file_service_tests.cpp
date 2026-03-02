@@ -1146,7 +1146,8 @@ TEST_F(FileServiceTests, file_destroyed_on_client_thread_during_read_callback_su
                                            std::placeholders::_1));
             },
             0,
-            mFileContent.size());
+            mFileContent.size(),
+            true);
 
         // Return a waiter to our caller.
         return notifier->get_future();
@@ -4125,7 +4126,8 @@ auto read(File file, std::uint64_t offset, std::uint64_t length)
             mFile.read(
                 std::bind(&ReadContext::onRead, this, std::move(context), std::placeholders::_1),
                 result->mOffset + count,
-                mLength);
+                mLength,
+                false);
         }
 
         // Where we'll store content.
@@ -4154,7 +4156,8 @@ auto read(File file, std::uint64_t offset, std::uint64_t length)
     file.read(
         std::bind(&ReadContext::onRead, context.get(), std::move(context), std::placeholders::_1),
         offset,
-        length);
+        length,
+        true);
 
     // Return waiter to our caller.
     return waiter;
@@ -4193,7 +4196,8 @@ auto readOnce(File file, std::uint64_t offset, std::uint64_t length)
             notifier->set_value(std::move(buffer));
         },
         offset,
-        length);
+        length,
+        true);
 
     // Return the waiter to our caller.
     return waiter;

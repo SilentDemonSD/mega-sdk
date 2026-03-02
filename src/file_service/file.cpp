@@ -140,20 +140,23 @@ FileRangeVector File::ranges() const
     return mContext->ranges();
 }
 
-void File::read(FileReadCallback callback, std::uint64_t offset, std::uint64_t length)
+void File::read(FileReadCallback callback,
+                std::uint64_t offset,
+                std::uint64_t length,
+                bool isJumpCandidate)
 {
     assert(callback);
     assert(mContext);
 
-    read(std::move(callback), FileRange(offset, offset + length));
+    read(std::move(callback), FileRange(offset, offset + length), isJumpCandidate);
 }
 
-void File::read(FileReadCallback callback, const FileRange& range)
+void File::read(FileReadCallback callback, const FileRange& range, bool isJumpCandidate)
 {
     assert(callback);
     assert(mContext);
 
-    mContext->read(FileReadRequest{std::move(callback), range});
+    mContext->read(FileReadRequest{std::move(callback), range, isJumpCandidate});
 }
 
 void File::reclaim(FileReclaimCallback callback)

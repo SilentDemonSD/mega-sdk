@@ -45,7 +45,10 @@ public:
     StreamContext(FileStreamDataCallback callback, File file);
 
     // Start streaming file data.
-    void stream(StreamContextPtr context, std::uint64_t offset, std::uint64_t length);
+    void stream(StreamContextPtr context,
+                std::uint64_t offset,
+                std::uint64_t length,
+                bool isJumpCandidate);
 }; // StreamContext
 
 void stream(FileStreamDataCallback callback, File file, std::uint64_t offset, std::uint64_t length)
@@ -57,7 +60,7 @@ void stream(FileStreamDataCallback callback, File file, std::uint64_t offset, st
     auto context = std::make_shared<StreamContext>(std::move(callback), std::move(file));
 
     // Start streaming data.
-    context->stream(context, offset, length);
+    context->stream(context, offset, length, true);
 }
 
 void StreamContext::onContinue(StreamContextPtr& context,
@@ -72,7 +75,7 @@ void StreamContext::onContinue(StreamContextPtr& context,
     consumed = std::min(consumed, length);
 
     // Try and stream some more file data.
-    stream(std::move(context), offset + consumed, length - consumed);
+    stream(std::move(context), offset + consumed, length - consumed, false);
 }
 
 void StreamContext::onData(StreamContextPtr& context,
@@ -121,7 +124,10 @@ StreamContext::StreamContext(FileStreamDataCallback callback, File file):
     mFile(std::move(file))
 {}
 
-void StreamContext::stream(StreamContextPtr context, std::uint64_t offset, std::uint64_t length)
+void StreamContext::stream(StreamContextPtr context,
+                           std::uint64_t offset,
+                           std::uint64_t length,
+                           bool isJumpCandidate)
 {
     // Sanity.
     assert(context.get() == this);
@@ -134,7 +140,8 @@ void StreamContext::stream(StreamContextPtr context, std::uint64_t offset, std::
                          offset,
                          std::placeholders::_1),
                offset,
-               length);
+               length,
+               isJumpCandidate);
 }
 
 class StreamContextFD;
@@ -165,7 +172,10 @@ public:
     StreamContextFD(FileStreamFDCallback callback, File file);
 
     // Start streaming file data.
-    void stream(StreamContextFDPtr context, std::uint64_t offset, std::uint64_t length);
+    void stream(StreamContextFDPtr context,
+                std::uint64_t offset,
+                std::uint64_t length,
+                bool isJumpCandidate);
 }; // StreamContext
 
 void stream(FileStreamFDCallback callback, File file, std::uint64_t offset, std::uint64_t length)
@@ -177,7 +187,7 @@ void stream(FileStreamFDCallback callback, File file, std::uint64_t offset, std:
     auto context = std::make_shared<StreamContextFD>(std::move(callback), std::move(file));
 
     // Start streaming data.
-    context->stream(context, offset, length);
+    context->stream(context, offset, length, true);
 }
 
 void StreamContextFD::onContinue(StreamContextFDPtr& context,
@@ -192,7 +202,7 @@ void StreamContextFD::onContinue(StreamContextFDPtr& context,
     consumed = std::min(consumed, length);
 
     // Try and stream some more file data.
-    stream(std::move(context), offset + consumed, length - consumed);
+    stream(std::move(context), offset + consumed, length - consumed, false);
 }
 
 void StreamContextFD::onData(StreamContextFDPtr& context,
@@ -227,7 +237,10 @@ StreamContextFD::StreamContextFD(FileStreamFDCallback callback, File file):
     mFile(std::move(file))
 {}
 
-void StreamContextFD::stream(StreamContextFDPtr context, std::uint64_t offset, std::uint64_t length)
+void StreamContextFD::stream(StreamContextFDPtr context,
+                             std::uint64_t offset,
+                             std::uint64_t length,
+                             bool isJumpCandidate)
 {
     // Sanity.
     assert(context.get() == this);
@@ -240,7 +253,8 @@ void StreamContextFD::stream(StreamContextFDPtr context, std::uint64_t offset, s
                          offset,
                          std::placeholders::_1),
                offset,
-               length);
+               length,
+               isJumpCandidate);
 }
 } // file_service
 } // mega

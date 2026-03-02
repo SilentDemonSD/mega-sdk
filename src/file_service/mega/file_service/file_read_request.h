@@ -26,6 +26,9 @@ struct FileReadRequest
 
     // The content the user wants to read.
     FileRange mRange;
+
+    // True if this is the first of a series of reads.
+    bool mIsJumpCandidate = false;
 }; // FileReadRequest
 
 } // file_service

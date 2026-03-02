@@ -77,10 +77,13 @@ public:
     // If you request 1MiB of data, you may get the entire 1MiB or you might
     // get much less. The information passed to the callback will specify
     // how much data you've received and it's your responsibility to request
-    // the rest, if necessary.
-    void read(FileReadCallback callback, std::uint64_t offset, std::uint64_t length);
+    // the rest, if necessary
+    void read(FileReadCallback callback,
+              std::uint64_t offset,
+              std::uint64_t length,
+              bool isJumpCandidate);
 
-    void read(FileReadCallback callback, const FileRange& range);
+    void read(FileReadCallback callback, const FileRange& range, bool isJumpCandidate);
 
     // Reclaim this file's storage.
     void reclaim(FileReclaimCallback callback);
