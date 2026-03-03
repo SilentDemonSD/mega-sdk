@@ -787,7 +787,17 @@ void FileContext::execute(FileReadRequest& request)
 
         // Request begins before our large read.
         if (request.mRange.mBegin < iterator->first.mBegin)
+        {
+            // How far ahead is the request?
+            auto distance = iterator->first.mBegin - request.mRange.mBegin;
+
+            // Not far enough to be considered a jump.
+            if (distance <= immediateThreshold)
+                return nullptr;
+
+            // Far enough to be considered a jump.
             return context;
+        }
 
         // How far is request from the end of the large read's data?
         auto distance = context->distance(request.mRange.mBegin);
