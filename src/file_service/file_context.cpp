@@ -1537,7 +1537,7 @@ void FileContext::pinUntil(std::chrono::steady_clock::time_point when)
     mPinTask = mService.executor().execute(std::move(callback), when, false);
 }
 
-ServiceOptions FileContext::options() const
+ServiceOptions FileContext::serviceOptions() const
 {
     return mService.serviceOptions();
 }

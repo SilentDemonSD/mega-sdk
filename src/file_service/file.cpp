@@ -47,7 +47,7 @@ File::~File()
         return;
 
     // Convenience.
-    auto options = mContext->options();
+    auto options = mContext->serviceOptions();
 
     // Pin the context in memory for a time.
     mContext->pinFor(options.mFileContextReleaseDelay);
