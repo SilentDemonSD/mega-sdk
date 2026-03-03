@@ -172,11 +172,15 @@ auto FileService::reclaim(ReclaimCallback callback) -> FileServiceResult
     if (!mContext)
         return FILE_SERVICE_UNINITIALIZED;
 
-    mContext->execute(
+    // Convenience.
+    auto& executor = mContext->executor();
+
+    executor.execute(
         [this, callback = std::move(callback)](const common::Task&)
         {
             mContext->reclaim(std::move(callback));
-        });
+        },
+        true);
 
     return FILE_SERVICE_SUCCESS;
 }
