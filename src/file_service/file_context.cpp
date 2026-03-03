@@ -714,19 +714,16 @@ void FileContext::execute(FileReadRequest& request)
 
         // Couldn't create a download for our range.
         if (!download)
-            return download;
+            return;
 
         // Sanity: We should only begin one download for any given request.
         assert(!downloader);
 
         // Make sure we begin our download.
-        downloader = [download]()
+        downloader = [download = std::move(download)]()
         {
             download->begin();
         };
-
-        // Return download to our caller.
-        return download;
     }; // addDownload
 
     // Complete request if it can be satisfied by data on disk.
