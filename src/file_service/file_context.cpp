@@ -826,12 +826,16 @@ void FileContext::execute(FileReadRequest& request)
     // Convenience.
     auto range = request.mRange;
 
-    // We should begin a download for the file's remaining data.
-    if (mDownloading.mLarge.empty() && range.length() > immediateThreshold)
+    // Request can't be satisfied by data on disk.
+    if (!completeIfOnDisk(request))
+        queueRequest(std::move(request));
+
+    // We're performing a large read.
+    if (range.length() > immediateThreshold)
     {
-        // Request can't be satisfied by data on disk.
-        if (!completeIfOnDisk(request))
-            queueRequest(std::move(request));
+        // A large download is already in progress.
+        if (!mDownloading.mLarge.empty())
+            return;
 
         // Extend range to the left if possible.
         range.mBegin -= std::min(backwardDistance, range.mBegin);
@@ -843,24 +847,11 @@ void FileContext::execute(FileReadRequest& request)
         range.mEnd = mInfo->size();
 
         // Try and download the file's remaining data.
-        addDownload(mDownloading.mLarge, range);
-
-        // Nothing left to do.
-        return;
+        return addDownload(mDownloading.mLarge, range);
     }
 
     // Sanity.
     assert(range.length() <= immediateThreshold);
-
-    // We can satisfy all or part of the caller's read.
-    if (completeIfOnDisk(request))
-        return;
-
-    // Sanity: Range should match the request's range.
-    assert(range == request.mRange);
-
-    // Queue request for later completion.
-    queueRequest(std::move(request));
 
     // Request can be satisfied by an existing large download.
     if (auto download = downloading(mDownloading.mLarge, range);
