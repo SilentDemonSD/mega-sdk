@@ -1890,7 +1890,7 @@ std::uint64_t FileContext::DownloadContext::distance(std::uint64_t position) con
     assert(mIterator->first.contains(position));
 
     // Return position's distance from mEnd.
-    return position - mRange.mEnd;
+    return std::max(mRange.mEnd, position) - mRange.mEnd;
 }
 
 auto FileContext::DownloadContext::download() -> PartialDownloadPtr
