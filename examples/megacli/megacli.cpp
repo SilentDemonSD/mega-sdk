@@ -5224,35 +5224,28 @@ static void exec_fileserviceReclaimOptions(autocomplete::ACState& state)
 {
     auto parseReclaimOptions = [&](file_service::ReclaimOptions& options)
     {
-        std::string ageThreshold;
-        std::string batchSize;
-        std::string delay;
-        std::string period;
-        std::string sizeThreshold;
+        auto ageThreshold = state.extractflagparam("-age-threshold");
+        auto batchSize = state.extractflagparam("-batch-size");
+        auto delay = state.extractflagparam("-delay");
+        auto period = state.extractflagparam("-period");
+        auto sizeThreshold = state.extractflagparam("-size-threshold");
 
-        state.extractflagparam("-age-threshold", ageThreshold);
-        state.extractflagparam("-batch-size", batchSize);
-        state.extractflagparam("-delay", delay);
-        state.extractflagparam("-period", period);
-        state.extractflagparam("-size-threshold", sizeThreshold);
+        if (ageThreshold)
+            options.mAgeThreshold = minutes(stoul(*ageThreshold));
 
-        if (!ageThreshold.empty())
-            options.mAgeThreshold = minutes(stoul(ageThreshold));
+        if (batchSize)
+            options.mBatchSize = stoul(*batchSize);
 
-        if (!batchSize.empty())
-            options.mBatchSize = stoul(batchSize);
+        if (delay)
+            options.mDelay = seconds(stoul(*delay));
 
-        if (!delay.empty())
-            options.mDelay = seconds(stoul(delay));
+        if (period)
+            options.mPeriod = seconds(stoul(*period));
 
-        if (!period.empty())
-            options.mPeriod = seconds(stoul(period));
+        if (sizeThreshold)
+            options.mSizeThreshold = stol(*sizeThreshold);
 
-        if (!sizeThreshold.empty())
-            options.mSizeThreshold = stol(sizeThreshold);
-
-        return !ageThreshold.empty() || !batchSize.empty() || !delay.empty() || !period.empty() ||
-               !sizeThreshold.empty();
+        return ageThreshold || batchSize || delay || period || sizeThreshold;
     };
 
     // Try and retrieve current reclaim options.
