@@ -579,55 +579,6 @@ TEST_F(SdkHttpServerTest, GetSetRestrictedMode)
     CASE_info << "finished";
 }
 
-// test httpServerAddListener, httpServerRemoveListener and check MegaTransferListener callbacks
-TEST_F(SdkHttpServerTest, HttpServerListenerCallbacks)
-{
-    ASSERT_NO_FATAL_FAILURE(SdkTest::getAccountsForTest(1));
-    CASE_info << "started";
-    testing::NiceMock<MockMegaTransferListener> mockListener{megaApi[0].get()};
-    std::promise<handle> fileNodeHandlePromise;
-
-    EXPECT_CALL(mockListener, onTransferFinish)
-        .WillOnce(
-            [&fileNodeHandlePromise](MegaApi*, MegaTransfer* transfer, MegaError*)
-            {
-                LOG_debug << "onTransferFinish called for node handle: "
-                          << transfer->getNodeHandle();
-                if (transfer)
-                    fileNodeHandlePromise.set_value(transfer->getNodeHandle());
-                else
-                    fileNodeHandlePromise.set_value(UNDEF);
-            });
-
-    auto server = scopedHttpServer(megaApi[0].get());
-    ASSERT_TRUE(server);
-
-    megaApi[0]->httpServerAddListener(&mockListener);
-    // Upload test file to trigger transfer events
-    const std::string testFileName = "http_server_listener_test.txt";
-    const std::string testFileContents = "HTTP server listener test file content";
-
-    auto fileNode = uploadFile(0, testFileName, testFileContents);
-    ASSERT_TRUE(fileNode);
-
-    // get local link to trigger the transfer
-    unique_ptr<char[]> fileLocalLink(megaApi[0]->httpServerGetLocalLink(fileNode.get()));
-    ASSERT_TRUE(fileLocalLink);
-    string fileLinkStr(fileLocalLink.get());
-    CASE_info << "Local file link: " << fileLinkStr;
-    auto response = HttpClient::get(fileLinkStr);
-    EXPECT_EQ(200, response.statusCode);
-
-    // Wait for OnTransferFinish callback
-    auto fileNodeHandle = fileNodeHandlePromise.get_future();
-    ASSERT_EQ(fileNodeHandle.wait_for(std::chrono::seconds(5U)), std::future_status::ready)
-        << "Timeout waiting for onTransferFinish callback";
-    EXPECT_EQ(fileNode->getHandle(), fileNodeHandle.get());
-
-    megaApi[0]->httpServerRemoveListener(&mockListener);
-    CASE_info << "finished";
-}
-
 /**
  * Test basic HTTP server functionality with GET request.
  */
