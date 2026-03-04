@@ -685,6 +685,7 @@ void FileContext::execute(FileReadRequest& request)
     const auto backwardDistance = options.mJumpBackwardDistance;
     const auto forwardDistance = options.mJumpForwardDistance;
     const auto immediateThreshold = options.mImmediateDownloadThreshold;
+    const auto minimumRangeSize = options.mMinimumRangeSize;
     const auto waitThreshold = seconds(1);
 
     // Cancels a download, if needed, when exiting this function.
@@ -893,6 +894,22 @@ void FileContext::execute(FileReadRequest& request)
     // Request can be satisfied by an existing small download.
     if (downloading(mDownloading.mSmall, range))
         return;
+
+    // Convenience.
+    auto length = range.length();
+
+    // Make sure we get as much as we can from the small download.
+    if (minimumRangeSize)
+        length = std::max(std::min(immediateThreshold, minimumRangeSize), length);
+
+    // Make sure our length won't overflow.
+    length = std::min(UINT64_MAX - range.mBegin, length);
+
+    // Make sure we don't try and download beyond the end of the file.
+    length = std::min(length, mInfo->size() - range.mBegin);
+
+    // Update range's end point.
+    range.mEnd = range.mBegin + length;
 
     // Try and add a small download that'll cover request.
     addDownload(mDownloading.mSmall, range);

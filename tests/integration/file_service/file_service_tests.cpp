@@ -521,6 +521,15 @@ TEST_F(FileServiceTests, append_succeeds)
     // Make sure we could open the file.
     ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
 
+    // No minimum range size.
+    mClient->fileService().serviceOptions(
+        [&]()
+        {
+            auto options = DefaultOptions;
+            options.mMinimumRangeSize = 0;
+            return options;
+        }());
+
     // Get our hands on the file's attributes.
     auto info = file->info();
 
@@ -1090,6 +1099,15 @@ TEST_F(FileServiceTests, fetch_succeeds)
 
     // Make sure we could open the file.
     ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+
+    // No minimum range size.
+    mClient->fileService().serviceOptions(
+        [&]()
+        {
+            auto options = DefaultOptions;
+            options.mMinimumRangeSize = 0;
+            return options;
+        }());
 
     // Read some ranges from the file.
     ASSERT_EQ(execute(read, *file, 256_KiB, 256_KiB).errorOr(FILE_SUCCESS), FILE_SUCCESS);
@@ -2379,6 +2397,15 @@ TEST_F(FileServiceTests, read_removed_file_succeeds)
     // Make sure we could create our file.
     ASSERT_EQ(handle.errorOr(API_OK), API_OK);
 
+    // No minimum range size.
+    mClient->fileService().serviceOptions(
+        [&]()
+        {
+            auto options = DefaultOptions;
+            options.mMinimumRangeSize = 0;
+            return options;
+        }());
+
     // Open the file for reading.
     auto file = mClient->fileOpen(*handle);
 
@@ -2430,6 +2457,9 @@ TEST_F(FileServiceTests, read_small_during_large_succeeds)
 
             // Any read larger than 64KiB is large.
             options.mImmediateDownloadThreshold = 1ul << 16;
+
+            // No minimum range size.
+            options.mMinimumRangeSize = 0;
 
             return options;
         }());
@@ -2505,6 +2535,7 @@ TEST_F(FileServiceTests, read_small_succeeds)
         {
             auto options = DefaultOptions;
             options.mImmediateDownloadThreshold = 1ul << 16;
+            options.mMinimumRangeSize = 1ul << 16;
             return options;
         }());
 
@@ -2512,30 +2543,40 @@ TEST_F(FileServiceTests, read_small_succeeds)
     auto waiter0 = read(*file, 0, 64_KiB);
     auto waiter1 = read(*file, 96_KiB, 64_KiB);
     auto waiter2 = read(*file, 192_KiB, 64_KiB);
+    auto waiter3 = read(*file, 288_KiB, 4_KiB);
 
     // Wait for all of the reads to complete.
     ASSERT_NE(waiter0.wait_for(mDefaultTimeout), timeout);
     ASSERT_NE(waiter1.wait_for(mDefaultTimeout), timeout);
     ASSERT_NE(waiter2.wait_for(mDefaultTimeout), timeout);
+    ASSERT_NE(waiter3.wait_for(mDefaultTimeout), timeout);
 
     // Make sure all of the reads succeeded.
     auto result0 = waiter0.get();
     auto result1 = waiter1.get();
     auto result2 = waiter2.get();
+    auto result3 = waiter3.get();
 
     ASSERT_EQ(result0.errorOr(FILE_SUCCESS), FILE_SUCCESS);
     ASSERT_EQ(result1.errorOr(FILE_SUCCESS), FILE_SUCCESS);
     ASSERT_EQ(result2.errorOr(FILE_SUCCESS), FILE_SUCCESS);
+    ASSERT_EQ(result3.errorOr(FILE_SUCCESS), FILE_SUCCESS);
 
     // Make sure each read got what it expected.
     ASSERT_TRUE(compare(*result0, mFileContent, 0, 64_KiB));
     ASSERT_TRUE(compare(*result1, mFileContent, 96_KiB, 64_KiB));
     ASSERT_TRUE(compare(*result2, mFileContent, 192_KiB, 64_KiB));
+    ASSERT_TRUE(compare(*result3, mFileContent, 288_KiB, 4_KiB));
+
+    // Make sure all downloads have completed.
+    ASSERT_EQ(execute(fetchBarrier, *file), FILE_SUCCESS);
 
     // Make sure the file's ranges match what we've downloaded.
-    EXPECT_THAT(
-        file->ranges(),
-        ElementsAre(FileRange(0, 64_KiB), FileRange(96_KiB, 160_KiB), FileRange(192_KiB, 256_KiB)));
+    EXPECT_THAT(file->ranges(),
+                ElementsAre(FileRange(0, 64_KiB),
+                            FileRange(96_KiB, 160_KiB),
+                            FileRange(192_KiB, 256_KiB),
+                            FileRange(288_KiB, 352_KiB)));
 }
 
 TEST_F(FileServiceTests, read_succeeds)
@@ -2543,6 +2584,15 @@ TEST_F(FileServiceTests, read_succeeds)
     // Open a file for reading.
     auto file = mClient->fileOpen(mFileHandle);
     ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+
+    // No minimum range size.
+    mClient->fileService().serviceOptions(
+        [&]()
+        {
+            auto options = DefaultOptions;
+            options.mMinimumRangeSize = 0;
+            return options;
+        }());
 
     // Latch the file's access time.
     auto accessed = file->info().accessed();
@@ -2772,10 +2822,14 @@ TEST_F(FileServiceTests, reclaim_all_succeeds)
     // Tracks each file that we've opened.
     std::vector<File> files;
 
-    // Disable readahead.
-    //
-    // This is necessary to ensure we read only as much as specified.
-    mClient->fileService().serviceOptions(DefaultOptions);
+    // No minimum range size.
+    mClient->fileService().serviceOptions(
+        [&]()
+        {
+            auto options = DefaultOptions;
+            options.mMinimumRangeSize = 0;
+            return options;
+        }());
 
     // Tracks total space allocated for our files.
     std::uint64_t totalAllocated = 0;
@@ -3845,6 +3899,15 @@ TEST_F(FileServiceTests, truncate_with_ranges_succeeds)
     // Make sure the file was opened.
     ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
 
+    // No minimum range size.
+    mClient->fileService().serviceOptions(
+        [&]()
+        {
+            auto options = DefaultOptions;
+            options.mMinimumRangeSize = 0;
+            return options;
+        }());
+
     // Reads a range from the file.
     auto read = [&](std::uint64_t offset, std::uint64_t length)
     {
@@ -4075,6 +4138,15 @@ TEST_F(FileServiceTests, write_succeeds)
 
     // Make sure we could actually open the file.
     ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+
+    // No minimum range size.
+    mClient->fileService().serviceOptions(
+        [&]()
+        {
+            auto options = DefaultOptions;
+            options.mMinimumRangeSize = 0;
+            return options;
+        }());
 
     // Read content from the file and make sure it matches our expectations.
     auto read = [&](std::uint64_t offset, std::uint64_t length)
