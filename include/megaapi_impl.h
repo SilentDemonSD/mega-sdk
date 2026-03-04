@@ -4660,13 +4660,6 @@ public:
         void httpServerEnableSubtitlesSupport(bool enable);
         bool httpServerIsSubtitlesSupportEnabled();
 
-        void httpServerAddListener(MegaTransferListener *listener);
-        void httpServerRemoveListener(MegaTransferListener *listener);
-
-        void fireOnStreamingStart(MegaTransferPrivate *transfer);
-        void fireOnStreamingTemporaryError(MegaTransferPrivate *transfer, unique_ptr<MegaErrorPrivate> e);
-        void fireOnStreamingFinish(MegaTransferPrivate *transfer, unique_ptr<MegaErrorPrivate> e);
-
         //FTP
         bool ftpServerStart(bool localOnly = true, int port = 4990, int dataportBegin = 1500, int dataPortEnd = 1600, bool useTLS = false, const char *certificatepath = NULL, const char *keypath = NULL);
         void ftpServerStop();
@@ -4980,7 +4973,6 @@ public:
         bool httpServerOfflineAttributeEnabled;
         int httpServerRestrictedMode;
         bool httpServerSubtitlesSupportEnabled;
-        set<MegaTransferListener *> httpServerListeners;
 
         MegaFTPServer *ftpServer;
         int ftpServerMaxBufferSize;

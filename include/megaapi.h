@@ -21648,12 +21648,14 @@ class MegaApi
          *
          * @param listener Listener to receive information about the HTTP proxy server
          */
+        MEGA_DEPRECATED
         void httpServerAddListener(MegaTransferListener *listener);
 
         /**
          * @brief Stop the reception of callbacks related to the HTTP proxy server on this listener
          * @param listener Listener that won't continue receiving information
          */
+        MEGA_DEPRECATED
         void httpServerRemoveListener(MegaTransferListener *listener);
 
         /**

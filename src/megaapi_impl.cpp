@@ -11517,57 +11517,6 @@ bool MegaApiImpl::httpServerIsLocalOnly()
     return localOnly;
 }
 
-void MegaApiImpl::httpServerAddListener(MegaTransferListener *listener)
-{
-    if (!listener)
-    {
-        return;
-    }
-
-    SdkMutexGuard g(sdkMutex);
-    httpServerListeners.insert(listener);
-}
-
-void MegaApiImpl::httpServerRemoveListener(MegaTransferListener *listener)
-{
-    if (!listener)
-    {
-        return;
-    }
-
-    SdkMutexGuard g(sdkMutex);
-    httpServerListeners.erase(listener);
-}
-
-void MegaApiImpl::fireOnStreamingStart(MegaTransferPrivate *transfer)
-{
-    for(set<MegaTransferListener *>::iterator it = httpServerListeners.begin(); it != httpServerListeners.end() ; it++)
-        (*it)->onTransferStart(api, transfer);
-}
-
-void MegaApiImpl::fireOnStreamingTemporaryError(MegaTransferPrivate *transfer, unique_ptr<MegaErrorPrivate> e)
-{
-    for(set<MegaTransferListener *>::iterator it = httpServerListeners.begin(); it != httpServerListeners.end() ; it++)
-        (*it)->onTransferTemporaryError(api, transfer, e.get());
-}
-
-void MegaApiImpl::fireOnStreamingFinish(MegaTransferPrivate *transfer, unique_ptr<MegaErrorPrivate> e)
-{
-    if(e->getErrorCode())
-    {
-        LOG_warn << "Streaming request finished with error: " << e->getErrorString();
-    }
-    else
-    {
-        LOG_info << "Streaming request finished";
-    }
-
-    for(set<MegaTransferListener *>::iterator it = httpServerListeners.begin(); it != httpServerListeners.end() ; it++)
-        (*it)->onTransferFinish(api, transfer, e.get());
-
-    delete transfer;
-}
-
 bool MegaApiImpl::ftpServerStart(bool localOnly, int port, int dataportBegin, int dataPortEnd, bool useTLS, const char *certificatepath, const char *keypath)
 {
     #ifndef ENABLE_EVT_TLS

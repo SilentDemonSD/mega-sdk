@@ -5040,15 +5040,9 @@ bool MegaApi::httpServerIsSubtitlesSupportEnabled()
     return pImpl->httpServerIsSubtitlesSupportEnabled();
 }
 
-void MegaApi::httpServerAddListener(MegaTransferListener *listener)
-{
-    pImpl->httpServerAddListener(listener);
-}
+void MegaApi::httpServerAddListener(MegaTransferListener*) {}
 
-void MegaApi::httpServerRemoveListener(MegaTransferListener *listener)
-{
-    pImpl->httpServerRemoveListener(listener);
-}
+void MegaApi::httpServerRemoveListener(MegaTransferListener*) {}
 
 char *MegaApi::httpServerGetLocalLink(MegaNode *node)
 {
