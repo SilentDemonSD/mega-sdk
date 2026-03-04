@@ -1790,7 +1790,13 @@ try
     {
         // Because no gaps needed to be filled.
         if (current == end)
+        {
+            // But act as if we did.
+            mRange.mEnd = range.mEnd;
+
+            // Continue the download.
             return Continue();
+        }
 
         // Because we couldn't write any data to the first gap.
         return Abort();
