@@ -137,7 +137,7 @@ try
         return FILE_SERVICE_ALREADY_INITIALIZED;
     }
 
-    mContext = std::make_unique<FileServiceContext>(client, serviceOptions, reclaimOptions);
+    mContext = std::make_unique<FileServiceContext>(client, reclaimOptions, serviceOptions);
 
     FSInfo1("File Service initialized");
 

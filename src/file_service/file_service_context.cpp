@@ -878,8 +878,8 @@ void FileServiceContext::updated(NodeEventQueue& events)
 }
 
 FileServiceContext::FileServiceContext(Client& client,
-                                       const ServiceOptions& serviceOptions,
-                                       const ReclaimOptions& reclaimOptions):
+                                       const ReclaimOptions& reclaimOptions,
+                                       const ServiceOptions& serviceOptions):
     NodeEventObserver(),
     mInstanceLogger("FileServiceContext", *this, logger()),
     mClient(client),

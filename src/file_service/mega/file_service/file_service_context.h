@@ -178,8 +178,8 @@ class FileServiceContext: common::NodeEventObserver
 
 public:
     FileServiceContext(common::Client& client,
-                       const ServiceOptions& serviceOptions,
-                       const ReclaimOptions& reclaimOptions);
+                       const ReclaimOptions& reclaimOptions,
+                       const ServiceOptions& serviceOptions);
 
     ~FileServiceContext();
 
