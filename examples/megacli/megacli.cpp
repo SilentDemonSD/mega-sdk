@@ -106,7 +106,6 @@ using std::hex;
 using std::ifstream;
 using std::ofstream;
 using std::setw;
-using std::stol;
 using std::stoul;
 using std::chrono::minutes;
 using std::chrono::seconds;
@@ -5243,7 +5242,7 @@ static void exec_fileserviceReclaimOptions(autocomplete::ACState& state)
             options.mPeriod = seconds(stoul(*period));
 
         if (sizeThreshold)
-            options.mSizeThreshold = stol(*sizeThreshold);
+            options.mSizeThreshold = stoul(*sizeThreshold);
 
         return ageThreshold || batchSize || delay || period || sizeThreshold;
     };
@@ -5270,12 +5269,16 @@ static void exec_fileserviceReclaimOptions(autocomplete::ACState& state)
     }
 
     // Print reclaim options.
+    const auto& threshold = options->mSizeThreshold;
+
     conlock(std::cout) << "Reclaim options:\n"
                        << "Age Threshold: " << options->mAgeThreshold.count() << "m\n"
                        << "Batch Size: " << options->mBatchSize << "\n"
                        << "Delay: " << options->mDelay.count() << "s\n"
                        << "Period: " << options->mPeriod.count() << "s\n"
-                       << "Size Threshold (BYTES): " << options->mSizeThreshold << std::endl;
+                       << "Size Threshold (BYTES): "
+                       << (threshold ? std::to_string(*threshold).c_str() : "Disabled")
+                       << std::endl;
 }
 
 static void exec_fileserviceReclaim(autocomplete::ACState&)

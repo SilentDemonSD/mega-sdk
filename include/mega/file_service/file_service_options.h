@@ -26,9 +26,8 @@ struct ReclaimOptions
     // How often should we try to reclaim space?
     std::chrono::seconds mPeriod{2 * 60 * 60};
 
-    // How many bytes can the service store before it needs to reclaim space? A negative number -1
-    // means disabled.
-    std::int64_t mSizeThreshold{-1};
+    // How many bytes can the service store before it needs to reclaim space?
+    std::optional<std::uint64_t> mSizeThreshold{};
 };
 
 struct ServiceOptions

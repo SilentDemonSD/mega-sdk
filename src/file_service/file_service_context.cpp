@@ -667,10 +667,10 @@ try
     auto reclaimOptions = this->reclaimOptions();
 
     // Convenience.
-    auto sizeThreshold = mReclaimOptions.mSizeThreshold;
+    const auto sizeThreshold = mReclaimOptions.mSizeThreshold;
 
     // No quota? No need to reclaim anything.
-    if (sizeThreshold < 0)
+    if (!sizeThreshold)
         return FileIDVector();
 
     // So we have exclusive access to the database.
@@ -680,10 +680,10 @@ try
     auto transaction = mDatabase.transaction();
 
     // Figure out how much storage we're currently using.
-    auto used = static_cast<int64_t>(storageUsed(lock, transaction));
+    auto used = storageUsed(lock, transaction);
 
     // No need to reclaim any storage.
-    if (sizeThreshold >= used)
+    if (sizeThreshold.value() >= used)
         return FileIDVector();
 
     // Get the allocated size and ID of all files in storage.
@@ -702,7 +702,7 @@ try
     FileIDVector ids;
 
     // Collect as many IDs for reclamation as necessary.
-    for (query.execute(); query && used > sizeThreshold; ++query)
+    for (query.execute(); query && used > sizeThreshold.value(); ++query)
     {
         // Latch the file's ID and allocated size.
         auto id = query.field("id").get<FileID>();
@@ -712,7 +712,7 @@ try
         ids.emplace_back(id);
 
         // Decrease amount of used storage.
-        used -= std::min(static_cast<int64_t>(size), used);
+        used -= std::min(size, used);
     }
 
     // Return vector of reclaimable IDs to our caller.
@@ -908,7 +908,7 @@ FileServiceContext::FileServiceContext(Client& client,
     purgeRemovedFiles();
 
     // User hasn't specified any storage quota.
-    if (mReclaimOptions.mSizeThreshold < 0)
+    if (!mReclaimOptions.mSizeThreshold)
         return;
 
     // Assume user's specified an initial reclamation delay.
@@ -2002,7 +2002,7 @@ Database createDatabase(const LocalPath& databasePath)
 
 bool reclamationEnabled(const ReclaimOptions& options)
 {
-    return options.mBatchSize && options.mPeriod.count() && options.mSizeThreshold >= 0;
+    return options.mBatchSize && options.mPeriod.count() && options.mSizeThreshold;
 }
 
 } // file_service

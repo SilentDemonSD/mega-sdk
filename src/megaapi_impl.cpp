@@ -42363,12 +42363,19 @@ void MegaFileServiceReclaimOptionsPrivate::setReclaimPeriod(uint64_t seconds)
 
 int64_t MegaFileServiceReclaimOptionsPrivate::getReclaimSizeThreshold() const
 {
-    return static_cast<int64_t>(mReclaim.mSizeThreshold);
+    const auto& sizeThreshold = mReclaim.mSizeThreshold;
+    if (sizeThreshold)
+        return static_cast<int64_t>(*sizeThreshold);
+    else
+        return -1;
 }
 
 void MegaFileServiceReclaimOptionsPrivate::setReclaimSizeThreshold(int64_t bytes)
 {
-    mReclaim.mSizeThreshold = bytes;
+    if (bytes >= 0)
+        mReclaim.mSizeThreshold = static_cast<uint64_t>(bytes);
+    else
+        mReclaim.mSizeThreshold = std::nullopt;
 }
 
 file_service::ReclaimOptions MegaFileServiceReclaimOptionsPrivate::getOptions() const
