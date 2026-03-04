@@ -124,8 +124,8 @@ auto FileService::serviceOptions() -> FileServiceResultOr<ServiceOptions>
 }
 
 auto FileService::initialize(Client& client,
-                             const ServiceOptions& serviceOptions,
-                             const ReclaimOptions& reclaimOptions) -> FileServiceResult
+                             const ReclaimOptions& reclaimOptions,
+                             const ServiceOptions& serviceOptions) -> FileServiceResult
 try
 {
     UniqueLock guard(mContextLock);
@@ -152,7 +152,7 @@ catch (std::runtime_error& exception)
 
 auto FileService::initialize(Client& client) -> FileServiceResult
 {
-    return initialize(client, ServiceOptions(), ReclaimOptions());
+    return initialize(client, ReclaimOptions(), ServiceOptions());
 }
 
 auto FileService::purge() -> FileServiceResult

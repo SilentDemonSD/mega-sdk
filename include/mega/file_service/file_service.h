@@ -58,8 +58,8 @@ public:
 
     // Initialize the file service.
     auto initialize(common::Client& client,
-                    const ServiceOptions& serviceOptions,
-                    const ReclaimOptions& reclaimOptions) -> FileServiceResult;
+                    const ReclaimOptions& reclaimOptions,
+                    const ServiceOptions& serviceOptions) -> FileServiceResult;
 
     auto initialize(common::Client& client) -> FileServiceResult;
 
