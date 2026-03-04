@@ -29532,6 +29532,9 @@ void MegaApiImpl::fileServiceSetReclaimOptions(const MegaFileServiceReclaimOptio
         return;
 
     auto* optionsImpl = dynamic_cast<const MegaFileServiceReclaimOptionsPrivate*>(options);
+
+    assert(optionsImpl);
+
     if (!optionsImpl)
         return;
 
