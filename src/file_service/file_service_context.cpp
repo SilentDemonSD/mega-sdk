@@ -625,14 +625,14 @@ void FileServiceContext::reclaimTaskCallback(Activity& activity,
     auto reschedule = [activity = std::move(activity), exchange, this]()
     {
         // Get the service's current options.
-        auto reclaimOptions = this->reclaimOptions();
+        const auto reclaimOptions = this->reclaimOptions();
 
         // Reclamation has been disabled.
         if (!reclamationEnabled(reclaimOptions))
             return exchange(Task());
 
         // When should the next reclamation occur?
-        auto when = steady_clock::now() + mReclaimOptions.mPeriod;
+        const auto when = steady_clock::now() + reclaimOptions.mPeriod;
 
         // Keep exchange below simple.
         auto callback = std::bind(&FileServiceContext::reclaimTaskCallback,
