@@ -706,13 +706,13 @@ try
     {
         // Latch the file's ID and allocated size.
         auto id = query.field("id").get<FileID>();
-        auto size = query.field("allocated_size").get<std::int64_t>();
+        auto size = query.field("allocated_size").get<std::uint64_t>();
 
         // Add the ID to our vector.
         ids.emplace_back(id);
 
         // Decrease amount of used storage.
-        used -= std::min(size, used);
+        used -= std::min(static_cast<int64_t>(size), used);
     }
 
     // Return vector of reclaimable IDs to our caller.
