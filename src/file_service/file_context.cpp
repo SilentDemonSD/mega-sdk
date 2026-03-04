@@ -119,6 +119,9 @@ public:
     void range(std::uint64_t begin, std::uint64_t end);
     void range(const FileRange& range);
 
+    // Retrieve this context's range.
+    const FileRange& range() const;
+
     // Mark this download as having been replaced.
     void replaced(const DownloadContextPtr& self);
 
@@ -892,8 +895,18 @@ void FileContext::execute(FileReadRequest& request)
         return;
 
     // Request can be satisfied by an existing small download.
-    if (downloading(mDownloading.mSmall, range))
-        return;
+    if (auto download = downloading(mDownloading.mSmall, range))
+    {
+        // What range is being downloaded?
+        auto& downloading = download->range();
+
+        // Request will be fully satisfied by the download.
+        if (downloading.mEnd >= range.mEnd)
+            return;
+
+        // Bump range's beginning.
+        range.mBegin += downloading.mEnd - range.mBegin;
+    }
 
     // Convenience.
     auto length = range.length();
@@ -1985,6 +1998,15 @@ void FileContext::DownloadContext::range(const FileRange& range)
 
     // Ensure end of downloaded data is within our new range.
     mRange.mEnd = std::min(range.mEnd, std::max(range.mBegin, mRange.mEnd));
+}
+
+const FileRange& FileContext::DownloadContext::range() const
+{
+    // Sanity: This method should only be called on an active download.
+    assert(!replaced());
+
+    // Return a reference to our download's range.
+    return mIterator->first;
 }
 
 void FileContext::DownloadContext::replaced([[maybe_unused]] const DownloadContextPtr& self)
