@@ -696,6 +696,9 @@ void FileContext::execute(FileReadRequest& request)
     // Add a download for a given range to the specified map.
     auto addDownload = [&](auto& map, const auto& range)
     {
+        // Sanity: Range shouldn't be zero length.
+        assert(!range.empty());
+
         // Where will our download be located in map?
         auto [iterator, added] = map.tryAdd(range, nullptr);
 
@@ -861,8 +864,12 @@ void FileContext::execute(FileReadRequest& request)
             iterator != mOnDisk.end() && iterator->mBegin <= range.mBegin)
             range.mBegin = iterator->mEnd;
 
-        // Try and download the file's remaining data.
-        return addDownload(mDownloading.mLarge, range);
+        // Try and download the file's remaining data if necessary.
+        if (range.length())
+            addDownload(mDownloading.mLarge, range);
+
+        // Nothing more to do.
+        return;
     }
 
     // Sanity.
