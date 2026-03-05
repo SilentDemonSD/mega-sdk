@@ -64,6 +64,9 @@ class FileContext::DownloadContext: private PartialDownloadCallback
     // Called when our download's encountered a failure.
     virtual auto failed(Error result, int retries) -> std::variant<Abort, Retry> override;
 
+    // True if this download has been replaced.
+    bool replaced() const;
+
     // Logs instance lifetime.
     InstanceLogger<DownloadContext> mInstanceLogger;
 
@@ -1707,7 +1710,7 @@ void FileContext::DownloadContext::completed(Error error)
     std::lock_guard guard(mContext.mLock);
 
     // Download hasn't been replaced.
-    if (mIterator != mDownloading.end())
+    if (!replaced())
     {
         // Keep this context alive until we exit this function.
         self = std::move(mIterator->second);
@@ -1743,8 +1746,8 @@ try
     // Acquire lock.
     std::lock_guard guard(mContext.mLock);
 
-    // Downloads been cancelled.
-    if (mIterator == mDownloading.end())
+    // Download's been replaced.
+    if (replaced())
         return Abort();
 
     // Downloaded data is outside of this range.
@@ -1847,6 +1850,11 @@ auto FileContext::DownloadContext::failed(Error result, int retries) -> std::var
     return options.mRangeRetryBackoff * (1 << --retries);
 }
 
+bool FileContext::DownloadContext::replaced() const
+{
+    return mIterator == mDownloading.end();
+}
+
 FileContext::DownloadContext::DownloadContext(Activity activity,
                                               FileContext& context,
                                               FileRangeMap<DownloadContextPtr>& downloading,
@@ -1876,7 +1884,7 @@ std::uint64_t FileContext::DownloadContext::distance(std::uint64_t position) con
     std::lock_guard guard(mContext.mLock);
 
     // Sanity: Method should only be called on an active download.
-    assert(mIterator != mDownloading.end());
+    assert(!replaced());
 
     // Sanity: Position should always be within the download's range.
     assert(mIterator->first.contains(position));
@@ -1932,7 +1940,7 @@ void FileContext::DownloadContext::range(std::uint64_t begin, std::uint64_t end)
 void FileContext::DownloadContext::range(const FileRange& range)
 {
     // Sanity: Method should only be called on an active download.
-    assert(mIterator != mDownloading.end());
+    assert(!replaced());
 
     // Range hasn't actually changed.
     if (mIterator->first == range)
@@ -1962,7 +1970,7 @@ void FileContext::DownloadContext::replaced([[maybe_unused]] const DownloadConte
     assert(self.get() == this);
 
     // Sanity: This method should only be called on an active download.
-    assert(mIterator != mDownloading.end());
+    assert(!replaced());
 
     // Remove this download from its map.
     mDownloading.remove(mIterator);
@@ -1977,7 +1985,7 @@ milliseconds FileContext::DownloadContext::timeUntil(std::uint64_t position) con
     std::lock_guard guard(mContext.mLock);
 
     // Sanity: Method should only be called for an active download.
-    assert(mIterator != mDownloading.end());
+    assert(!replaced());
 
     // Sanity: position should always be within the download's range.
     assert(mIterator->first.contains(position));
