@@ -898,14 +898,14 @@ void FileContext::execute(FileReadRequest& request)
     if (auto download = downloading(mDownloading.mSmall, range))
     {
         // What range is being downloaded?
-        auto& downloading = download->range();
+        auto& downloadRange = download->range();
 
         // Request will be fully satisfied by the download.
-        if (downloading.mEnd >= range.mEnd)
+        if (downloadRange.mEnd >= range.mEnd)
             return;
 
         // Bump range's beginning.
-        range.mBegin += downloading.mEnd - range.mBegin;
+        range.mBegin += downloadRange.mEnd - range.mBegin;
     }
 
     // Convenience.
