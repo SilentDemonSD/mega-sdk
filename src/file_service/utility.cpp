@@ -23,6 +23,7 @@ class StreamContext
     // Called when the user wants to stream more file data.
     void onContinue(StreamContextPtr& context,
                     std::uint64_t consumed,
+                    std::uint64_t displacement,
                     std::uint64_t length,
                     std::uint64_t offset);
 
@@ -53,7 +54,7 @@ public:
 
 void stream(FileStreamDataCallback callback, File file, std::uint64_t offset, std::uint64_t length)
 {
-    // Sanity.
+    // Sanity: callback should never be null.
     assert(callback);
 
     // Instantiate streaming context.
@@ -65,17 +66,37 @@ void stream(FileStreamDataCallback callback, File file, std::uint64_t offset, st
 
 void StreamContext::onContinue(StreamContextPtr& context,
                                std::uint64_t consumed,
+                               std::uint64_t displacement,
                                std::uint64_t length,
                                std::uint64_t offset)
 {
-    // Sanity.
+    // Sanity: context should always refer to this instance.
     assert(context.get() == this);
 
-    // Make sure consumed is sane.
-    consumed = std::min(consumed, length);
+    // Convenience.
+    std::uint64_t size = mBuffer.size();
+    std::uint64_t remaining = size - displacement;
 
-    // Try and stream some more file data.
-    stream(std::move(context), offset + consumed, length - consumed, false);
+    // Make sure consumed is sane.
+    consumed = std::min(consumed, remaining);
+
+    // We've exhausted our buffer so try and stream more data.
+    if (consumed == remaining)
+        return stream(std::move(context), offset + size, length - size, false);
+
+    // Clarity: Keeps callback invocation below simple.
+    auto onContinue = std::bind(&StreamContext::onContinue,
+                                this,
+                                std::move(context),
+                                std::placeholders::_1,
+                                consumed + displacement,
+                                length,
+                                offset);
+
+    // Let the user know they've got data to read.
+    mCallback(FileStreamResult{std::move(onContinue),
+                               mBuffer.data() + displacement + consumed,
+                               remaining - consumed});
 }
 
 void StreamContext::onData(StreamContextPtr& context,
@@ -83,7 +104,7 @@ void StreamContext::onData(StreamContextPtr& context,
                            std::uint64_t offset,
                            FileResultOr<FileReadResult> result)
 {
-    // Sanity.
+    // Sanity: context should always refer to this instance.
     assert(context.get() == this);
 
     // Couldn't stream file data.
@@ -107,15 +128,17 @@ void StreamContext::onData(StreamContextPtr& context,
     if (!count)
         return mCallback(unexpected(FILE_FAILED));
 
+    // Clarity: Keeps callback invocation below simple.
+    auto onContinue = std::bind(&StreamContext::onContinue,
+                                this,
+                                std::move(context),
+                                std::placeholders::_1,
+                                0,
+                                length,
+                                offset);
+
     // Pass streamed data to the user.
-    mCallback(FileStreamResult{std::bind(&StreamContext::onContinue,
-                                         this,
-                                         std::move(context),
-                                         std::placeholders::_1,
-                                         length,
-                                         offset),
-                               mBuffer.data(),
-                               count});
+    mCallback(FileStreamResult{std::move(onContinue), mBuffer.data(), count});
 }
 
 StreamContext::StreamContext(FileStreamDataCallback callback, File file):
@@ -129,7 +152,7 @@ void StreamContext::stream(StreamContextPtr context,
                            std::uint64_t length,
                            bool isJumpCandidate)
 {
-    // Sanity.
+    // Sanity: context should always refer to this instance.
     assert(context.get() == this);
 
     // Try and stream some data from the file.
@@ -180,7 +203,7 @@ public:
 
 void stream(FileStreamFDCallback callback, File file, std::uint64_t offset, std::uint64_t length)
 {
-    // Sanity.
+    // Sanity: context should always refer to this instance.
     assert(callback);
 
     // Instantiate streaming context.
@@ -195,7 +218,7 @@ void StreamContextFD::onContinue(StreamContextFDPtr& context,
                                  std::uint64_t length,
                                  std::uint64_t offset)
 {
-    // Sanity.
+    // Sanity: context should always refer to this instance.
     assert(context.get() == this);
 
     // Make sure consumed is sane.
@@ -210,7 +233,7 @@ void StreamContextFD::onData(StreamContextFDPtr& context,
                              std::uint64_t offset,
                              FileResultOr<FileReadResult> result)
 {
-    // Sanity.
+    // Sanity: context should always refer to this instance.
     assert(context.get() == this);
 
     // Couldn't stream file data.
@@ -242,7 +265,7 @@ void StreamContextFD::stream(StreamContextFDPtr context,
                              std::uint64_t length,
                              bool isJumpCandidate)
 {
-    // Sanity.
+    // Sanity: context should always refer to this instance.
     assert(context.get() == this);
 
     // Try and stream some data from the file.

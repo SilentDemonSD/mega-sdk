@@ -3820,12 +3820,15 @@ TEST_F(FileServiceTests, stream_succeeds)
                     if (!result->mLength)
                         return notifier->set_value(std::move(*buffer));
 
+                    // Only read 8K at a time to test stream's buffering logic.
+                    auto consumed = std::min(8_KiB, result->mLength);
+
                     // Add the streamed data to our buffer.
                     buffer->append(static_cast<const char*>(result->mBuffer),
-                                   static_cast<std::size_t>(result->mLength));
+                                   static_cast<std::size_t>(consumed));
 
                     // Stream the rest of the file's data.
-                    result->mContinue(result->mLength);
+                    result->mContinue(consumed);
                 });
         };
 
