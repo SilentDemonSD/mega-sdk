@@ -115,8 +115,8 @@ void StreamContext::onData(StreamContextPtr& context,
     if (!result->mLength)
         return mCallback(FileStreamResult{});
 
-    // How much data can we buffer?
-    auto count = std::min<std::uint64_t>(SIZE_MAX, result->mLength);
+    // Limit buffer size to 8MiB.
+    auto count = std::min<std::uint64_t>(1u << 23, result->mLength);
 
     // Make sure our buffer's large enough for our data.
     mBuffer.resize(static_cast<std::size_t>(count));
