@@ -26,6 +26,7 @@
 #include "json.h"
 #include "types.h"
 
+#include <optional>
 #include <string>
 #include <type_traits>
 
@@ -95,7 +96,8 @@ struct MEGA_API MediaProperties
     static std::string encodeMediaPropertiesAttributes(MediaProperties vp, uint32_t filekey[4]);
 
     // extract structure members back out of attributes
-    static MediaProperties decodeMediaPropertiesAttributes(const std::string& attrs, uint32_t filekey[4]);
+    static auto decodeMediaPropertiesAttributes(const std::string& attributes, uint32_t fileKey[4])
+        -> std::optional<MediaProperties>;
 
 #ifdef USE_MEDIAINFO
     static const char* supportedformatsMediaInfoAudio();

@@ -798,12 +798,14 @@ int MegaNodePrivate::getDuration()
     if (type == MegaNode::TYPE_FILE && nodekey.size() == FILENODEKEYLENGTH && fileattrstring.size())
     {
         uint32_t* attrKey = (uint32_t*)(nodekey.data() + FILENODEKEYLENGTH / 2);
-        MediaProperties mediaProperties = MediaProperties::decodeMediaPropertiesAttributes(fileattrstring, attrKey);
-        if (mediaProperties.shortformat != 255 // 255 = MediaInfo failed processing the file
-                && mediaProperties.shortformat != 254 // 254 = No information available
-                && mediaProperties.playtime > 0)
+        auto mediaProperties =
+            MediaProperties::decodeMediaPropertiesAttributes(fileattrstring, attrKey);
+        if (mediaProperties &&
+            mediaProperties->shortformat != 255 // 255 = MediaInfo failed processing the file
+            && mediaProperties->shortformat != 254 // 254 = No information available
+            && mediaProperties->playtime > 0)
         {
-            return static_cast<int>(mediaProperties.playtime);
+            return static_cast<int>(mediaProperties->playtime);
         }
     }
 
@@ -832,12 +834,14 @@ int MegaNodePrivate::getWidth()
         if (type == MegaNode::TYPE_FILE && nodekey.size() == FILENODEKEYLENGTH && fileattrstring.size())
         {
             uint32_t* attrKey = (uint32_t*)(nodekey.data() + FILENODEKEYLENGTH / 2);
-            MediaProperties mediaProperties = MediaProperties::decodeMediaPropertiesAttributes(fileattrstring, attrKey);
-            if (mediaProperties.shortformat != 255 // 255 = MediaInfo failed processing the file
-                    && mediaProperties.shortformat != 254 // 254 = No information available
-                    && mediaProperties.width > 0)
+            auto mediaProperties =
+                MediaProperties::decodeMediaPropertiesAttributes(fileattrstring, attrKey);
+            if (mediaProperties &&
+                mediaProperties->shortformat != 255 // 255 = MediaInfo failed processing the file
+                && mediaProperties->shortformat != 254 // 254 = No information available
+                && mediaProperties->width > 0)
             {
-                width = static_cast<int>(mediaProperties.width);
+                width = static_cast<int>(mediaProperties->width);
             }
         }
     }
@@ -852,12 +856,14 @@ int MegaNodePrivate::getHeight()
         if (type == MegaNode::TYPE_FILE && nodekey.size() == FILENODEKEYLENGTH && fileattrstring.size())
         {
             uint32_t* attrKey = (uint32_t*)(nodekey.data() + FILENODEKEYLENGTH / 2);
-            MediaProperties mediaProperties = MediaProperties::decodeMediaPropertiesAttributes(fileattrstring, attrKey);
-            if (mediaProperties.shortformat != 255 // 255 = MediaInfo failed processing the file
-                    && mediaProperties.shortformat != 254 // 254 = No information available
-                    && mediaProperties.height > 0)
+            auto mediaProperties =
+                MediaProperties::decodeMediaPropertiesAttributes(fileattrstring, attrKey);
+            if (mediaProperties &&
+                mediaProperties->shortformat != 255 // 255 = MediaInfo failed processing the file
+                && mediaProperties->shortformat != 254 // 254 = No information available
+                && mediaProperties->height > 0)
             {
-                height = static_cast<int>(mediaProperties.height);
+                height = static_cast<int>(mediaProperties->height);
             }
         }
     }
@@ -872,12 +878,14 @@ int MegaNodePrivate::getShortformat()
         if (type == MegaNode::TYPE_FILE && nodekey.size() == FILENODEKEYLENGTH && fileattrstring.size())
         {
             uint32_t* attrKey = (uint32_t*)(nodekey.data() + FILENODEKEYLENGTH / 2);
-            MediaProperties mediaProperties = MediaProperties::decodeMediaPropertiesAttributes(fileattrstring, attrKey);
-            if (mediaProperties.shortformat != 255 // 255 = MediaInfo failed processing the file
-                && mediaProperties.shortformat != 254 // 254 = No information available
-                && mediaProperties.shortformat > 0)
+            auto mediaProperties =
+                MediaProperties::decodeMediaPropertiesAttributes(fileattrstring, attrKey);
+            if (mediaProperties &&
+                mediaProperties->shortformat != 255 // 255 = MediaInfo failed processing the file
+                && mediaProperties->shortformat != 254 // 254 = No information available
+                && mediaProperties->shortformat > 0)
             {
-                shortformat = mediaProperties.shortformat;
+                shortformat = mediaProperties->shortformat;
             }
         }
     }
@@ -892,12 +900,14 @@ int MegaNodePrivate::getVideocodecid()
         if (type == MegaNode::TYPE_FILE && nodekey.size() == FILENODEKEYLENGTH && fileattrstring.size())
         {
             uint32_t* attrKey = (uint32_t*)(nodekey.data() + FILENODEKEYLENGTH / 2);
-            MediaProperties mediaProperties = MediaProperties::decodeMediaPropertiesAttributes(fileattrstring, attrKey);
-            if (mediaProperties.shortformat != 255 // 255 = MediaInfo failed processing the file
-                && mediaProperties.shortformat != 254 // 254 = No information available
-                && mediaProperties.videocodecid > 0)
+            auto mediaProperties =
+                MediaProperties::decodeMediaPropertiesAttributes(fileattrstring, attrKey);
+            if (mediaProperties &&
+                mediaProperties->shortformat != 255 // 255 = MediaInfo failed processing the file
+                && mediaProperties->shortformat != 254 // 254 = No information available
+                && mediaProperties->videocodecid > 0)
             {
-                videocodecid = static_cast<int>(mediaProperties.videocodecid);
+                videocodecid = static_cast<int>(mediaProperties->videocodecid);
             }
         }
     }

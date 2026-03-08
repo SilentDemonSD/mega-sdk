@@ -2579,17 +2579,20 @@ string showMediaInfo(const MediaProperties& mp, MediaFileInfo& mediaInfo, bool o
 
 string showMediaInfo(const std::string& fileattributes, uint32_t fakey[4], MediaFileInfo& mediaInfo, bool oneline)
 {
-    MediaProperties mp = MediaProperties::decodeMediaPropertiesAttributes(fileattributes, fakey);
-    return showMediaInfo(mp, mediaInfo, oneline);
+    if (auto mp = MediaProperties::decodeMediaPropertiesAttributes(fileattributes, fakey))
+        return showMediaInfo(*mp, mediaInfo, oneline);
+
+    return "Couldn't decode media properties";
 }
 
-string showMediaInfo(Node* n, MediaFileInfo& /*mediaInfo*/, bool oneline)
+string showMediaInfo(Node* n, MediaFileInfo& mediaInfo, bool oneline)
 {
+    // Convenience.
+    auto* key = (uint32_t*)(n->nodekey().data() + FILENODEKEYLENGTH / 2);
+
     if (n->hasfileattribute(fa_media))
-    {
-        MediaProperties mp = MediaProperties::decodeMediaPropertiesAttributes(n->fileattrstring, (uint32_t*)(n->nodekey().data() + FILENODEKEYLENGTH / 2));
-        return showMediaInfo(mp, client->mediaFileInfo, oneline);
-    }
+        return showMediaInfo(n->fileattrstring, key, mediaInfo, oneline);
+
     return "The node has no mediainfo attribute";
 }
 
@@ -9538,10 +9541,10 @@ void exec_mediainfo(autocomplete::ACState& s)
         if (client->fsaccess->getextension(localFilename, ext) && MediaProperties::isMediaFilenameExt(ext))
         {
             mp.extractMediaPropertyFileAttributes(localFilename, client->fsaccess.get());
-                                uint32_t dummykey[4] = { 1, 2, 3, 4 };  // check encode/decode
-                                string attrs = mp.convertMediaPropertyFileAttributes(dummykey, client->mediaFileInfo);
-                                MediaProperties dmp = MediaProperties::decodeMediaPropertiesAttributes(":" + attrs, dummykey);
-                                cout << showMediaInfo(dmp, client->mediaFileInfo, false) << endl;
+            uint32_t dummykey[4] = {1, 2, 3, 4}; // check encode/decode
+            string attrs = mp.convertMediaPropertyFileAttributes(dummykey, client->mediaFileInfo);
+            auto dmp = MediaProperties::decodeMediaPropertiesAttributes(":" + attrs, dummykey);
+            cout << showMediaInfo(dmp.value_or({}), client->mediaFileInfo, false) << endl;
         }
         else
         {

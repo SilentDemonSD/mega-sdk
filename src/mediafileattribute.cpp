@@ -542,18 +542,22 @@ std::string MediaProperties::encodeMediaPropertiesAttributes(MediaProperties vp,
     return result;
 }
 
-MediaProperties MediaProperties::decodeMediaPropertiesAttributes(const std::string& attrs, uint32_t fakey[4])
+auto MediaProperties::decodeMediaPropertiesAttributes(const std::string& attrs, uint32_t fakey[4])
+    -> std::optional<MediaProperties>
 {
-    MediaProperties r;
-
     int ppo = Node::hasfileattribute(&attrs, fa_media);
     int pos = ppo - 1;
+
     if (ppo && pos + 3 + 11 <= (int)attrs.size())
     {
         std::string binary;
+        MediaProperties r;
+
         Base64::atob(attrs.substr(static_cast<size_t>(pos + 3), 11), binary);
         assert(binary.size() == 8);
+
         byte v[8];
+
         memcpy(v, binary.data(), std::min<size_t>(sizeof v, binary.size()));
         xxteaDecrypt((uint32_t*)v, sizeof(v)/4, fakey);
 
@@ -586,9 +590,11 @@ MediaProperties MediaProperties::decodeMediaPropertiesAttributes(const std::stri
                 r.audiocodecid = static_cast<uint32_t>((v[2] >> 4) + (v[3] << 4));
             }
         }
+
+        return r;
     }
 
-    return r;
+    return std::nullopt;
 }
 
 #ifdef USE_MEDIAINFO
@@ -718,25 +724,26 @@ static inline uint32_t coalesce(uint32_t a, uint32_t b)
 bool MediaFileInfo::timeToRetryMediaPropertyExtraction(const std::string& fileattributes, uint32_t fakey[4])
 {
     // Check if we should retry video property extraction, due to previous failure with older library
-    MediaProperties vp = MediaProperties::decodeMediaPropertiesAttributes(fileattributes, fakey);
-    if (vp.isIdentified())
+    auto vp = MediaProperties::decodeMediaPropertiesAttributes(fileattributes, fakey);
+
+    if (vp && vp->isIdentified())
     {
-        if (vp.fps < MEDIA_INFO_BUILD)
+        if (vp->fps < MEDIA_INFO_BUILD)
         {
-            LOG_debug << "Media extraction retry needed with a newer build. Old: "
-                      << vp.fps << "  New: " << MEDIA_INFO_BUILD;
+            LOG_debug << "Media extraction retry needed with a newer build. Old: " << vp->fps
+                      << "  New: " << MEDIA_INFO_BUILD;
             return true;
         }
-        if (vp.width < GetMediaInfoVersion())
+        if (vp->width < GetMediaInfoVersion())
         {
             LOG_debug << "Media extraction retry needed with a newer MediaInfo version. Old: "
-                      << vp.width << "  New: " << GetMediaInfoVersion();
+                      << vp->width << "  New: " << GetMediaInfoVersion();
             return true;
         }
-        if (vp.playtime < downloadedCodecMapsVersion)
+        if (vp->playtime < downloadedCodecMapsVersion)
         {
             LOG_debug << "Media extraction retry needed with newer code mappings. Old: "
-                      << vp.playtime << "  New: " << downloadedCodecMapsVersion;
+                      << vp->playtime << "  New: " << downloadedCodecMapsVersion;
             return true;
         }
     }
@@ -975,8 +982,8 @@ std::string MediaProperties::convertMediaPropertyFileAttributes(uint32_t fakey[4
     size_t pos = simServerAttribs.find("/");
     if (pos != std::string::npos)
         simServerAttribs.replace(pos, 1, ":");
-    MediaProperties decVp = MediaProperties::decodeMediaPropertiesAttributes(simServerAttribs, fakey);
-    assert(*this == decVp);
+    auto decVp = MediaProperties::decodeMediaPropertiesAttributes(simServerAttribs, fakey);
+    assert(decVp && *this == *decVp);
 #endif
 
     return mediafileattributes;
