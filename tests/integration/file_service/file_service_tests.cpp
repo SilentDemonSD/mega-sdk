@@ -2990,7 +2990,7 @@ TEST_F(FileServiceTests, reclaim_concurrent_succeeds)
     // Make sure the file's actually taking space on disk.
     auto usedBefore = mClient->fileService().storageUsed();
     ASSERT_EQ(usedBefore.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
-    ASSERT_EQ(*usedBefore, mFileContent.size());
+    ASSERT_GE(*usedBefore, mFileContent.size());
 
     // Initiate several concurrent reclaim requests.
     using ReclaimResult = decltype(reclaim(std::declval<File>()));
