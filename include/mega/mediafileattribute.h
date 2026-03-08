@@ -99,6 +99,36 @@ struct MEGA_API MediaProperties
     static auto decodeMediaPropertiesAttributes(const std::string& attributes, uint32_t fileKey[4])
         -> std::optional<MediaProperties>;
 
+    // decode file attributes and return the value of a specified media property.
+    template<typename PropertySelector>
+    static auto getMediaProperty(const std::string& attributes,
+                                 uint32_t fileKey[4],
+                                 PropertySelector selector)
+        -> std::enable_if_t<IsPropertySelectorV<PropertySelector>,
+                            std::optional<PropertyTypeT<PropertySelector>>>
+    {
+        // Sanity: selector should never be null.
+        assert(selector);
+
+        // selector actually is null.
+        if (!selector)
+            return std::nullopt;
+
+        // Try and decode media properties.
+        auto properties = decodeMediaPropertiesAttributes(attributes, fileKey);
+
+        // Couldn't decode media properties.
+        if (!properties)
+            return std::nullopt;
+
+        // MediaInfo couldn't process the file or file has no information.
+        if (properties->shortformat >= 254)
+            return std::nullopt;
+
+        // Return specified property to our caller.
+        return (*properties.*selector);
+    }
+
 #ifdef USE_MEDIAINFO
     static const char* supportedformatsMediaInfoAudio();
     static const char* supportedformatsMediaInfo();
