@@ -1111,8 +1111,13 @@ class MegaNodePrivate : public MegaNode, public Cacheable
         bool mMarkedSensitive = false; // sensitive attribute set on this node
         nodelabel_t mLabel;
         bool mIsNodeKeyDecrypted = false;
-};
 
+    private:
+        template<typename PropertySelector>
+        auto getMediaProperty(PropertySelector selector)
+            -> std::enable_if_t<MediaProperties::IsPropertySelectorV<PropertySelector>,
+                                std::optional<MediaProperties::PropertyTypeT<PropertySelector>>>;
+};
 
 class MegaBackupInfoPrivate : public MegaBackupInfo
 {

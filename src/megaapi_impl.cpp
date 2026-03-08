@@ -793,6 +793,30 @@ const char *MegaNodePrivate::getOfficialAttr(const char *attrName) const
     return getAttrFrom(attrName, mOfficialAttrs.get());
 }
 
+template<typename PropertySelector>
+auto MegaNodePrivate::getMediaProperty(PropertySelector selector)
+    -> std::enable_if_t<MediaProperties::IsPropertySelectorV<PropertySelector>,
+                        std::optional<MediaProperties::PropertyTypeT<PropertySelector>>>
+{
+    // Node isn't a file.
+    if (type != MegaNode::TYPE_FILE)
+        return std::nullopt;
+
+    // Node hasn't been decrypted.
+    if (nodekey.size() != FILENODEKEYLENGTH)
+        return std::nullopt;
+
+    // Node doesnt have any file attributes.
+    if (fileattrstring.empty())
+        return std::nullopt;
+
+    // Convenience.
+    auto fileKey = reinterpret_cast<std::uint32_t*>(nodekey.data() + FILENODEKEYLENGTH / 2);
+
+    // Try and retrieve the specified property.
+    return MediaProperties::getMediaProperty(fileattrstring, fileKey, selector);
+}
+
 int MegaNodePrivate::getDuration()
 {
     if (type == MegaNode::TYPE_FILE && nodekey.size() == FILENODEKEYLENGTH && fileattrstring.size())
