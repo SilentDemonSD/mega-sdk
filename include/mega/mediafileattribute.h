@@ -22,10 +22,12 @@
 #ifndef MEGA_MEDIAFILEATTRIBUTE_H
 #define MEGA_MEDIAFILEATTRIBUTE_H 1
 
-#include "types.h"
-#include "json.h"
 #include "filesystem.h"
+#include "json.h"
+#include "types.h"
+
 #include <string>
+#include <type_traits>
 
 namespace mega {
 
@@ -40,6 +42,18 @@ struct MEGA_API FileSystemAccess;
 struct MEGA_API MediaProperties
 {
     enum { UNKNOWN_FORMAT = 254, NOT_IDENTIFIED_FORMAT = 255 };
+
+    // Check if T is a pointer to one of our properties.
+    template<typename T>
+    struct IsPropertySelector: std::false_type
+    {}; // IsPropertySelector<T>
+
+    template<typename T>
+    struct IsPropertySelector<T MediaProperties::*>: std::true_type
+    {}; // IsPropertySelector<T MediaProperties::*>
+
+    template<typename T>
+    static constexpr auto IsPropertySelectorV = IsPropertySelector<T>::value;
 
     byte shortformat;
     uint32_t width;
