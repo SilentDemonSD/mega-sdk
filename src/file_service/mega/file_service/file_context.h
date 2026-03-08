@@ -41,13 +41,11 @@
 
 #include <chrono>
 #include <cstdint>
-#include <functional>
 #include <future>
 #include <list>
 #include <memory>
 #include <mutex>
 #include <type_traits>
-#include <variant>
 
 namespace mega
 {
