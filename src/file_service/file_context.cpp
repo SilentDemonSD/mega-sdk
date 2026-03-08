@@ -44,7 +44,6 @@ namespace file_service
 
 using namespace common;
 
-using std::chrono::duration_cast;
 using std::chrono::milliseconds;
 using std::chrono::seconds;
 using std::chrono::steady_clock;
