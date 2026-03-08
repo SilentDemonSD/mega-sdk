@@ -1743,6 +1743,9 @@ void FileContext::DownloadContext::completed(Error error)
         // Keep this context alive until we exit this function.
         self = std::move(mIterator->second);
 
+        // Update mRange so it tracks the data we haven't downloaded.
+        mRange = {mRange.mEnd, mIterator->first.mEnd};
+
         // Remove ourselves from our file's map of downloading ranges.
         mDownloading.remove(mIterator);
     }
@@ -2014,6 +2017,9 @@ void FileContext::DownloadContext::replaced([[maybe_unused]] const DownloadConte
 
     // Sanity: This method should only be called on an active download.
     assert(!replaced());
+
+    // Update mRange so it tracks the data we haven't downloaded.
+    mRange = {mRange.mEnd, mIterator->first.mEnd};
 
     // Remove this download from its map.
     mDownloading.remove(mIterator);
