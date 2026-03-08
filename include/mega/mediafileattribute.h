@@ -55,6 +55,19 @@ struct MEGA_API MediaProperties
     template<typename T>
     static constexpr auto IsPropertySelectorV = IsPropertySelector<T>::value;
 
+    // What kind of property does PropertySelector reference?
+    template<typename PropertySelector>
+    struct PropertyType;
+
+    template<typename T>
+    struct PropertyType<T MediaProperties::*>
+    {
+        using Type = T;
+    }; // PropertyType<T MediaProperties::*>
+
+    template<typename T>
+    using PropertyTypeT = typename PropertyType<T>::Type;
+
     byte shortformat;
     uint32_t width;
     uint32_t height;
