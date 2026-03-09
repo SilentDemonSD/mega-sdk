@@ -639,6 +639,33 @@ ErrorOr<bool> ClientAdapter::exists(NodeHandle handle) const
     return !!mClient.nodeByHandle(handle);
 }
 
+ErrorOr<std::string> ClientAdapter::fileAttributes(NodeHandle handle) const
+{
+    // Make sure deinitialize(...) waits for this call to complete.
+    auto activity = mActivities.begin();
+
+    // Client's being torn down.
+    if (mDeinitialized)
+        return unexpected(LOCAL_LOGGED_OUT);
+
+    // Acquire RNT lock.
+    std::lock_guard guard(mClient.nodeTreeMutex);
+
+    // Try and locate the speciifed node.
+    auto node = mClient.nodeByHandle(handle);
+
+    // Couldn't locate the node.
+    if (!node)
+        return unexpected(API_ENOENT);
+
+    // Node isn't a file.
+    if (node->type != FILENODE)
+        return unexpected(API_FUSE_EISDIR);
+
+    // Return file attributes to caller.
+    return node->fileattrstring;
+}
+
 FileSystemAccess& ClientAdapter::fsAccess() const
 {
     return *mClient.fsaccess;

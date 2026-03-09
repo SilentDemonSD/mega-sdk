@@ -87,6 +87,9 @@ public:
     // Query whether a node exists in the cloud.
     ErrorOr<bool> exists(NodeHandle handle) const override;
 
+    // Retrieve a file's attributes.
+    ErrorOr<std::string> fileAttributes(NodeHandle handle) const override;
+
     // Request access the local filesystem.
     FileSystemAccess& fsAccess() const override;
 

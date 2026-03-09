@@ -84,6 +84,9 @@ public:
     // Query whether a node exists in the cloud.
     virtual ErrorOr<bool> exists(NodeHandle handle) const = 0;
 
+    // Retrieve a file's attributes.
+    virtual ErrorOr<std::string> fileAttributes(NodeHandle handle) const = 0;
+
     // Request access the local filesystem.
     virtual FileSystemAccess& fsAccess() const = 0;
 
