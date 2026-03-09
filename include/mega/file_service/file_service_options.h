@@ -33,7 +33,7 @@ struct ReclaimOptions
 struct ServiceOptions
 {
     // How long should we wait before we remove a file context from memory?
-    std::chrono::seconds mFileContextReleaseDelay{2 * 60};
+    std::chrono::seconds mFileContextReleaseDelay{3};
 
     // Reads less than or equal to this value will be downloaded immediately.
     std::uint64_t mImmediateDownloadThreshold = 1ul << 20;
