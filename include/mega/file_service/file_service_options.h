@@ -55,7 +55,7 @@ struct ServiceOptions
     std::uint64_t mMaximumRangeRetries = 5u;
 
     // What is the minimum amount of data we should request from the cloud?
-    std::uint64_t mMinimumRangeSize = UINT64_C(1) << 20;
+    std::uint64_t mMinimumRangeSize = UINT64_C(1) << 16;
 
     // How long should we wait between retries?
     common::deciseconds mRangeRetryBackoff{20};
