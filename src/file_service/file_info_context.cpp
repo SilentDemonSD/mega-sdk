@@ -37,6 +37,7 @@ FileInfoContext::FileInfoContext(std::int64_t accessed,
                                  Activity activity,
                                  std::uint64_t allocatedSize,
                                  bool dirty,
+                                 std::optional<std::uint32_t> duration,
                                  NodeHandle handle,
                                  FileID id,
                                  std::optional<FileLocation> location,
@@ -50,6 +51,7 @@ FileInfoContext::FileInfoContext(std::int64_t accessed,
     mActivity(std::move(activity)),
     mAllocatedSize(allocatedSize),
     mDirty(dirty),
+    mDuration(duration),
     mHandle(handle),
     mID(id),
     mLocation(std::move(location)),
@@ -96,6 +98,11 @@ std::uint64_t FileInfoContext::allocatedSize() const
 bool FileInfoContext::dirty() const
 {
     return get(&FileInfoContext::mDirty);
+}
+
+std::optional<std::uint32_t> FileInfoContext::duration() const
+{
+    return mDuration;
 }
 
 void FileInfoContext::flushed(NodeHandle handle)

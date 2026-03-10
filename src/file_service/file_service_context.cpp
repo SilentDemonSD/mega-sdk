@@ -307,6 +307,7 @@ auto FileServiceContext::fileContextFromCloud(FileID id) -> FileServiceResultOr<
     // Clarity.
     auto allocatedSize = 0u;
     auto dirty = false;
+    auto duration = std::nullopt;
     auto location = FileLocation{std::move(node->mName), node->mParentHandle};
     auto reportedSize = 0u;
 
@@ -315,6 +316,7 @@ auto FileServiceContext::fileContextFromCloud(FileID id) -> FileServiceResultOr<
                                                   mActivities.begin(),
                                                   allocatedSize,
                                                   dirty,
+                                                  duration,
                                                   node->mHandle,
                                                   id,
                                                   location,
@@ -489,6 +491,7 @@ auto FileServiceContext::infoContextFromDatabase(FileID id) -> FileInfoContextPt
     auto accessed = query.field("accessed").get<std::int64_t>();
     auto allocatedSize = query.field("allocated_size").get<std::uint64_t>();
     auto dirty = query.field("dirty").get<bool>();
+    auto duration = std::nullopt;
     auto handle = NodeHandle();
     auto modified = query.field("modified").get<std::int64_t>();
     auto name = query.field("name").get<std::optional<std::string>>();
@@ -512,6 +515,7 @@ auto FileServiceContext::infoContextFromDatabase(FileID id) -> FileInfoContextPt
                                              mActivities.begin(),
                                              allocatedSize,
                                              dirty,
+                                             duration,
                                              handle,
                                              id,
                                              std::move(location),
@@ -1128,6 +1132,7 @@ try
     // Clarity.
     auto allocatedSize = 0u;
     auto dirty = true;
+    auto duration = std::nullopt;
     auto location = FileLocation{name, parent};
     auto reportedSize = 0u;
     auto size = 0u;
@@ -1137,6 +1142,7 @@ try
                                                   mActivities.begin(),
                                                   allocatedSize,
                                                   dirty,
+                                                  duration,
                                                   NodeHandle(),
                                                   id,
                                                   location,

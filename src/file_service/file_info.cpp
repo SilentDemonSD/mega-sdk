@@ -55,6 +55,11 @@ bool FileInfo::dirty() const
     return mContext->dirty();
 }
 
+std::optional<std::uint32_t> FileInfo::duration() const
+{
+    return mContext->duration();
+}
+
 NodeHandle FileInfo::handle() const
 {
     return mContext->handle();

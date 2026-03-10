@@ -11,6 +11,7 @@
 #include <mega/file_service/file_size_info.h>
 #include <mega/types.h>
 
+#include <cstddef>
 #include <mutex>
 #include <optional>
 #include <type_traits>
@@ -45,6 +46,9 @@ class FileInfoContext: public FileSizeInfo
     // Whether this file's been locally modified.
     bool mDirty;
 
+    // How long does this file play for?
+    const std::optional<std::uint32_t> mDuration;
+
     // The node in the cloud this file is associated with, if any.
     NodeHandle mHandle;
 
@@ -77,6 +81,7 @@ public:
                     common::Activity activity,
                     std::uint64_t allocatedSize,
                     bool dirty,
+                    std::optional<std::uint32_t> duration,
                     NodeHandle handle,
                     FileID id,
                     std::optional<FileLocation> location,
@@ -104,6 +109,11 @@ public:
 
     // Has the file been locally modified?
     bool dirty() const;
+
+    // How long does this file play for?
+    //
+    // Meaningful only for media files such as videos.
+    std::optional<std::uint32_t> duration() const;
 
     // Signal that this file has been flushed to the cloud.
     void flushed(NodeHandle handle);

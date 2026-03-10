@@ -65,6 +65,11 @@ public:
     // Has this file been locally modified?
     bool dirty() const;
 
+    // How long does this file play for?
+    //
+    // Meaningful only for media files such as videos.
+    std::optional<std::uint32_t> duration() const;
+
     // What node is this file associated with?
     NodeHandle handle() const;
 
