@@ -11,14 +11,17 @@ using namespace common;
 
 static void downgrade10(Query& query);
 static void downgrade21(Query& query);
+static void downgrade32(Query& query);
 
 static void upgrade01(Query& query);
 static void upgrade12(Query& query);
+static void upgrade23(Query& query);
 
 const DatabaseVersionVector& DatabaseBuilder::versions() const
 {
     static const DatabaseVersionVector versions = {{&downgrade10, &upgrade01},
-                                                   {&downgrade21, &upgrade12}}; // versions
+                                                   {&downgrade21, &upgrade12},
+                                                   {&downgrade32, &upgrade23}}; // versions
 
     return versions;
 }
@@ -41,6 +44,13 @@ void downgrade10(Query& query)
 void downgrade21(Query& query)
 {
     query = "drop table file_key_data";
+
+    query.execute();
+}
+
+void downgrade32(Query& query)
+{
+    query = "drop table file_durations";
 
     query.execute();
 }
@@ -158,6 +168,26 @@ void upgrade12(Query& query)
             "             on delete cascade, "
             "  constraint pk_file_key_data "
             "            primary key (id) "
+            ")";
+
+    query.execute();
+}
+
+void upgrade23(Query& query)
+{
+    query = "create table file_durations ( "
+            "  duration integer "
+            "  constraint nn_file_durations_duration "
+            "             not null, "
+            "  id integer "
+            "  constraint nn_file_durations_id "
+            "             not null, "
+            "  constraint fk_file_durations_files "
+            "             foreign key (id) "
+            "             references files (id) "
+            "             on delete cascade, "
+            "  constraint pk_file_durations "
+            "             primary key (id) "
             ")";
 
     query.execute();
