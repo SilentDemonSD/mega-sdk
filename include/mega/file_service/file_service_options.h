@@ -15,16 +15,16 @@ namespace file_service
 struct ReclaimOptions
 {
     // How long shouldn't we access a file before we can reclaim it?
-    std::chrono::minutes mAgeThreshold{3 * 24 * 60};
+    std::chrono::minutes mAgeThreshold = std::chrono::hours(3 * 24);
 
     // How many files should we reclaim at a time?
     std::size_t mBatchSize = 4u;
 
     // How long after startup should we wait until we reclaim space?
-    std::chrono::seconds mDelay{30 * 60};
+    std::chrono::seconds mDelay = std::chrono::minutes(30);
 
     // How often should we try to reclaim space?
-    std::chrono::seconds mPeriod{2 * 60 * 60};
+    std::chrono::seconds mPeriod = std::chrono::hours(2);
 
     // How many bytes can the service store before it needs to reclaim space?
     std::optional<std::uint64_t> mSizeThreshold{};
