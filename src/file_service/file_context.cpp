@@ -809,7 +809,7 @@ void FileContext::execute(FileReadRequest& request)
         // Convenience.
         auto context = iterator->second;
 
-        // Request begins before our the large read + disk cache.
+        // Request begins before our adjacent disk cache + the large read.
         if (request.mRange.mBegin < effectiveBegin)
         {
             // How far ahead is the request?
@@ -823,7 +823,13 @@ void FileContext::execute(FileReadRequest& request)
             return context;
         }
 
-        // How far is request from the end of the large read's data?
+        // Request sits on the adjacent disk cache, not a jump
+        if (request.mRange.mBegin < iterator->first.mBegin)
+        {
+            return nullptr;
+        }
+
+        // Request sits on the large read: How far it is away from the read's data's end?
         auto distance = context->distance(request.mRange.mBegin);
 
         // Request begins before the large read's data ends.
