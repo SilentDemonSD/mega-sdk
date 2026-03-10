@@ -32,6 +32,9 @@ struct ReclaimOptions
 
 struct ServiceOptions
 {
+    // How fast do we think the user's download speed is?
+    std::uint64_t mEstimatedDownloadBitrate = 50 * 1000 * 8;
+
     // How long should we wait before we remove a file context from memory?
     std::chrono::seconds mFileContextReleaseDelay{3};
 
