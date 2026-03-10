@@ -107,6 +107,11 @@ public:
     // How much disk space has been allocated to this file?
     std::uint64_t allocatedSize() const override;
 
+    // What is the estimated bitrate of this file?
+    //
+    // Meaningful only for media files such as videos.
+    std::optional<std::uint64_t> bitrate() const;
+
     // Has the file been locally modified?
     bool dirty() const;
 

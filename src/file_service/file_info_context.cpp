@@ -61,7 +61,10 @@ FileInfoContext::FileInfoContext(std::int64_t accessed,
     mReportedSize(reportedSize),
     mService(service),
     mSize(size)
-{}
+{
+    // Sanity: If the file's duration is specified, it must not be zero.
+    assert(!mDuration || *mDuration);
+}
 
 FileInfoContext::~FileInfoContext()
 {
@@ -93,6 +96,19 @@ void FileInfoContext::allocatedSize(std::uint64_t allocatedSize)
 std::uint64_t FileInfoContext::allocatedSize() const
 {
     return get(&FileInfoContext::mAllocatedSize);
+}
+
+std::optional<std::uint64_t> FileInfoContext::bitrate() const
+{
+    // Can't compute bitrate without duration.
+    if (!mDuration.value_or(0))
+        return std::nullopt;
+
+    // Compute estimated bitrate.
+    auto rate = size() * 8 / *mDuration;
+
+    // Return estimated bitrate to our caller.
+    return rate;
 }
 
 bool FileInfoContext::dirty() const

@@ -50,6 +50,11 @@ std::uint64_t FileInfo::allocatedSize() const
     return mContext->allocatedSize();
 }
 
+std::optional<std::uint64_t> FileInfo::bitrate() const
+{
+    return mContext->bitrate();
+}
+
 bool FileInfo::dirty() const
 {
     return mContext->dirty();
