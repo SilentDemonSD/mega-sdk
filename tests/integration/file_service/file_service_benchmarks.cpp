@@ -1,6 +1,6 @@
+#include <mega/common/statistics.h>
 #include <mega/common/testing/cloud_path.h>
 #include <mega/common/testing/single_client_test.h>
-#include <mega/common/testing/statistics.h>
 #include <mega/common/testing/utility.h>
 #include <mega/file_service/file.h>
 #include <mega/file_service/file_range.h>
@@ -203,13 +203,13 @@ class BenchmarkReadRequestContext
 
     // Convenience.
     template<typename T>
-    using Averager = common::testing::Averager<T, 5>;
+    using Averager = common::Averager<T, 5>;
 
     template<typename T>
-    using Maximizer = common::testing::Maximizer<T>;
+    using Maximizer = common::Maximizer<T>;
 
     template<typename T>
-    using Minimizer = common::testing::Minimizer<T>;
+    using Minimizer = common::Minimizer<T>;
 
     using Rep = std::chrono::milliseconds::rep;
 

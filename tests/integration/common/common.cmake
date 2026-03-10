@@ -20,7 +20,6 @@ target_sources(test_integration PRIVATE
                                 common/mega/common/testing/printers.h
                                 common/mega/common/testing/real_client.h
                                 common/mega/common/testing/single_client_test.h
-                                common/mega/common/testing/statistics.h
                                 common/mega/common/testing/test.h
                                 common/mega/common/testing/utility.h
                                 common/mega/common/testing/watchdog.h

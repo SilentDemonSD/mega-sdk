@@ -63,6 +63,7 @@ target_sources(SDKlib PRIVATE
                       include/mega/common/serialization_traits_forward.h
                       include/mega/common/shared_mutex.h
                       include/mega/common/shared_mutex_forward.h
+                      include/mega/common/statistics.h
                       include/mega/common/status_flag.h
                       include/mega/common/subsystem_logger.h
                       include/mega/common/task_executor.h

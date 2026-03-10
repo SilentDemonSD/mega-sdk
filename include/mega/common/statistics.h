@@ -9,8 +9,6 @@ namespace mega
 {
 namespace common
 {
-namespace testing
-{
 namespace detail
 {
 
@@ -109,6 +107,5 @@ using Maximizer = detail::Latcher<std::greater, T>;
 template<typename T>
 using Minimizer = detail::Latcher<std::less, T>;
 
-} // testing
 } // common
 } // mega
