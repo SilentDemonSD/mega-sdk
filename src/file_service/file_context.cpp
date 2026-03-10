@@ -50,6 +50,9 @@ using std::chrono::steady_clock;
 
 class FileContext::DownloadContext: private PartialDownloadCallback
 {
+    // Retrieve this download's estimated bitrate.
+    std::uint64_t bitrate() const;
+
     // Called when the file range has been downloaded.
     void completed(Error result) override;
 
@@ -1770,6 +1773,21 @@ void FileContext::write(FileWriteRequest request)
     executeOrQueue(std::move(request));
 }
 
+std::uint64_t FileContext::DownloadContext::bitrate() const
+{
+    // Convenience.
+    auto& averager = mContext.mAverageLargeDownloadBitrate;
+
+    // Compute average bitrate.
+    auto bitrate = std::ceil(averager.get().value_or(0));
+
+    // Bitrate should always be larger than zero.
+    bitrate = std::max(1.0, bitrate);
+
+    // Return computed bitrate to our caller.
+    return static_cast<std::uint64_t>(bitrate);
+}
+
 void FileContext::DownloadContext::completed(Error error)
 {
     // Used to keep this context alive until we exit this function.
@@ -1817,6 +1835,10 @@ try
 
     // Acquire lock.
     std::lock_guard guard(mContext.mLock);
+
+    // Update our file's average large download bitrate.
+    if (isLargeDownload())
+        mContext.mAverageLargeDownloadBitrate(speed.mOverallMean << 3);
 
     // Download's been replaced.
     if (replaced())
