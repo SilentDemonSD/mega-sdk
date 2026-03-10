@@ -6,6 +6,7 @@
 #include <mega/common/instance_logger.h>
 #include <mega/common/lock_forward.h>
 #include <mega/common/node_key_data.h>
+#include <mega/common/statistics.h>
 #include <mega/common/task_queue.h>
 #include <mega/common/transaction_forward.h>
 #include <mega/file_service/buffer_pointer.h>
@@ -207,6 +208,9 @@ class FileContext final: public std::enable_shared_from_this<FileContext>
 
     // Keep our service alive until we're dead.
     common::Activity mActivity;
+
+    // What's the average bitrate of our large downloads?
+    common::Averager<std::uint64_t, 5> mAverageLargeDownloadBitrate;
 
     // Wraps mFile and unifies logic.
     FileBufferPtr mBuffer;

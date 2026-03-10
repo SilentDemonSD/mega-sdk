@@ -1578,6 +1578,7 @@ FileContext::FileContext(Activity activity,
     enable_shared_from_this(),
     mInstanceLogger("FileContext", *this, logger()),
     mActivity(std::move(activity)),
+    mAverageLargeDownloadBitrate(),
     mBuffer(std::make_shared<SparseFileBuffer>(*file, *info)),
     mDownloading(),
     mInfo(std::move(info)),
@@ -1601,7 +1602,16 @@ FileContext::FileContext(Activity activity,
     mService(service),
     mDownloadMonitor(),
     mMonitor()
-{}
+{
+    // Estimated bitrate based on the file's duration, if any.
+    const auto fileBitrate = mInfo->bitrate().value_or(0);
+
+    // Estimated bitrate provided by the service.
+    const auto serviceBitrate = serviceOptions().mEstimatedDownloadBitrate;
+
+    // Prime average bitrate based on of the two bitrates above.
+    mAverageLargeDownloadBitrate(std::max(fileBitrate, serviceBitrate));
+}
 
 FileContext::~FileContext()
 {
