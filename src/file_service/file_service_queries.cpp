@@ -16,6 +16,7 @@ FileServiceQueries::FileServiceQueries(Database& database):
     mAddFileRange(database.query()),
     mGetFile(database.query()),
     mGetFileByNameAndParentHandle(database.query()),
+    mGetFileDuration(database.query()),
     mGetFileIDs(database.query()),
     mGetFileIDsByParentHandle(database.query()),
     mGetFileKeyData(database.query()),
@@ -82,6 +83,10 @@ FileServiceQueries::FileServiceQueries(Database& database):
     mGetFileByNameAndParentHandle = "select * "
                                     "  from files "
                                     " where name = :name and parent_handle = :parent_handle";
+
+    mGetFileDuration = "select duration "
+                       "  from file_durations "
+                       " where id = :id";
 
     mGetFileIDs = "select id "
                   "  from files "
