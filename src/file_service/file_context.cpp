@@ -773,6 +773,22 @@ void FileContext::execute(FileReadRequest& request)
         return download;
     }; // downloading
 
+    // Extends a position to the left boundary of a cached on-disk range.
+    // Given a position, this function checks whether the position lies within
+    // or directly at the end of an existing on-disk range. If so, it returns the
+    // beginning of that range, effectively extending the position to the left.
+    auto leftExtendOnDisk = [&](uint64_t position) -> uint64_t
+    {
+        if (auto iterator = mOnDisk.endsAt(position); iterator != mOnDisk.end())
+            return iterator->mBegin;
+
+        if (auto iterator = mOnDisk.endsAfter(position);
+            iterator != mOnDisk.end() && iterator->mBegin < position)
+            return iterator->mBegin;
+
+        return position;
+    };
+
     // True if request is a jump.
     auto isJump = [&](auto& request) -> DownloadContextPtr
     {
@@ -790,14 +806,17 @@ void FileContext::execute(FileReadRequest& request)
         if (iterator == mDownloading.mLarge.end())
             return nullptr;
 
+        // Left extend the begin of from the disk cache
+        auto effectiveBegin = leftExtendOnDisk(iterator->first.mBegin);
+
         // Convenience.
         auto context = iterator->second;
 
-        // Request begins before our large read.
-        if (request.mRange.mBegin < iterator->first.mBegin)
+        // Request begins before our the large read + disk cache.
+        if (request.mRange.mBegin < effectiveBegin)
         {
             // How far ahead is the request?
-            auto distance = iterator->first.mBegin - request.mRange.mBegin;
+            auto distance = effectiveBegin - request.mRange.mBegin;
 
             // Not far enough to be considered a jump.
             if (distance <= immediateThreshold)
