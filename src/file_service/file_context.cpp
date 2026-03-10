@@ -35,6 +35,7 @@
 #include <mega/filesystem.h>
 
 #include <cassert>
+#include <chrono>
 #include <iterator>
 
 namespace mega
@@ -44,6 +45,7 @@ namespace file_service
 
 using namespace common;
 
+using std::chrono::duration_cast;
 using std::chrono::milliseconds;
 using std::chrono::seconds;
 using std::chrono::steady_clock;
@@ -76,6 +78,9 @@ class FileContext::DownloadContext: private PartialDownloadCallback
 
     // Keeps our manager alive until we're dead.
     Activity mActivity;
+
+    // When did we begin this download?
+    std::optional<steady_clock::time_point> mBegan;
 
     // Callbacks to execute when this range's fetch completes.
     std::vector<FileFetchCallback> mCallbacks;
@@ -1843,6 +1848,22 @@ try
     // Acquire lock.
     std::lock_guard guard(mContext.mLock);
 
+    // Need to compute average time to first byte.
+    if (mBegan)
+    {
+        // What's the current time?
+        auto now = steady_clock::now();
+
+        // How long did it take for our first byte to arrive?
+        auto elapsed = duration_cast<milliseconds>(now - *mBegan).count();
+
+        // Feed elapsed time into our file's TTFB averager.
+        mContext.mAverageTimeToFirstByte(static_cast<std::uint64_t>(elapsed));
+
+        // Clear mBegan so we don't do this more than once per download.
+        mBegan.reset();
+    }
+
     // Update our file's average large download bitrate.
     if (isLargeDownload())
         mContext.mAverageLargeDownloadBitrate(speed.mOverallMean << 3);
@@ -1971,6 +1992,7 @@ FileContext::DownloadContext::DownloadContext(Activity activity,
     PartialDownloadCallback(),
     mInstanceLogger("DownloadContext", *this, logger()),
     mActivity(std::move(activity)),
+    mBegan(),
     mCallbacks(),
     mContext(context),
     mDownload(),
@@ -2021,6 +2043,9 @@ auto FileContext::DownloadContext::download() -> PartialDownloadPtr
     // Couldn't create the download.
     if (!download)
         return completed(download.error()), nullptr;
+
+    // For simplicity, consider now to be the time the download began.
+    mBegan = steady_clock::now();
 
     // Grab download.
     mDownload = std::move(*download);
