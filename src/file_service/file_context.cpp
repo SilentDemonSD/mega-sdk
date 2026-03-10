@@ -62,6 +62,9 @@ class FileContext::DownloadContext: private PartialDownloadCallback
     // Called when our download's encountered a failure.
     virtual auto failed(Error result, int retries) -> std::variant<Abort, Retry> override;
 
+    // True if this is a large download.
+    bool isLargeDownload() const;
+
     // True if this download has been replaced.
     bool replaced() const;
 
@@ -1923,6 +1926,11 @@ auto FileContext::DownloadContext::failed(Error result, int retries) -> std::var
 
     // Retry the download.
     return options.mRangeRetryBackoff * (1 << --retries);
+}
+
+bool FileContext::DownloadContext::isLargeDownload() const
+{
+    return &mDownloading == &mContext.mDownloading.mLarge;
 }
 
 bool FileContext::DownloadContext::replaced() const
