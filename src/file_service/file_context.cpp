@@ -695,10 +695,8 @@ void FileContext::execute(FileReadRequest& request)
     // Convenience.
     const auto backwardAlignment = options.mJumpBackwardAlignment;
     const auto backwardDistance = options.mJumpBackwardDistance;
-    const auto forwardDistance = options.mJumpForwardDistance;
     const auto immediateThreshold = options.mImmediateDownloadThreshold;
     const auto minimumRangeSize = options.mMinimumRangeSize;
-    const auto waitThreshold = seconds(1);
 
     // Cancels a download, if needed, when exiting this function.
     ScopedDestructor canceller;
@@ -844,14 +842,11 @@ void FileContext::execute(FileReadRequest& request)
         if (request.mRange.mBegin < iterator->first.mBegin)
             return nullptr;
 
-        // Request sits on the large read: How far it is away from the read's data's end?
-        auto distance = context->distance(request.mRange.mBegin);
-
-        // Request begins before the large read's data ends.
-        if (distance <= forwardDistance)
+        // Existing large download will satisfy request shortly.
+        if (context->shouldWait(request.mRange.mBegin))
             return nullptr;
 
-        // Request begins after the large read's downloaded data.
+        // We can satisfy request quicker if we begin a new download.
         return context;
     }; // isJump
 
@@ -926,7 +921,7 @@ void FileContext::execute(FileReadRequest& request)
 
     // Request can be satisfied by an existing large download.
     if (auto download = downloading(mDownloading.mLarge, range);
-        download && download->timeUntil(range.mBegin) <= waitThreshold)
+        download && download->shouldWait(range.mBegin))
         return;
 
     // Request can be satisfied by an existing small download.
