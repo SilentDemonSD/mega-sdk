@@ -10,6 +10,7 @@ using namespace common;
 
 FileServiceQueries::FileServiceQueries(Database& database):
     mAddFile(database.query()),
+    mAddFileDuration(database.query()),
     mAddFileID(database.query()),
     mAddFileKeyData(database.query()),
     mAddFileRange(database.query()),
@@ -49,6 +50,11 @@ FileServiceQueries::FileServiceQueries(Database& database):
                "  :reported_size, "
                "  :size "
                ")";
+
+    mAddFileDuration = "insert into file_durations values ( "
+                       "  :duration, "
+                       "  :id "
+                       ")";
 
     mAddFileID = "insert into file_ids values (:id)";
 

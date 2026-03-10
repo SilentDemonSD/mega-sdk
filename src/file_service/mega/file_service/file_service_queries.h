@@ -13,6 +13,7 @@ struct FileServiceQueries
     explicit FileServiceQueries(common::Database& database);
 
     common::Query mAddFile;
+    common::Query mAddFileDuration;
     common::Query mAddFileID;
     common::Query mAddFileKeyData;
     common::Query mAddFileRange;
