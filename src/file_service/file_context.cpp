@@ -788,7 +788,7 @@ void FileContext::execute(FileReadRequest& request)
     // Given a position, this function checks whether the position lies within
     // or directly at the end of an existing on-disk range. If so, it returns the
     // beginning of that range, effectively extending the position to the left.
-    auto leftExtendOnDisk = [&](uint64_t position) -> uint64_t
+    auto leftExtendOnDisk = [&](uint64_t position)
     {
         if (auto iterator = mOnDisk.endsAtOrAfter(position);
             iterator != mOnDisk.end() && iterator->mBegin < position)
@@ -842,9 +842,7 @@ void FileContext::execute(FileReadRequest& request)
 
         // Request sits on the adjacent disk cache, not a jump
         if (request.mRange.mBegin < iterator->first.mBegin)
-        {
             return nullptr;
-        }
 
         // Request sits on the large read: How far it is away from the read's data's end?
         auto distance = context->distance(request.mRange.mBegin);
