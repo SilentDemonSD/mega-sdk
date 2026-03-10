@@ -1479,6 +1479,18 @@ auto FileContext::shrink(std::uint64_t newSize, std::uint64_t oldSize)
     return std::make_pair(std::move(databaseLock), std::move(transaction));
 }
 
+milliseconds FileContext::timeToFirstByte() const
+{
+    // Compute average time to first byte.
+    auto ttfb = std::ceil(mAverageTimeToFirstByte.get().value_or(0));
+
+    // Time to first byte should never be negative.
+    ttfb = std::max(0.0, ttfb);
+
+    // Return computed time to first byte.
+    return milliseconds(static_cast<milliseconds::rep>(ttfb));
+}
+
 void FileContext::updateAccessAndModificationTimes(std::int64_t accessed,
                                                    std::int64_t modified,
                                                    Transaction& transaction)
