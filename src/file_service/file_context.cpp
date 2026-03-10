@@ -779,10 +779,7 @@ void FileContext::execute(FileReadRequest& request)
     // beginning of that range, effectively extending the position to the left.
     auto leftExtendOnDisk = [&](uint64_t position) -> uint64_t
     {
-        if (auto iterator = mOnDisk.endsAt(position); iterator != mOnDisk.end())
-            return iterator->mBegin;
-
-        if (auto iterator = mOnDisk.endsAfter(position);
+        if (auto iterator = mOnDisk.endsAtOrAfter(position);
             iterator != mOnDisk.end() && iterator->mBegin < position)
             return iterator->mBegin;
 
