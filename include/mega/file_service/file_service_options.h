@@ -35,6 +35,9 @@ struct ServiceOptions
     // How fast do we think the user's download speed is?
     std::uint64_t mEstimatedDownloadBitrate = 50 * 1000 * 8;
 
+    // How long do we think it'll take before a download yields its first byte of data?
+    std::chrono::milliseconds mEstimatedTimeToFirstByte = std::chrono::seconds(1);
+
     // How long should we wait before we remove a file context from memory?
     std::chrono::seconds mFileContextReleaseDelay{3};
 
