@@ -77,9 +77,6 @@ class FileContext::DownloadContext: private PartialDownloadCallback
     // Keeps our manager alive until we're dead.
     Activity mActivity;
 
-    // Tracks the average speed of our download.
-    std::optional<Speeds> mAverageSpeed;
-
     // Callbacks to execute when this range's fetch completes.
     std::vector<FileFetchCallback> mCallbacks;
 
@@ -1848,9 +1845,6 @@ try
     if (offset >= mIterator->first.mEnd)
         return Abort();
 
-    // Update the download's average speed.
-    mAverageSpeed = speed;
-
     // Original range of our write.
     FileRange range(offset, std::min(offset + length, mIterator->first.mEnd));
 
@@ -1967,7 +1961,6 @@ FileContext::DownloadContext::DownloadContext(Activity activity,
     PartialDownloadCallback(),
     mInstanceLogger("DownloadContext", *this, logger()),
     mActivity(std::move(activity)),
-    mAverageSpeed(),
     mCallbacks(),
     mContext(context),
     mDownload(),
@@ -2111,15 +2104,17 @@ milliseconds FileContext::DownloadContext::timeUntil(std::uint64_t position) con
     if (mRange.mEnd > position)
         return milliseconds(0);
 
-    // Can't estimate time as we have no speed statistics.
-    if (!mAverageSpeed || !mAverageSpeed->mOverallMean)
-        return milliseconds::max();
+    // Compute estimated bitrate.
+    const auto bitrate = this->bitrate();
+
+    // Sanity: Bitrate should never be zero.
+    assert(bitrate);
 
     // How much data do we need to download before mEnd overtakes position?
-    auto remaining = (position - mRange.mEnd) + 1;
+    const auto remaining = (position - mRange.mEnd) + 1;
 
     // Estimate how long it'll take to download remaining data.
-    auto estimated = (remaining * 1000) / mAverageSpeed->mOverallMean;
+    const auto estimated = (remaining * 8000) / bitrate;
 
     // Return estimated download time to our caller.
     return milliseconds(estimated);
