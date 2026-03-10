@@ -25,6 +25,7 @@
 #include <mega/file_service/file_service_result_or.h>
 #include <mega/file_service/logging.h>
 #include <mega/filesystem.h>
+#include <mega/mediafileattribute.h>
 
 #include <chrono>
 #include <stdexcept>
@@ -168,6 +169,9 @@ public:
 
 static Database createDatabase(const LocalPath& databasePath);
 
+static std::optional<std::uint32_t> extractDuration(const std::string& attributes,
+                                                    const NodeKeyData& keyData);
+
 static bool reclamationEnabled(const ReclaimOptions& options);
 
 template<typename Lock>
@@ -261,6 +265,23 @@ auto FileServiceContext::fileContextFromCloud(FileID id) -> FileServiceResultOr<
     if (node->mIsDirectory)
         return unexpected(FILE_SERVICE_FILE_IS_A_DIRECTORY);
 
+    // Try and retrieve the node's key data.
+    auto keyData = mClient.keyData(node->mHandle, false);
+
+    // Couldn't get our hands on the nodes's key data.
+    if (!keyData)
+        return unexpected(FILE_SERVICE_UNEXPECTED);
+
+    // Try and retrieve the node's file attributes.
+    auto attributes = mClient.fileAttributes(node->mHandle);
+
+    // Couldn't get our hands on the node's file attributes.
+    if (!attributes)
+        return unexpected(FILE_SERVICE_UNEXPECTED);
+
+    // Try and extract the node's duration.
+    auto duration = extractDuration(*attributes, *keyData);
+
     // Make sure no one's changing our indexes.
     UniqueLock lockContexts(mLock);
 
@@ -298,6 +319,17 @@ auto FileServiceContext::fileContextFromCloud(FileID id) -> FileServiceResultOr<
 
     query.execute();
 
+    // Add the file's duration to the database.
+    if (duration && *duration)
+    {
+        query = transaction.query(mQueries.mAddFileDuration);
+
+        query.param(":duration").set(*duration);
+        query.param(":id").set(id);
+
+        query.execute();
+    }
+
     // Add the file to storage.
     auto file = mStorage.addFile(id);
 
@@ -307,7 +339,6 @@ auto FileServiceContext::fileContextFromCloud(FileID id) -> FileServiceResultOr<
     // Clarity.
     auto allocatedSize = 0u;
     auto dirty = false;
-    auto duration = std::nullopt;
     auto location = FileLocation{std::move(node->mName), node->mParentHandle};
     auto reportedSize = 0u;
 
@@ -491,7 +522,6 @@ auto FileServiceContext::infoContextFromDatabase(FileID id) -> FileInfoContextPt
     auto accessed = query.field("accessed").get<std::int64_t>();
     auto allocatedSize = query.field("allocated_size").get<std::uint64_t>();
     auto dirty = query.field("dirty").get<bool>();
-    auto duration = std::nullopt;
     auto handle = NodeHandle();
     auto modified = query.field("modified").get<std::int64_t>();
     auto name = query.field("name").get<std::optional<std::string>>();
@@ -509,6 +539,17 @@ auto FileServiceContext::infoContextFromDatabase(FileID id) -> FileInfoContextPt
     // File only has a location if its name and parent are set.
     if (name && parent)
         location = FileLocation{std::move(*name), *parent};
+
+    // Load the file's duration, if any.
+    std::optional<std::uint32_t> duration;
+
+    query = transaction.query(mQueries.mGetFileDuration);
+
+    query.param(":id").set(id);
+
+    // File has a duration.
+    if (query.execute())
+        duration = query.field("duration").get<std::uint32_t>();
 
     // Instantiate a context to represent this file's information.
     info = std::make_shared<FileInfoContext>(accessed,
@@ -2004,6 +2045,40 @@ Database createDatabase(const LocalPath& databasePath)
     DatabaseBuilder(database).build();
 
     return database;
+}
+
+std::optional<std::uint32_t> extractDuration(const std::string& attributes,
+                                             const NodeKeyData& keyData)
+{
+    // No attributes? No duration.
+    if (attributes.empty())
+        return std::nullopt;
+
+    // Sanity: key data should always be valid.
+    assert(keyData.mKeyAndIV.size() == FILENODEKEYLENGTH);
+
+    // Caller's passed us invalid key data.
+    if (keyData.mKeyAndIV.size() != FILENODEKEYLENGTH)
+        return std::nullopt;
+
+    // Necessary as getMediaProperty(...) requires a mutable file key.
+    auto temp = keyData.mKeyAndIV.substr(FILENODEKEYLENGTH / 2);
+
+    // Necessary as getMediaProperty(...) wants the file key as u32s.
+    auto fileKey = reinterpret_cast<std::uint32_t*>(temp.data());
+
+    // Keeps line below simple.
+    auto selector = &MediaProperties::playtime;
+
+    // Try and extract the node's file duration.
+    auto duration = MediaProperties::getMediaProperty(attributes, fileKey, selector);
+
+    // Duration exists and is nonzero.
+    if (duration && *duration)
+        return duration;
+
+    // Duration doesn't exist or is zero.
+    return std::nullopt;
 }
 
 bool reclamationEnabled(const ReclaimOptions& options)
