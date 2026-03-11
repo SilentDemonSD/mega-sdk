@@ -20,6 +20,7 @@
 #include <mega/file_service/file_location.h>
 #include <mega/file_service/file_move_event.h>
 #include <mega/file_service/file_range.h>
+#include <mega/file_service/file_range_set.h>
 #include <mega/file_service/file_read_result.h>
 #include <mega/file_service/file_remove_event.h>
 #include <mega/file_service/file_result.h>
@@ -132,7 +133,6 @@ using common::testing::Watchdog;
 using ::mega::AutoFileHandle;
 using ::testing::AnyOf;
 using ::testing::ElementsAre;
-using ::testing::IsSupersetOf;
 using testing::observe;
 using ::testing::UnorderedElementsAreArray;
 
@@ -2464,49 +2464,78 @@ TEST_F(FileServiceTests, read_small_during_large_succeeds)
             return options;
         }());
 
-    // Kick off a large read.
-    auto waiter0 = read(*file, 48, 64_KiB + 1);
+    // Kick off several reads.
+    auto waiter0 = readOnce(*file, 48, 64_KiB + 1);
+    auto waiter1 = readOnce(*file, 64_KiB, 4_KiB);
+    auto waiter2 = readOnce(*file, 72_KiB, 4_KiB);
+    auto waiter3 = readOnce(*file, 1016_KiB, 4_KiB);
 
-    // Kick off several small reads.
-    auto waiter1 = read(*file, 64_KiB, 4_KiB);
-    auto waiter2 = read(*file, 72_KiB, 4_KiB);
-    auto waiter3 = read(*file, 1016_KiB, 4_KiB);
+    // So we know when all downloads have completed.
+    auto waiter4 = fetchBarrier(*file);
 
-    // Wait for our small reads to complete.
+    // Wait for our reads to complete.
+    ASSERT_NE(waiter0.wait_for(mDefaultTimeout), timeout);
     ASSERT_NE(waiter1.wait_for(mDefaultTimeout), timeout);
     ASSERT_NE(waiter2.wait_for(mDefaultTimeout), timeout);
     ASSERT_NE(waiter3.wait_for(mDefaultTimeout), timeout);
 
+    // Convenience.
+    constexpr auto NoWait = std::chrono::milliseconds(0);
+
+    // Make sure our reads completed before any downloads.
+    ASSERT_EQ(waiter4.wait_for(NoWait), timeout);
+
     // Make sure each small read succeeded.
+    auto result0 = waiter0.get();
     auto result1 = waiter1.get();
     auto result2 = waiter2.get();
     auto result3 = waiter3.get();
 
+    ASSERT_EQ(result0.errorOr(FILE_SUCCESS), FILE_SUCCESS);
     ASSERT_EQ(result1.errorOr(FILE_SUCCESS), FILE_SUCCESS);
     ASSERT_EQ(result2.errorOr(FILE_SUCCESS), FILE_SUCCESS);
     ASSERT_EQ(result3.errorOr(FILE_SUCCESS), FILE_SUCCESS);
 
-    // Make sure each small read received valid data.
-    ASSERT_TRUE(compare(*result1, mFileContent, 64_KiB, 4_KiB));
-    ASSERT_TRUE(compare(*result2, mFileContent, 72_KiB, 4_KiB));
-    ASSERT_TRUE(compare(*result3, mFileContent, 1016_KiB, 4_KiB));
+    // Make sure each read received valid data.
+    ASSERT_TRUE(compare(*result0, mFileContent, 48, result0->size()));
+    ASSERT_TRUE(compare(*result1, mFileContent, 64_KiB, result1->size()));
+    ASSERT_TRUE(compare(*result2, mFileContent, 72_KiB, result2->size()));
+    ASSERT_TRUE(compare(*result3, mFileContent, 1016_KiB, result3->size()));
 
-    // Make sure our small reads have been cached.
-    ASSERT_THAT(
-        file->ranges(),
-        IsSupersetOf(
-            {FileRange(64_KiB, 68_KiB), FileRange(72_KiB, 76_KiB), FileRange(1016_KiB, 1020_KiB)}));
+    // Make sure the data for each small read is now on disk.
+    {
+        // Get the file's ranges on disk as a set.
+        auto ranges = [&file]()
+        {
+            FileRangeSet ranges;
 
-    // Wait for our large read to complete.
-    ASSERT_NE(waiter0.wait_for(mDefaultTimeout), timeout);
+            for (auto range: file->ranges())
+                ranges.add(range);
 
-    // Make sure our large read succeeded.
-    auto result0 = waiter0.get();
+            return ranges;
+        }();
 
-    ASSERT_EQ(result0.errorOr(FILE_SUCCESS), FILE_SUCCESS);
+        // Check first read is on disk.
+        auto iterator = ranges.contains(48);
 
-    // Make sure the large read received valid data.
-    ASSERT_TRUE(compare(*result0, mFileContent, 48, 64_KiB + 1));
+        ASSERT_NE(iterator, ranges.end());
+        ASSERT_LE(48 + result0->size(), iterator->mEnd);
+
+        // Check second read is on disk.
+        iterator = ranges.contains(64_KiB);
+        ASSERT_NE(iterator, ranges.end());
+        ASSERT_LE(64_KiB + result1->size(), iterator->mEnd);
+
+        // Check third read is on disk.
+        iterator = ranges.contains(72_KiB);
+        ASSERT_NE(iterator, ranges.end());
+        ASSERT_LE(72_KiB + result2->size(), iterator->mEnd);
+
+        // Check fourth read is on disk.
+        iterator = ranges.contains(1016_KiB);
+        ASSERT_NE(iterator, ranges.end());
+        ASSERT_LE(72_KiB + result3->size(), iterator->mEnd);
+    }
 
     // Let the client download as fast as it can.
     mClient->setDownloadSpeed(0);
@@ -2515,7 +2544,8 @@ TEST_F(FileServiceTests, read_small_during_large_succeeds)
     //
     // Necessary as our large read will have begun a download for all of hte
     // file's data from 16 bytes forward.
-    ASSERT_EQ(execute(fetchBarrier, *file), FILE_SUCCESS);
+    ASSERT_NE(waiter4.wait_for(mDefaultTimeout), timeout);
+    ASSERT_EQ(waiter4.get(), FILE_SUCCESS);
 
     // Make sure a single contiguous range is in the cache.
     ASSERT_THAT(file->ranges(), ElementsAre(FileRange(16, mFileContent.size())));
