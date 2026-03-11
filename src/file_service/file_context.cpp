@@ -797,11 +797,17 @@ void FileContext::execute(FileReadRequest& request)
         if (request.mRange.length() <= immediateThreshold)
             return nullptr;
 
-        auto iterator = mDownloading.mLarge.begin();
-
         // No large range download is in progress.
-        if (iterator == mDownloading.mLarge.end())
+        if (mDownloading.mLarge.empty())
             return nullptr;
+
+        // Request can be completely satisfied by data on disk.
+        if (auto iterator = mOnDisk.contains(request.mRange.mBegin);
+            iterator != mOnDisk.end() && iterator->mEnd >= request.mRange.mEnd)
+            return nullptr;
+
+        // Get a reference to the large download in progress.
+        auto iterator = mDownloading.mLarge.begin();
 
         // Left extend the begin of from the disk cache
         auto effectiveBegin = leftExtendOnDisk(iterator->first.mBegin);
