@@ -691,7 +691,7 @@ void FileContext::execute(FileReadRequest& request)
 
     // Convenience.
     const auto backwardAlignment = options.mJumpBackwardAlignment;
-    const auto backwardDistance = options.mJumpBackwardDistance;
+    const auto backwardDistanceInMs = static_cast<uint64_t>(options.mJumpBackwardDistance.count());
     const auto forwardDistance = options.mJumpForwardDistance;
     const auto immediateThreshold = options.mImmediateDownloadThreshold;
     const auto minimumRangeSize = options.mMinimumRangeSize;
@@ -920,8 +920,8 @@ void FileContext::execute(FileReadRequest& request)
             return;
 
         // Extend range to the left if possible.
-        uint64_t backwardBytes =
-            static_cast<uint64_t>(backwardDistance.count()) * downloadBitrate() / 8 / 1024;
+        // divide 8 from bits to Bytes, divide 1000 from Ms to seconds
+        uint64_t backwardBytes = backwardDistanceInMs * downloadBitrate() / 8 / 1000;
         range.mBegin -= std::min(backwardBytes, range.mBegin);
 
         // Round down to the nearest boundary.
