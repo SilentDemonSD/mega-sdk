@@ -2289,8 +2289,8 @@ TEST_F(FileServiceTests, read_jump_forward_succeeds)
             // Don't begin a large read's range earlier than specified.
             options.mJumpBackwardDistance = chrono::milliseconds{0};
 
-            // Consider any read more than 3000ms ahead to be a "jump."
-            options.mJumpForwardDistance = chrono::milliseconds{3000};
+            // Consider any read more than 30ms ahead to be a "jump."
+            options.mJumpForwardDistance = chrono::milliseconds{30};
 
             // Consider reads larger than 64KiB "large."
             options.mImmediateDownloadThreshold = 1ul << 16;
