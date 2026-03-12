@@ -695,6 +695,7 @@ void FileContext::execute(FileReadRequest& request)
     // Convenience.
     const auto backwardAlignment = options.mJumpBackwardAlignment;
     const auto backwardDistance = options.mJumpBackwardDistance;
+    const auto forwardDistance = options.mJumpForwardDistance;
     const auto immediateThreshold = options.mImmediateDownloadThreshold;
     const auto minimumRangeSize = options.mMinimumRangeSize;
 
@@ -843,7 +844,7 @@ void FileContext::execute(FileReadRequest& request)
             return nullptr;
 
         // Existing large download will satisfy request shortly.
-        if (context->shouldWait(request.mRange.mBegin))
+        if (context->timeUntil(request.mRange.mBegin) <= forwardDistance)
             return nullptr;
 
         // We can satisfy request quicker if we begin a new download.
@@ -1594,7 +1595,7 @@ FileContext::FileContext(Activity activity,
     enable_shared_from_this(),
     mInstanceLogger("FileContext", *this, logger()),
     mActivity(std::move(activity)),
-    mAverageLargeDownloadBitrate(),
+    mAverageLargeDownloadBitrate(64),
     mAverageTimeToFirstByte(),
     mBuffer(std::make_shared<SparseFileBuffer>(*file, *info)),
     mDownloading(),
@@ -1627,7 +1628,7 @@ FileContext::FileContext(Activity activity,
     const auto serviceBitrate = serviceOptions().mEstimatedDownloadBitrate;
 
     // Prime average bitrate based on of the two bitrates above.
-    mAverageLargeDownloadBitrate(std::max(fileBitrate, serviceBitrate));
+    mAverageLargeDownloadBitrate.update(std::max(fileBitrate, serviceBitrate));
 
     // Convenience.
     auto timeToFirstByte = serviceOptions().mEstimatedTimeToFirstByte.count();
@@ -1798,14 +1799,8 @@ std::uint64_t FileContext::DownloadContext::bitrate() const
     // Convenience.
     auto& averager = mContext.mAverageLargeDownloadBitrate;
 
-    // Compute average bitrate.
-    auto bitrate = std::ceil(averager.get().value_or(0));
-
     // Bitrate should always be larger than zero.
-    bitrate = std::max(1.0, bitrate);
-
-    // Return computed bitrate to our caller.
-    return static_cast<std::uint64_t>(bitrate);
+    return std::max<uint64_t>(1, averager.getValue());
 }
 
 void FileContext::DownloadContext::completed(Error error)
@@ -1873,8 +1868,12 @@ try
     }
 
     // Update our file's average large download bitrate.
+    const auto fileBitrate = mContext.mInfo->bitrate().value_or(0);
     if (isLargeDownload())
-        mContext.mAverageLargeDownloadBitrate(speed.mOverallMean << 3);
+    {
+        mContext.mAverageLargeDownloadBitrate.update(
+            std::max(fileBitrate, speed.mOverallMean << 3));
+    }
 
     // Download's been replaced.
     if (replaced())

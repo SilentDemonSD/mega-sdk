@@ -213,7 +213,7 @@ class FileContext final: public std::enable_shared_from_this<FileContext>
     common::Activity mActivity;
 
     // What's the average bitrate of our large downloads?
-    common::Averager<std::uint64_t, 5> mAverageLargeDownloadBitrate;
+    common::EmaInteger mAverageLargeDownloadBitrate;
 
     // Average time to first byte over all our downloads.
     common::Averager<std::uint64_t, 5> mAverageTimeToFirstByte;

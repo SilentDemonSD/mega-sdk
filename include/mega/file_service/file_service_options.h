@@ -54,8 +54,8 @@ struct ServiceOptions
     // How far should we extend the beginning of a new range?
     std::uint64_t mJumpBackwardDistance = UINT64_C(1) << 24;
 
-    // How far forward does a read have to be for us to consider it a jump?
-    std::uint64_t mJumpForwardDistance = UINT64_C(1) << 25;
+    // How far forward in milliseconds does a read have to be for us to consider it a jump?
+    std::chrono::milliseconds mJumpForwardDistance{3000};
 
     // How many times will we try to download a range before we give up.
     std::uint64_t mMaximumRangeRetries = 5u;

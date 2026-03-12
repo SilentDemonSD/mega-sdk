@@ -99,6 +99,46 @@ public:
     }
 }; // Averager<T, N>
 
+// Exponential Moving Average
+class EmaInteger
+{
+public:
+    // alpha: A value between 0 and 256 (where 256 = alpha of 1.0)
+    // 26: Roughly alpha = 0.1 (Very smooth, slow to react).
+    // 64: Exactly alpha = 0.25 (Balanced).
+    // 128: Exactly alpha = 0.5 (Responsive, but shows more jitter).
+    EmaInteger(uint32_t alpha):
+        mAlpha(alpha)
+    {}
+
+    void update(uint64_t newSample)
+    {
+        // Shift new sample to match our internal fixed-point scale (2^8)
+        uint64_t scaledSample = newSample << 8;
+
+        if (!mCurrentEma)
+        {
+            mCurrentEma = scaledSample;
+        }
+        else
+        {
+            // EMA Formula: Current = (Alpha * Sample) + ((1 - Alpha) * Previous)
+            // We use 256 to represent "1"
+            mCurrentEma = (mAlpha * scaledSample + (256 - mAlpha) * mCurrentEma.value_or(0)) >> 8;
+        }
+    }
+
+    uint64_t getValue() const
+    {
+        // Shift back to get the real integer value
+        return mCurrentEma.value_or(0) >> 8;
+    }
+
+private:
+    uint32_t mAlpha; // Scale of 256
+    std::optional<uint64_t> mCurrentEma{}; // Stored in fixed-point (Value * 256)
+};
+
 // Incrementally computes the maximum in a sequence of values.
 template<typename T>
 using Maximizer = detail::Latcher<std::greater, T>;
