@@ -961,9 +961,16 @@ void FileContext::execute(FileReadRequest& request)
         download && download->shouldWait(range.mBegin))
         return;
 
-    // Request can be satisfied by an existing small download.
-    if (auto download = downloading(mDownloading.mSmall, range))
+    // Bump beginning of small download as necessary.
+    while (true)
     {
+        // Can request be satisfied by an existing small download?
+        auto download = downloading(mDownloading.mSmall, range);
+
+        // Request can't be satisfied by an existing small download.
+        if (!download)
+            break;
+
         // What range is being downloaded?
         auto& downloadRange = download->range();
 
@@ -973,6 +980,10 @@ void FileContext::execute(FileReadRequest& request)
 
         // Bump range's beginning.
         range.mBegin += downloadRange.mEnd - range.mBegin;
+
+        // Range has become empty.
+        if (range.mBegin >= range.mEnd)
+            return;
     }
 
     // Convenience.
