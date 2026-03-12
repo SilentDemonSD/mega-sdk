@@ -1594,7 +1594,7 @@ FileContext::FileContext(Activity activity,
     enable_shared_from_this(),
     mInstanceLogger("FileContext", *this, logger()),
     mActivity(std::move(activity)),
-    mAverageLargeDownloadBitrate(64),
+    mAverageLargeDownloadBitrate(256),
     mAverageTimeToFirstByte(),
     mBuffer(std::make_shared<SparseFileBuffer>(*file, *info)),
     mDownloading(),
@@ -1868,7 +1868,7 @@ try
     if (isLargeDownload())
     {
         mContext.mAverageLargeDownloadBitrate.update(
-            std::max(fileBitrate, speed.mOverallMean << 3));
+            std::max(fileBitrate, speed.mCircularMean << 3));
     }
 
     // Download's been replaced.
