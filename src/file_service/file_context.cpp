@@ -848,6 +848,34 @@ void FileContext::execute(FileReadRequest& request)
         return context;
     }; // isJump
 
+    // Check if request is a small prefix of a large download.
+    //
+    // If true, request will be clamped so it does not overlap the leading
+    // edge of the large download.
+    auto isSmallPrefix = [&](auto& request)
+    {
+        // Convenience.
+        auto& largeDownloads = mDownloading.mLarge;
+        auto& range = request.mRange;
+
+        // Does request overlap an existing large download?
+        auto iterator = largeDownloads.beginsAfter(range.mBegin);
+
+        // Request doesn't overlap an existing large download.
+        if (iterator == largeDownloads.end() || range.mEnd <= iterator->first.mBegin)
+            return false;
+
+        // Request isn't a small prefix of the large download.
+        if (iterator->first.mBegin - range.mBegin > immediateThreshold)
+            return false;
+
+        // Translate request into a small read.
+        range.mEnd = iterator->first.mBegin;
+
+        // Let our caller know that request is a small prefix.
+        return true;
+    }; // isSmallPrefix
+
     // Queue a request for later completion.
     auto queueRequest = [this](auto&& request)
     {
@@ -875,8 +903,14 @@ void FileContext::execute(FileReadRequest& request)
     auto range = request.mRange;
 
     // We're performing a large read.
-    if (range.length() > immediateThreshold)
+    //
+    // While used here purely for control flow effects.
+    while (range.length() > immediateThreshold)
     {
+        // Request is a small prefix of a large download.
+        if (isSmallPrefix(request))
+            break;
+
         // Request can't be satisfied by data on disk.
         if (!completeIfOnDisk(request))
             queueRequest(std::move(request));
