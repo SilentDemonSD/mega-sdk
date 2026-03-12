@@ -899,17 +899,17 @@ void FileContext::execute(FileReadRequest& request)
         };
     }
 
-    // Convenience.
-    auto range = request.mRange;
-
     // We're performing a large read.
     //
     // While used here purely for control flow effects.
-    while (range.length() > immediateThreshold)
+    while (request.mRange.length() > immediateThreshold)
     {
         // Request is a small prefix of a large download.
         if (isSmallPrefix(request))
             break;
+
+        // Convenience.
+        auto range = request.mRange;
 
         // Request can't be satisfied by data on disk.
         if (!completeIfOnDisk(request))
@@ -942,6 +942,9 @@ void FileContext::execute(FileReadRequest& request)
         // Nothing more to do.
         return;
     }
+
+    // Convenience.
+    auto range = request.mRange;
 
     // Sanity.
     assert(range.length() <= immediateThreshold);
