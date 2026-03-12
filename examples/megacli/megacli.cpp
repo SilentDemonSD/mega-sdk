@@ -9544,7 +9544,8 @@ void exec_mediainfo(autocomplete::ACState& s)
             uint32_t dummykey[4] = {1, 2, 3, 4}; // check encode/decode
             string attrs = mp.convertMediaPropertyFileAttributes(dummykey, client->mediaFileInfo);
             auto dmp = MediaProperties::decodeMediaPropertiesAttributes(":" + attrs, dummykey);
-            cout << showMediaInfo(dmp.value_or({}), client->mediaFileInfo, false) << endl;
+            cout << showMediaInfo(dmp.value_or(MediaProperties{}), client->mediaFileInfo, false)
+                 << endl;
         }
         else
         {
