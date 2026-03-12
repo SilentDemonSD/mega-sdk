@@ -52,9 +52,6 @@ using std::chrono::steady_clock;
 
 class FileContext::DownloadContext: private PartialDownloadCallback
 {
-    // Retrieve this download's estimated bitrate.
-    std::uint64_t bitrate() const;
-
     // Called when the file range has been downloaded.
     void completed(Error result) override;
 
@@ -889,7 +886,9 @@ void FileContext::execute(FileReadRequest& request)
             return;
 
         // Extend range to the left if possible.
-        range.mBegin -= std::min(backwardDistance, range.mBegin);
+        uint64_t backwardBytes =
+            static_cast<uint64_t>(backwardDistance.count()) * downloadBitrate() / 8 / 1024;
+        range.mBegin -= std::min(backwardBytes, range.mBegin);
 
         // Round down to the nearest boundary.
         range.mBegin &= ~((UINT64_C(1) << backwardAlignment) - 1);
@@ -1666,6 +1665,12 @@ AutoFileHandle FileContext::dupFileDescriptor()
     return mFile->dupFileDescriptor();
 }
 
+std::uint64_t FileContext::downloadBitrate() const
+{
+    // Bitrate should always be larger than zero.get_speed
+    return std::max<uint64_t>(1, mAverageLargeDownloadBitrate.getValue());
+}
+
 void FileContext::fetch(FileFetchRequest request)
 {
     executeOrQueue(std::move(request));
@@ -1792,15 +1797,6 @@ void FileContext::truncate(FileTruncateRequest request)
 void FileContext::write(FileWriteRequest request)
 {
     executeOrQueue(std::move(request));
-}
-
-std::uint64_t FileContext::DownloadContext::bitrate() const
-{
-    // Convenience.
-    auto& averager = mContext.mAverageLargeDownloadBitrate;
-
-    // Bitrate should always be larger than zero.
-    return std::max<uint64_t>(1, averager.getValue());
 }
 
 void FileContext::DownloadContext::completed(Error error)
@@ -2162,7 +2158,7 @@ milliseconds FileContext::DownloadContext::timeUntil(std::uint64_t position) con
         return milliseconds(0);
 
     // Compute estimated bitrate.
-    const auto bitrate = this->bitrate();
+    const auto bitrate = mContext.downloadBitrate();
 
     // Sanity: Bitrate should never be zero.
     assert(bitrate);

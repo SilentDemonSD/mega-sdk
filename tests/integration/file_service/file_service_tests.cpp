@@ -2207,7 +2207,7 @@ TEST_F(FileServiceTests, read_jump_backwards_succeeds)
             options.mJumpBackwardAlignment = 0;
 
             // Don't begin a large read's range earlier than specified.
-            options.mJumpBackwardDistance = 0;
+            options.mJumpBackwardDistance = chrono::milliseconds{0};
 
             // Consider any read more than 3000ms ahead to be a "jump."
             options.mJumpForwardDistance = chrono::milliseconds{3000};
@@ -2287,7 +2287,7 @@ TEST_F(FileServiceTests, read_jump_forward_succeeds)
             options.mJumpBackwardAlignment = 0;
 
             // Don't begin a large read's range earlier than specified.
-            options.mJumpBackwardDistance = 0;
+            options.mJumpBackwardDistance = chrono::milliseconds{0};
 
             // Consider any read more than 3000ms ahead to be a "jump."
             options.mJumpForwardDistance = chrono::milliseconds{3000};
@@ -2366,7 +2366,7 @@ TEST_F(FileServiceTests, read_large_succeeds)
             options.mJumpBackwardAlignment = 0;
 
             // Don't begin the range earlier than specified.
-            options.mJumpBackwardDistance = 0;
+            options.mJumpBackwardDistance = chrono::milliseconds{0};
 
             // Consider reads larger than 128K as "large."
             options.mImmediateDownloadThreshold = 1ul << 17;
@@ -2452,8 +2452,8 @@ TEST_F(FileServiceTests, read_small_during_large_succeeds)
             // Align large ranges on a 16 byte boundary.
             options.mJumpBackwardAlignment = 4;
 
-            // Begin large ranges 24 bytes earlier than their read.
-            options.mJumpBackwardDistance = 24;
+            // Begin large ranges 30ms than their read.
+            options.mJumpBackwardDistance = chrono::milliseconds{30};
 
             // Any read larger than 64KiB is large.
             options.mImmediateDownloadThreshold = 1ul << 16;

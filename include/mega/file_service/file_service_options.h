@@ -49,10 +49,10 @@ struct ServiceOptions
     // Note that this value is expressed as a power of two.
     //
     // I.e. An value of 10 here means align at a 1K boundary.
-    std::uint64_t mJumpBackwardAlignment = 24;
+    std::uint64_t mJumpBackwardAlignment = 20;
 
     // How far should we extend the beginning of a new range?
-    std::uint64_t mJumpBackwardDistance = UINT64_C(1) << 24;
+    std::chrono::milliseconds mJumpBackwardDistance{2000};
 
     // How far forward in milliseconds does a read have to be for us to consider it a jump?
     std::chrono::milliseconds mJumpForwardDistance{3000};
