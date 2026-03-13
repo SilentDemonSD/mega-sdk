@@ -217,7 +217,7 @@ public:
     // Find the first range that begins after position.
     Iterator beginsAfter(std::uint64_t position)
     {
-        return mByRangeBegin.upper_bound(position).nodePointer();
+        return mByRangeBegin.upper_bound(position);
     }
 
     ConstIterator beginsAfter(std::uint64_t position) const
@@ -228,7 +228,7 @@ public:
     // Find the range that begins at position.
     Iterator beginsAt(std::uint64_t position)
     {
-        return mByRangeBegin.find(position).nodePointer();
+        return mByRangeBegin.find(position);
     }
 
     ConstIterator beginsAt(std::uint64_t position) const
