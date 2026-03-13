@@ -862,17 +862,14 @@ void FileContext::execute(FileReadRequest& request)
         auto& range = request.mRange;
 
         // Does request overlap an existing large download?
-        auto iterator = largeDownloads.beginsAtOrAfter(range.mBegin);
+        auto iterator = largeDownloads.beginsAfter(range.mBegin);
 
         // Request doesn't overlap an existing large download.
         if (iterator == largeDownloads.end() || range.mEnd <= iterator->first.mBegin)
             return false;
 
-        // How large is the common prefix?
-        auto distance = iterator->first.mBegin - range.mBegin;
-
         // Request isn't a small prefix of the large download.
-        if (!distance || distance > immediateThreshold)
+        if (iterator->first.mBegin - range.mBegin > immediateThreshold)
             return false;
 
         // Translate request into a small read.
