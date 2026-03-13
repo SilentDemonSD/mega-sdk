@@ -862,7 +862,7 @@ void FileContext::execute(FileReadRequest& request)
         auto& range = request.mRange;
 
         // Does request overlap an existing large download?
-        auto iterator = largeDownloads.beginsAfter(range.mBegin);
+        auto iterator = largeDownloads.beginsAtOrAfter(range.mBegin);
 
         // Request doesn't overlap an existing large download.
         if (iterator == largeDownloads.end() || range.mEnd <= iterator->first.mBegin)
