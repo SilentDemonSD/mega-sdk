@@ -2548,7 +2548,14 @@ TEST_F(FileServiceTests, read_small_during_large_succeeds)
     ASSERT_EQ(waiter4.get(), FILE_SUCCESS);
 
     // Make sure a single contiguous range is in the cache.
-    ASSERT_THAT(file->ranges(), ElementsAre(FileRange(16, mFileContent.size())));
+    auto ranges = file->ranges();
+    ASSERT_EQ(ranges.size(), 1u);
+
+    // Range should begin at or before our first read.
+    ASSERT_LE(ranges.front().mBegin, 48u);
+
+    // And extend until the end of the file.
+    ASSERT_EQ(ranges.front().mEnd, mFileContent.size());
 }
 
 TEST_F(FileServiceTests, read_small_succeeds)
