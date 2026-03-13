@@ -2616,6 +2616,32 @@ TEST_F(FileServiceTests, read_small_succeeds)
                             FileRange(288_KiB, 352_KiB)));
 }
 
+TEST_F(FileServiceTests, read_same_range_concurrently_succeeds)
+{
+    // Open a file for reading.
+    auto file = mClient->fileOpen(mFileHandle);
+    ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+
+    // Kick off two reads for the entire file.
+    auto waiter0 = read(*file, 0, mFileContent.size());
+    auto waiter1 = read(*file, 0, mFileContent.size());
+
+    // Wait for both reads to complete.
+    ASSERT_NE(waiter0.wait_for(mDefaultTimeout), timeout);
+    ASSERT_NE(waiter1.wait_for(mDefaultTimeout), timeout);
+
+    // Make sure each read succeeded.
+    auto result0 = waiter0.get();
+    auto result1 = waiter1.get();
+
+    ASSERT_EQ(result0.errorOr(FILE_SUCCESS), FILE_SUCCESS);
+    ASSERT_EQ(result1.errorOr(FILE_SUCCESS), FILE_SUCCESS);
+
+    // Make sure neither read returns corrupt data.
+    ASSERT_TRUE(compare(*result0, mFileContent, 0, mFileContent.size()));
+    ASSERT_TRUE(compare(*result1, mFileContent, 0, mFileContent.size()));
+}
+
 TEST_F(FileServiceTests, read_succeeds)
 {
     // Open a file for reading.
