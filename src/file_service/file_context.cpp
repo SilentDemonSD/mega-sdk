@@ -984,10 +984,7 @@ void FileContext::execute(FileReadRequest& request)
 
     // Bump beginning of range.
     range.mBegin = current->mBegin;
-
-    // Bump ending of range to the end of the last gap.
-    for (; current != end; ++current)
-        range.mEnd = current->mEnd;
+    range.mEnd = current->mEnd;
 
     // Sanity: range should never be empty.
     assert(!range.empty());
