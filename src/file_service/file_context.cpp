@@ -871,12 +871,18 @@ void FileContext::execute(FileReadRequest& request)
         if (iterator == largeDownloads.end() || range.mEnd <= iterator->first.mBegin)
             return false;
 
+        // How large is the common prefix?
+        auto distance = iterator->first.mBegin - range.mBegin;
+
         // Request isn't a small prefix of the large download.
-        if (iterator->first.mBegin - range.mBegin > immediateThreshold)
+        if (!distance || distance > immediateThreshold)
             return false;
 
         // Translate request into a small read.
         range.mEnd = iterator->first.mBegin;
+
+        // Range should never be empty.
+        assert(!range.empty());
 
         // Let our caller know that request is a small prefix.
         return true;
