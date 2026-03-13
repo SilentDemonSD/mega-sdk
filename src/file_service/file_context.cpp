@@ -974,46 +974,26 @@ void FileContext::execute(FileReadRequest& request)
         download && download->timeUntil(range.mBegin) <= seconds(1))
         return;
 
-    // Bump beginning of small download as necessary.
-    while (true)
-    {
-        // Can request be satisfied by an existing small download?
-        auto download = downloading(mDownloading.mSmall, range);
+    // Extend the small range's size so our download is worthwhile.
+    range.mEnd = range.mBegin + std::min(minimumRangeSize, range.length());
 
-        // Request can't be satisfied by an existing small download.
-        if (!download)
-            break;
+    // Find all gaps in range that aren't covered by a small download.
+    auto current = gaps(mDownloading.mSmall, range);
+    auto end = current.end();
 
-        // What range is being downloaded?
-        auto& downloadRange = download->range();
+    // Range is already covered by small downloads.
+    if (current == end)
+        return;
 
-        // Request will be fully satisfied by the download.
-        if (downloadRange.mEnd >= range.mEnd)
-            return;
+    // Bump beginning of range.
+    range.mBegin = current->mBegin;
 
-        // Bump range's beginning.
-        range.mBegin += downloadRange.mEnd - range.mBegin;
+    // Bump ending of range to the end of the last gap.
+    for (; current != end; ++current)
+        range.mEnd = current->mEnd;
 
-        // Range has become empty.
-        if (range.mBegin >= range.mEnd)
-            return;
-    }
-
-    // Convenience.
-    auto length = range.length();
-
-    // Make sure we get as much as we can from the small download.
-    if (minimumRangeSize)
-        length = std::max(std::min(immediateThreshold, minimumRangeSize), length);
-
-    // Make sure our length won't overflow.
-    length = std::min(UINT64_MAX - range.mBegin, length);
-
-    // Make sure we don't try and download beyond the end of the file.
-    length = std::min(length, mInfo->size() - range.mBegin);
-
-    // Update range's end point.
-    range.mEnd = range.mBegin + length;
+    // Sanity: range should never be empty.
+    assert(!range.empty());
 
     // Try and add a small download that'll cover request.
     addDownload(mDownloading.mSmall, range);
