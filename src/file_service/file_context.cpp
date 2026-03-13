@@ -128,9 +128,6 @@ public:
     // Mark this download as having been replaced.
     void replaced(const DownloadContextPtr& self);
 
-    // Should we wait for this download to reach position?
-    bool shouldWait(std::uint64_t position) const;
-
     // How long until we can satisfy a read at position?
     milliseconds timeUntil(std::uint64_t position) const;
 }; // DownloadContext
@@ -974,7 +971,7 @@ void FileContext::execute(FileReadRequest& request)
 
     // Request can be satisfied by an existing large download.
     if (auto download = downloading(mDownloading.mLarge, range);
-        download && download->shouldWait(range.mBegin))
+        download && download->timeUntil(range.mBegin) <= seconds(1))
         return;
 
     // Bump beginning of small download as necessary.
@@ -2189,21 +2186,6 @@ void FileContext::DownloadContext::replaced([[maybe_unused]] const DownloadConte
 
     // End iterator is a sentinel that this download has been replaced.
     mIterator = mDownloading.end();
-}
-
-bool FileContext::DownloadContext::shouldWait(std::uint64_t position) const
-{
-    // Compute average time to first byte.
-    const auto timeToFirstByte = mContext.timeToFirstByte();
-
-    // Compute time until download overtakes position.
-    const auto timeUntilOvertaken = timeUntil(position);
-
-    // Should we wait until download overtakes position?
-    const auto shouldWait = timeToFirstByte >= timeUntilOvertaken;
-
-    // Let the caller know if they should wait for position to be overtaken.
-    return shouldWait;
 }
 
 milliseconds FileContext::DownloadContext::timeUntil(std::uint64_t position) const
