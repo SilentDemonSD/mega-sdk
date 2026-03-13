@@ -747,6 +747,9 @@ void FileContext::execute(FileReadRequest& request)
         // Convenience.
         auto& range = request.mRange;
 
+        // A request's range should never be zero.
+        assert(range.length());
+
         // Can any range on disk partially satisfy request?
         auto iterator = mOnDisk.contains(range.mBegin);
 
@@ -796,6 +799,9 @@ void FileContext::execute(FileReadRequest& request)
     // True if request is a jump.
     auto isJump = [&](auto& request) -> DownloadContextPtr
     {
+        // A request's range should never be zero.
+        assert(request.mRange.length());
+
         // Request isn't a jump candidate.
         if (!request.mIsJumpCandidate)
             return nullptr;
@@ -879,6 +885,10 @@ void FileContext::execute(FileReadRequest& request)
     // Queue a request for later completion.
     auto queueRequest = [this](auto&& request)
     {
+        // We should never queue a request for zero bytes.
+        assert(request.mRange.length());
+
+        // Queue the request for later completion.
         mPendingReadRequests.emplace(request);
     }; // queueRequest
 
