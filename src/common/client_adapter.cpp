@@ -1699,6 +1699,7 @@ bool ClientPartialDownload::inProgress()
 void ClientPartialDownload::notify(PartialDownloadWeakPtr cookie, Event& event)
 {
     // Convenience.
+    using Match = DirectRead::Match;
     using Revoke = DirectRead::Revoke;
     using Valid = DirectRead::IsValid;
 
@@ -1716,6 +1717,10 @@ void ClientPartialDownload::notify(PartialDownloadWeakPtr cookie, Event& event)
                                      [&](Failure& failure)
                                      {
                                          failure.ret = NEVER;
+                                     },
+                                     [&](Match& match)
+                                     {
+                                         match.mMatched = false;
                                      },
                                      [&](Revoke& revoke)
                                      {
@@ -1742,6 +1747,11 @@ void ClientPartialDownload::notify(PartialDownloadWeakPtr cookie, Event& event)
                           {
                               // Delegate.
                               download->failure(failure);
+                          },
+                          [&](Match& match)
+                          {
+                              // Does match.mAppData reference this download?
+                              match.mMatched = match.mAppData == download.get();
                           },
                           [&](Revoke& revoke)
                           {

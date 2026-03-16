@@ -17502,6 +17502,10 @@ void MegaClient::queueread(handle handle,
                                                                    appData,
                                                                    failure.timeLeft);
                               },
+                              [&](DirectRead::Match& match)
+                              {
+                                  match.mMatched = appData == match.mAppData;
+                              },
                               [&](DirectRead::Revoke& revoke)
                               {
                                   if (appData == revoke.appdata)

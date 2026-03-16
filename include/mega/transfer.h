@@ -1174,6 +1174,20 @@ struct MEGA_API DirectRead
         dstime ret{0}; // Callback sets and tells the interval for a retry
     };
 
+    // Parameters for the match callback.
+    struct Match
+    {
+        Match(void* appData):
+            mAppData(appData)
+        {}
+
+        // What application data are we trying to find?
+        void* mAppData{nullptr};
+
+        // Did this read contain our application data?
+        bool mMatched{false};
+    };
+
     // Type for the callback to revoke itself
     struct Revoke
     {
@@ -1191,7 +1205,7 @@ struct MEGA_API DirectRead
         bool ret{false}; // Callback sets
     };
 
-    using CallbackParam = std::variant<Data, Failure, Revoke, IsValid>;
+    using CallbackParam = std::variant<Data, Failure, Match, Revoke, IsValid>;
 
     using Callback = std::function<void(CallbackParam&)>;
 
@@ -1214,6 +1228,9 @@ struct MEGA_API DirectRead
 
     void abort();
     m_off_t drMaxReqSize() const;
+
+    // True if this read contains appData.
+    bool match(void* appData) const;
 
     void revokeCallback(void* appData);
 
