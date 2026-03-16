@@ -1297,14 +1297,10 @@ struct MEGA_API DirectReadNode
                    const char* chatAuth);
     ~DirectReadNode();
 
-    // Convenience.
-    template<typename Predicate>
-    static constexpr auto IsDirectReadPredicateV =
-        std::is_invocable_r_v<bool, Predicate, const DirectRead&>;
-
     // Abort all reads satisfying a particular predicate.
     template<typename Predicate>
-    auto abort(Predicate predicate) -> std::enable_if_t<IsDirectReadPredicateV<Predicate>>
+    auto abort(Predicate predicate)
+        -> std::enable_if_t<std::is_invocable_r_v<bool, Predicate, const DirectRead&>>
     {
         // Iterate over all active reads.
         for (auto i = reads.begin(); i != reads.end();)
