@@ -319,15 +319,16 @@ static void describe(NodeInfo& destination,
 
 static NodeInfo describe(Node& node);
 
-ClientAdapter::ClientAdapter(MegaClient& client)
-  : Client(common::logger())
-  , mActivities()
-  , mClient(client)
-  , mDeinitialized{false}
-  , mLock()
-  , mPendingCallbacks()
-  , mTaskQueue()
-  , mThreadID(std::this_thread::get_id())
+thread_local bool ClientAdapter::mOnClientThread = false;
+
+ClientAdapter::ClientAdapter(MegaClient& client):
+    Client(common::logger()),
+    mActivities(),
+    mClient(client),
+    mDeinitialized{false},
+    mLock(),
+    mPendingCallbacks(),
+    mTaskQueue()
 {
 }
 
@@ -465,6 +466,9 @@ void ClientAdapter::deinitialize()
 
 void ClientAdapter::dispatch()
 {
+    // Let tasks know they're executing on the client thread.
+    auto restorer = makeScopedValue(mOnClientThread, true);
+
     // Acquire lock.
     std::unique_lock<std::mutex> lock(mLock);
 
@@ -958,7 +962,7 @@ void ClientAdapter::move(MoveCallback callback,
 
 bool ClientAdapter::isClientThread() const
 {
-    return std::this_thread::get_id() == mThreadID;
+    return mOnClientThread;
 }
 
 ErrorOr<NodeHandle> ClientAdapter::parentHandle(NodeHandle handle) const

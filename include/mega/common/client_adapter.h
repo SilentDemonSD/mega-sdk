@@ -40,7 +40,7 @@ class ClientAdapter
     TaskQueue mTaskQueue;
 
     // So we can check when we're running on the client thread.
-    std::thread::id mThreadID;
+    static thread_local bool mOnClientThread;
 
 public:
     explicit ClientAdapter(MegaClient& client);
