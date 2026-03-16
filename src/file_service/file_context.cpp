@@ -971,8 +971,14 @@ void FileContext::execute(FileReadRequest& request)
         download && download->timeUntil(range.mBegin) <= seconds(1))
         return;
 
-    // Extend the small range's size so our download is worthwhile.
-    range.mEnd = range.mBegin + std::min(minimumRangeSize, range.length());
+    // Extend the small range's length so our download is worthwhile.
+    auto length = std::max(minimumRangeSize, range.length());
+
+    // Make sure the small range doesn't extend beyond the end of the file.
+    length = std::min(length, mInfo->size() - range.mBegin);
+
+    // Update the small range's end point.
+    range.mEnd = range.mBegin + length;
 
     // Find all gaps in range that aren't covered by a small download.
     auto current = gaps(mDownloading.mSmall, range);
