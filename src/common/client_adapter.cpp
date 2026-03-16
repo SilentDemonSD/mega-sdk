@@ -1786,8 +1786,8 @@ ClientPartialDownload::ClientPartialDownload(PartialDownloadCallback& callback,
 
 ClientPartialDownload::~ClientPartialDownload()
 {
-    // Let the user know the download's been completed.
-    completed(API_EINCOMPLETE);
+    // Let the user know the download's been cancelled.
+    cancel();
 }
 
 void ClientPartialDownload::begin()
@@ -1868,8 +1868,30 @@ bool ClientPartialDownload::cancel()
         mStatus = (mStatus ^ SF_CANCELLABLE) | SF_CANCELLED | SF_COMPLETED;
     }
 
+    // Called on the client's thread to cancel this download.
+    auto doCancel = [&client = mClient.client(), handle = mHandle, this]()
+    {
+        client.abortreads(
+            [this](auto& read)
+            {
+                return read.match(this);
+            },
+            handle.as8byte());
+    }; // doCancel
+
     // Let the user know their download has been cancelled.
     mCallback.completed(API_EINCOMPLETE);
+
+    // We're executing on the client's thread.
+    if (mClient.isClientThread())
+        return doCancel(), true;
+
+    // We're not executing on the client's thread.
+    mClient.execute(
+        [doCancel = std::move(doCancel)](auto&)
+        {
+            doCancel();
+        });
 
     // Let the caller know the download has been cancelled.
     return true;
