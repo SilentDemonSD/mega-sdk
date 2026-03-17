@@ -2397,6 +2397,46 @@ TEST_F(FileServiceTests, read_large_succeeds)
     ASSERT_THAT(file->ranges(), ElementsAre(FileRange(32_KiB, mFileContent.size())));
 }
 
+TEST_F(FileServiceTests, read_large_with_alignment_succeeds)
+{
+    // Try and open our test file.
+    auto file = mClient->fileOpen(mFileHandle);
+
+    // Make sure we could open our test file.
+    ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+
+    // Tweak service options.
+    mClient->fileService().serviceOptions(
+        [&]()
+        {
+            auto options = DefaultOptions;
+
+            // Align to a 64K boundary.
+            options.mJumpBackwardAlignment = 16;
+            options.mJumpBackwardDistance = chrono::milliseconds{0};
+
+            // Consider reads larger than 128K as "large."
+            options.mImmediateDownloadThreshold = 1ul << 17;
+
+            return options;
+        }());
+
+    // Kick off a single large read.
+    auto result = execute(readOnce, *file, 96_KiB, 128_KiB + 1);
+
+    // Make sure our read succeeded.
+    ASSERT_EQ(result.errorOr(FILE_SUCCESS), FILE_SUCCESS);
+
+    // And returned valid data.
+    ASSERT_TRUE(compare(*result, mFileContent, 96_KiB, result->size()));
+
+    // Make sure any pending range downloads have completed.
+    ASSERT_EQ(execute(fetchBarrier, *file), FILE_SUCCESS);
+
+    // We should have a single range on disk.
+    ASSERT_THAT(file->ranges(), ElementsAre(FileRange(64_KiB, mFileContent.size())));
+}
+
 TEST_F(FileServiceTests, read_removed_file_succeeds)
 {
     // Create a file for us to play with.
