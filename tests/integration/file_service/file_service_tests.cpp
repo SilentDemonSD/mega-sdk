@@ -334,6 +334,9 @@ static auto remove(File file) -> std::future<FileResult>;
 // Update the specified file's modification time.
 static auto touch(File file, std::int64_t modified) -> std::future<FileResult>;
 
+// Convert a vector of ranges into a set of ranges.
+static FileRangeSet toSet(const FileRangeVector& ranges);
+
 // Truncate the specified file to a particular size.
 static auto truncate(File file, std::uint64_t newSize) -> std::future<FileResult>;
 
@@ -4786,6 +4789,11 @@ auto touch(File file, std::int64_t modified) -> std::future<FileResult>
 
     // Return the waiter to our caller.
     return waiter;
+}
+
+FileRangeSet toSet(const FileRangeVector& ranges)
+{
+    return FileRangeSet(ranges.begin(), ranges.end());
 }
 
 auto truncate(File file, std::uint64_t newSize) -> std::future<FileResult>
