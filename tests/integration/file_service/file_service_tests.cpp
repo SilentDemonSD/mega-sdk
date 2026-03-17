@@ -21,6 +21,8 @@
 #include <mega/file_service/file_move_event.h>
 #include <mega/file_service/file_range.h>
 #include <mega/file_service/file_range_set.h>
+#include <mega/file_service/file_range_tree_utilities.h>
+#include <mega/file_service/file_range_vector.h>
 #include <mega/file_service/file_read_result.h>
 #include <mega/file_service/file_remove_event.h>
 #include <mega/file_service/file_result.h>
@@ -290,6 +292,9 @@ static bool compare(const std::string& computed,
                     const std::string& expected,
                     std::uint64_t offset,
                     std::uint64_t length);
+
+// Check that each range in expected is fully contained within ranges.
+static bool contains(const FileRangeVector& expected, const FileRangeSet& ranges);
 
 // Execute an asynchronous request synchronously.
 template<typename Function, typename... Parameters>
@@ -4452,6 +4457,30 @@ bool compare(const std::string& computed,
 
     // Make sure the content matches our file.
     return !expected.compare(offset, length, computed);
+}
+
+bool contains(const FileRangeVector& expected, const FileRangeSet& ranges)
+{
+    auto current = std::begin(expected);
+    auto end = std::end(expected);
+
+    // If one input is empty so should the other.
+    if ((current == end) != ranges.empty())
+        return false;
+
+    // Check that each range in [current, end) is fully contained by ranges.
+    for (; current != end; ++current)
+    {
+        // Check if our current range is fully contained by ranges.
+        auto gaps = file_service::gaps(ranges, *current);
+
+        // Current range isn't fully contained by ranges.
+        if (gaps.begin() != gaps.end())
+            return false;
+    }
+
+    // Each range in [current, end) is fully contained by ranges.
+    return true;
 }
 
 template<typename Function, typename... Parameters>
