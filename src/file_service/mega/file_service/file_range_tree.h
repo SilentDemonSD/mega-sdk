@@ -124,6 +124,15 @@ public:
 
     FileRangeTree() = default;
 
+    template<typename Iterator>
+    FileRangeTree(Iterator begin, Iterator end):
+        mByRangeEnd(),
+        mByRangeBegin()
+    {
+        for (; begin != end; ++begin)
+            add(*begin);
+    }
+
     FileRangeTree(FileRangeTree&& other) = default;
 
     ~FileRangeTree()

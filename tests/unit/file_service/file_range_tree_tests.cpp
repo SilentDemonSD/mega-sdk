@@ -66,6 +66,25 @@ TEST(FileRangeMapTests, add)
     EXPECT_EQ(iterator->second.mValue, 1);
 }
 
+TEST(FileRangeMapTests, add_with_iterators)
+{
+    static const std::pair<FileRange, int> ranges[] = {{FileRange(0, 1), 2},
+                                                       {FileRange(3, 4), 5},
+                                                       {FileRange(6, 7), 8}}; // ranges
+
+    FileRangeMap<int> map(std::begin(ranges), std::end(ranges));
+
+    for (auto& range: ranges)
+    {
+        auto i = map.beginsAt(range.first.mBegin);
+        auto j = map.endsAt(range.first.mEnd);
+
+        ASSERT_NE(i, map.end());
+        ASSERT_EQ(i, j);
+        ASSERT_EQ(*i, range);
+    }
+}
+
 TEST(FileRangeSetTests, add)
 {
     auto add = [](FileRangeSet& set, const FileRange& range)
@@ -74,6 +93,23 @@ TEST(FileRangeSetTests, add)
     }; // add
 
     EXPECT_NO_FATAL_FAILURE(testAdd(std::move(add)));
+}
+
+TEST(FileRangeSetTests, add_with_iterators)
+{
+    static const FileRange ranges[] = {{1, 2}, {3, 4}, {5, 6}}; // ranges
+
+    FileRangeSet set(std::begin(ranges), std::end(ranges));
+
+    for (auto& range: ranges)
+    {
+        auto i = set.beginsAt(range.mBegin);
+        auto j = set.endsAt(range.mEnd);
+
+        ASSERT_NE(i, set.end());
+        ASSERT_EQ(i, j);
+        ASSERT_EQ(*i, range);
+    }
 }
 
 TEST(FileRangeSetTests, constructor)
