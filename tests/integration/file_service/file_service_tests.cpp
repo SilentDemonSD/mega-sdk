@@ -2549,6 +2549,50 @@ TEST_F(FileServiceTests, read_small_during_large_succeeds)
     ASSERT_THAT(file->ranges(), ElementsAre(FileRange(0, 16_MiB)));
 }
 
+TEST_F(FileServiceTests, read_small_size_extension_succeeds)
+{
+    // Open our test file for reading.
+    auto file = mClient->fileOpen(mFileHandle);
+    ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+
+    // Tweak service options.
+    mClient->fileService().serviceOptions(
+        [&]()
+        {
+            auto options = DefaultOptions;
+
+            // Reads greater than 64K are large.
+            options.mImmediateDownloadThreshold = 64_KiB;
+
+            // Small reads are extended to 64K in size.
+            options.mMinimumRangeSize = 64_KiB;
+
+            return options;
+        }());
+
+    // Perform two small reads.
+    auto waiter0 = readOnce(*file, 0, 4_KiB);
+    auto waiter1 = readOnce(*file, 68_KiB, 4_KiB);
+
+    // Wait for both of our reads to complete.
+    ASSERT_NE(waiter0.wait_for(mDefaultTimeout), timeout);
+    ASSERT_NE(waiter1.wait_for(mDefaultTimeout), timeout);
+
+    // Make sure our reads completed successfully.
+    auto result0 = waiter0.get();
+    auto result1 = waiter1.get();
+
+    // And gave us some of the data we expected.
+    ASSERT_TRUE(compare(*result0, mFileContent, 0, result0->size()));
+    ASSERT_TRUE(compare(*result1, mFileContent, 68_KiB, result1->size()));
+
+    // Wait for any range downloads to complete.
+    ASSERT_EQ(execute(fetchBarrier, *file), FILE_SUCCESS);
+
+    // We should have two 64K blocks on disk.
+    ASSERT_THAT(file->ranges(), ElementsAre(FileRange(0, 64_KiB), FileRange(68_KiB, 132_KiB)));
+}
+
 TEST_F(FileServiceTests, read_succeeds)
 {
     // Open a file for reading.
