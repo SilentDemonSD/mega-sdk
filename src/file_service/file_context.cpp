@@ -97,6 +97,9 @@ class FileContext::DownloadContext: private PartialDownloadCallback
     // What range has this context downloaded?
     FileRange mRange;
 
+    // How many times have we failed in a row?
+    std::uint64_t mRetries;
+
 public:
     DownloadContext(Activity activity,
                     FileContext& context,
@@ -1888,6 +1891,9 @@ try
     // Acquire lock.
     std::lock_guard guard(mContext.mLock);
 
+    // Reset retry counter.
+    mRetries = 0;
+
     // Need to compute average time to first byte.
     if (mBegan)
     {
@@ -2002,7 +2008,7 @@ catch (std::runtime_error&)
     return Abort();
 }
 
-auto FileContext::DownloadContext::failed(Error result, int retries) -> std::variant<Abort, Retry>
+auto FileContext::DownloadContext::failed(Error result, int) -> std::variant<Abort, Retry>
 {
     // Failure isn't due to a retryable error.
     if (!retryable(result))
@@ -2012,11 +2018,11 @@ auto FileContext::DownloadContext::failed(Error result, int retries) -> std::var
     auto options = mContext.mService.serviceOptions();
 
     // Or if we've already retried the download too many times.
-    if (static_cast<std::uint64_t>(retries) >= options.mMaximumRangeRetries)
+    if (mRetries >= options.mMaximumRangeRetries)
         return Abort();
 
     // Retry the download.
-    return options.mRangeRetryBackoff * (1 << --retries);
+    return options.mRangeRetryBackoff * (1 << mRetries++);
 }
 
 bool FileContext::DownloadContext::isLargeDownload() const
@@ -2042,7 +2048,8 @@ FileContext::DownloadContext::DownloadContext(Activity activity,
     mDownload(),
     mDownloading(downloading),
     mIterator(iterator),
-    mRange(iterator->first.mBegin, iterator->first.mBegin)
+    mRange(iterator->first.mBegin, iterator->first.mBegin),
+    mRetries(0)
 {}
 
 void FileContext::DownloadContext::cancel()
