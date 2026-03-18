@@ -2040,7 +2040,7 @@ FileContext::DownloadContext::DownloadContext(Activity activity,
                                               FileRangeMap<DownloadContextPtr>& downloading,
                                               FileRangeMap<DownloadContextPtr>::Iterator iterator):
     PartialDownloadCallback(),
-    mInstanceLogger("DownloadContext", *this, logger()),
+    mInstanceLogger("FileContext::DownloadContext", *this, logger()),
     mActivity(std::move(activity)),
     mBegan(),
     mCallbacks(),
@@ -2226,7 +2226,7 @@ void FileContext::FetchContext::completed(FileResult result)
 }
 
 FileContext::FetchContext::FetchContext(FileContext& context, FileFetchRequest request):
-    mInstanceLogger("FetchContext", *this, logger()),
+    mInstanceLogger("FileContext::FetchContext", *this, logger()),
     mActivity(context.mMonitor.begin()),
     mContext(context),
     mRequests()
@@ -2390,7 +2390,7 @@ void FileContext::FlushContext::uploaded(FlushContextPtr& context, ErrorOr<Uploa
 }
 
 FileContext::FlushContext::FlushContext(FileContext& context, FileFlushRequest request):
-    mInstanceLogger("FlushContext", *this, logger()),
+    mInstanceLogger("FileContext::FlushContext", *this, logger()),
     mActivity(context.mMonitor.begin()),
     mContext(context),
     mHandle(context.mInfo->handle()),
@@ -2506,7 +2506,7 @@ void FileContext::ReclaimContext::completed(ReclaimContextPtr context,
 }
 
 FileContext::ReclaimContext::ReclaimContext(FileContext& context):
-    mInstanceLogger("ReclaimContext", *this, logger()),
+    mInstanceLogger("FileContext::ReclaimContext", *this, logger()),
     mActivity(context.mMonitor.begin()),
     mAllocatedSize(context.mInfo->allocatedSize()),
     mCallbacks(),

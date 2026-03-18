@@ -1993,7 +1993,7 @@ void FileServiceContext::ReclaimContext::reclaimed(ReclaimContextPtr context,
 }
 
 FileServiceContext::ReclaimContext::ReclaimContext(FileServiceContext& service):
-    mInstanceLogger("ReclaimContext", *this, logger()),
+    mInstanceLogger("FileServiceContext::ReclaimContext", *this, logger()),
     mActivity(service.mActivities.begin()),
     mCallbacks(),
     mIDs(),
