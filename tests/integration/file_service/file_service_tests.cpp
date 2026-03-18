@@ -2813,6 +2813,7 @@ TEST_F(FileServiceTests, read_write_sequence)
     // Initiate a request to overwrite all of the file's data.
     auto write = testing::write(expected.data(), *file, 0, expected.size());
 
+    // Initiate another request to read some of the file's data.
     // Initiate a request to read some of the file's new data.
     auto read1 = read(*file, 0, expected.size());
 
@@ -2841,12 +2842,18 @@ TEST_F(FileServiceTests, read_write_sequence)
     if (HasFailure())
         return;
 
-    // The first read should return the file's original data.
-    EXPECT_FALSE(mFileContent.compare(0, readResult0->size(), *readResult0));
+    // Both reads should return the file's original data.
+    EXPECT_TRUE(compare(*readResult0, mFileContent, 0, readResult0->size()));
+    EXPECT_TRUE(compare(*readResult1, mFileContent, 0, readResult1->size()));
 
-    // The second read should return the file's updated data.
-    EXPECT_EQ(expected.size(), readResult1->size());
-    EXPECT_FALSE(expected.compare(*readResult1));
+    // Initiate a read for the data we wrote.
+    auto readResult2 = execute(read, *file, 0, expected.size());
+
+    // Make sure the read succeeded.
+    ASSERT_EQ(readResult2.errorOr(FILE_SUCCESS), FILE_SUCCESS);
+
+    // And that it returned the data we wrote.
+    EXPECT_TRUE(compare(*readResult2, expected, 0, expected.size()));
 }
 
 TEST_F(FileServiceTests, reclaim_all_succeeds)
@@ -4345,6 +4352,7 @@ void FileServiceTests::SetUp()
     SingleClientTest::SetUp();
 
     // Make sure the service's options are in a known state.
+    mClient->fileService().reclaimOptions(DefaultReclaimOptions);
     mClient->fileService().serviceOptions(DefaultOptions);
 
     // Make sure the service contains no lingering data.

@@ -487,21 +487,11 @@ void FileContext::completed(FileWriteRequest&& request)
     completed(std::move(request), FileWriteResult{begin, end - begin});
 }
 
-void FileContext::dequeued([[maybe_unused]] std::unique_lock<std::mutex> lock, FileReadRequestTag)
+template<typename RequestTag>
+void FileContext::dequeued([[maybe_unused]] std::unique_lock<std::mutex> lock, RequestTag)
 {
     assert(lock.mutex() == &mRequestsLock);
     assert(lock.owns_lock());
-}
-
-void FileContext::dequeued([[maybe_unused]] std::unique_lock<std::mutex> lock, FileWriteRequestTag)
-{
-    assert(lock.mutex() == &mRequestsLock);
-    assert(lock.owns_lock());
-
-    // Sanity.
-    assert(mNumPendingWriteRequests);
-
-    --mNumPendingWriteRequests;
 }
 
 void FileContext::dequeued(std::unique_lock<std::mutex> lock, const FileRequest& request)
@@ -551,14 +541,11 @@ bool FileContext::executable(std::unique_lock<std::mutex>& lock,
 }
 
 bool FileContext::executable([[maybe_unused]] std::unique_lock<std::mutex>& lock,
-                             bool queuing,
+                             bool,
                              FileReadRequestTag)
 {
     assert(lock.mutex() == &mRequestsLock);
     assert(lock.owns_lock());
-
-    if (queuing && mNumPendingWriteRequests)
-        return false;
 
     return mReadWriteState.read();
 }
@@ -1379,18 +1366,11 @@ auto FileContext::queue(std::unique_lock<std::mutex> lock, Request&& request)
     queued(std::move(lock), tag(request));
 }
 
-void FileContext::queued([[maybe_unused]] std::unique_lock<std::mutex> lock, FileReadRequestTag)
+template<typename RequestTag>
+void FileContext::queued([[maybe_unused]] std::unique_lock<std::mutex> lock, RequestTag)
 {
     assert(lock.mutex() == &mRequestsLock);
     assert(lock.owns_lock());
-}
-
-void FileContext::queued([[maybe_unused]] std::unique_lock<std::mutex> lock, FileWriteRequestTag)
-{
-    assert(lock.mutex() == &mRequestsLock);
-    assert(lock.owns_lock());
-
-    ++mNumPendingWriteRequests;
 }
 
 template<typename Request>
@@ -1650,7 +1630,6 @@ FileContext::FileContext(Activity activity,
     mFlushContextLock(),
     mKeyData(std::move(keyData)),
     mLock(),
-    mNumPendingWriteRequests(0u),
     mOnDisk(std::move(ranges)),
     mPendingReadRequests(),
     mPinTask(),

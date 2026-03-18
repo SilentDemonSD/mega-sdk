@@ -104,8 +104,8 @@ class FileContext final: public std::enable_shared_from_this<FileContext>
     void completed(FileWriteRequest&& request);
 
     // Called when a request of a particular class is dequeued.
-    void dequeued(std::unique_lock<std::mutex> lock, FileReadRequestTag tag);
-    void dequeued(std::unique_lock<std::mutex> lock, FileWriteRequestTag tag);
+    template<typename RequestTag>
+    void dequeued(std::unique_lock<std::mutex> lock, RequestTag tag);
 
     // Called when a request has been dequeued.
     void dequeued(std::unique_lock<std::mutex> lock, const FileRequest& request);
@@ -175,8 +175,8 @@ class FileContext final: public std::enable_shared_from_this<FileContext>
         -> std::enable_if_t<IsFileRequestV<Request>>;
 
     // Called when a request of a particular class has been queued.
-    void queued(std::unique_lock<std::mutex> lock, FileReadRequestTag tag);
-    void queued(std::unique_lock<std::mutex> lock, FileWriteRequestTag tag);
+    template<typename RequestTag>
+    void queued(std::unique_lock<std::mutex> lock, RequestTag tag);
 
     // Return an error if this request should be rejected.
     template<typename Request>
@@ -251,9 +251,6 @@ class FileContext final: public std::enable_shared_from_this<FileContext>
 
     // Serializes access to mDownloading, mOnDisk and mPendingReadRequests.
     mutable std::recursive_mutex mLock;
-
-    // How many write requests are pending?
-    std::size_t mNumPendingWriteRequests;
 
     // What ranges are present on disk?
     FileRangeSet mOnDisk;
