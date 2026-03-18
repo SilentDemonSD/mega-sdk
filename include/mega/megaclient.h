@@ -2015,11 +2015,14 @@ public:
 
     // abort all reads on handle satisfying predicate.
     template<typename Predicate>
-    auto abortreads(Predicate&& predicate, handle handle)
+    auto abortreads(Predicate&& predicate, handle handle, bool isPublicHandle)
         -> std::enable_if_t<std::is_invocable_r_v<bool, Predicate, const DirectRead&>>
     {
         // Sanity: handle should never be undefined.
         assert(handle != UNDEF);
+
+        // Add handle type as needed.
+        encodeHandleType(&handle, isPublicHandle);
 
         // Try and find the direct read node associated with our handle.
         auto i = hdrns.find(handle);

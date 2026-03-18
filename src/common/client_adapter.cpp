@@ -1856,6 +1856,49 @@ void ClientPartialDownload::begin()
 
 bool ClientPartialDownload::cancel()
 {
+    // Bundles state necessary to cancel this download via the client.
+    class Canceller
+    {
+        // The client responsible for this download.
+        MegaClient& mClient;
+
+        // Reference to the download we're cancelling.
+        ClientPartialDownload& mDownload;
+
+        // Handle of the download we're cancelling.
+        NodeHandle mHandle;
+
+        // Whether we were downloading a public node.
+        bool mIsPublicHandle;
+
+    public:
+        Canceller(ClientPartialDownload& download):
+            mClient(download.mClient.client()),
+            mDownload(download),
+            mHandle(download.mHandle),
+            mIsPublicHandle(download.mKeyData.mIsPublicHandle)
+        {}
+
+        // Called directly by cancel().
+        void operator()()
+        {
+            // Ask the client to cancel our download.
+            mClient.abortreads(
+                [this](auto& read)
+                {
+                    return read.match(&mDownload);
+                },
+                mHandle.as8byte(),
+                mIsPublicHandle);
+        }
+
+        // Called by the client's thread pool.
+        void operator()(const Task&)
+        {
+            operator()();
+        }
+    }; // CancelFunctor
+
     // Check and update the download's status.
     {
         std::lock_guard guard(mLock);
@@ -1868,30 +1911,18 @@ bool ClientPartialDownload::cancel()
         mStatus = (mStatus ^ SF_CANCELLABLE) | SF_CANCELLED | SF_COMPLETED;
     }
 
-    // Called on the client's thread to cancel this download.
-    auto doCancel = [&client = mClient.client(), handle = mHandle, this]()
-    {
-        client.abortreads(
-            [this](auto& read)
-            {
-                return read.match(this);
-            },
-            handle.as8byte());
-    }; // doCancel
+    // Responsible for cancelling this download via the client.
+    Canceller canceller(*this);
 
     // Let the user know their download has been cancelled.
     mCallback.completed(API_EINCOMPLETE);
 
     // We're executing on the client's thread.
     if (mClient.isClientThread())
-        return doCancel(), true;
+        return canceller(), true;
 
     // We're not executing on the client's thread.
-    mClient.execute(
-        [doCancel = std::move(doCancel)](auto&)
-        {
-            doCancel();
-        });
+    mClient.execute(std::move(canceller));
 
     // Let the caller know the download has been cancelled.
     return true;

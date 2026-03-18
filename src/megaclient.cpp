@@ -17619,14 +17619,12 @@ void MegaClient::preadabort(handle handle, m_off_t offset, m_off_t count)
 
 void MegaClient::abortreads(handle handle, bool isPublicHandle, m_off_t offset, m_off_t count)
 {
-    encodeHandleType(&handle, isPublicHandle);
-
     auto predicate = [=](const DirectRead& read)
     {
         return (count < 0 || count == read.count) && (offset < 0 || offset == read.offset);
     }; // predicate
 
-    abortreads(std::move(predicate), handle);
+    abortreads(std::move(predicate), handle, isPublicHandle);
 }
 
 void MegaClient::abortreads()
