@@ -68,20 +68,21 @@ TEST(FileRangeMapTests, add)
 
 TEST(FileRangeMapTests, add_with_iterators)
 {
-    static const std::pair<FileRange, int> ranges[] = {{FileRange(0, 1), 2},
-                                                       {FileRange(3, 4), 5},
-                                                       {FileRange(6, 7), 8}}; // ranges
+    static const std::pair<FileRange, int> elements[] = {{FileRange(0, 1), 2},
+                                                         {FileRange(3, 4), 5},
+                                                         {FileRange(6, 7), 8}}; // elements
 
-    FileRangeMap<int> map(std::begin(ranges), std::end(ranges));
+    FileRangeMap<int> map(std::begin(elements), std::end(elements));
 
-    for (auto& range: ranges)
+    for (auto& element: elements)
     {
-        auto i = map.beginsAt(range.first.mBegin);
-        auto j = map.endsAt(range.first.mEnd);
+        auto i = map.beginsAt(element.first.mBegin);
+        auto j = map.endsAt(element.first.mEnd);
 
         ASSERT_NE(i, map.end());
         ASSERT_EQ(i, j);
-        ASSERT_EQ(*i, range);
+        ASSERT_EQ(i->first, element.first);
+        ASSERT_EQ(i->second, element.second);
     }
 }
 
