@@ -487,26 +487,6 @@ void FileContext::completed(FileWriteRequest&& request)
     completed(std::move(request), FileWriteResult{begin, end - begin});
 }
 
-template<typename RequestTag>
-void FileContext::dequeued([[maybe_unused]] std::unique_lock<std::mutex> lock, RequestTag)
-{
-    assert(lock.mutex() == &mRequestsLock);
-    assert(lock.owns_lock());
-}
-
-void FileContext::dequeued(std::unique_lock<std::mutex> lock, const FileRequest& request)
-{
-    assert(lock.mutex() == &mRequestsLock);
-    assert(lock.owns_lock());
-
-    std::visit(
-        [&lock, this](auto&& request)
-        {
-            this->dequeued(std::move(lock), tag(request));
-        },
-        request);
-}
-
 template<typename Dispatcher>
 void FileContext::dispatch(Dispatcher&& dispatcher, const FileRange& range)
 {
@@ -1247,8 +1227,8 @@ void FileContext::execute()
 
         mRequests.pop_front();
 
-        // Perform post dequeue actions.
-        dequeued(std::unique_lock(std::move(lock)), request);
+        // Release lock.
+        lock.unlock();
 
         // Execute the request.
         execute(request);
@@ -1361,16 +1341,6 @@ auto FileContext::queue(std::unique_lock<std::mutex> lock, Request&& request)
         mRequests.emplace_front(Tag(), std::forward<Request>(request));
     else
         mRequests.emplace_back(Tag(), std::forward<Request>(request));
-
-    // Perform post-queue actions.
-    queued(std::move(lock), tag(request));
-}
-
-template<typename RequestTag>
-void FileContext::queued([[maybe_unused]] std::unique_lock<std::mutex> lock, RequestTag)
-{
-    assert(lock.mutex() == &mRequestsLock);
-    assert(lock.owns_lock());
 }
 
 template<typename Request>

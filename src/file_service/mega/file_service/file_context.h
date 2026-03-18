@@ -103,13 +103,6 @@ class FileContext final: public std::enable_shared_from_this<FileContext>
     // Called when a file write request has been completed.
     void completed(FileWriteRequest&& request);
 
-    // Called when a request of a particular class is dequeued.
-    template<typename RequestTag>
-    void dequeued(std::unique_lock<std::mutex> lock, RequestTag tag);
-
-    // Called when a request has been dequeued.
-    void dequeued(std::unique_lock<std::mutex> lock, const FileRequest& request);
-
     // Dispatch all read requests within range.
     template<typename Dispatcher>
     void dispatch(Dispatcher&& dispatcher, const FileRange& range);
@@ -173,10 +166,6 @@ class FileContext final: public std::enable_shared_from_this<FileContext>
     template<typename Request>
     auto queue(std::unique_lock<std::mutex> lock, Request&& request)
         -> std::enable_if_t<IsFileRequestV<Request>>;
-
-    // Called when a request of a particular class has been queued.
-    template<typename RequestTag>
-    void queued(std::unique_lock<std::mutex> lock, RequestTag tag);
 
     // Return an error if this request should be rejected.
     template<typename Request>
