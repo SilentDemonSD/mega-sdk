@@ -29,6 +29,7 @@
 #include "megaapi_impl.h"
 
 #include "mega/canceller.h"
+#include "mega/common/node_key_data.h"
 #include "mega/file_service/file.h"
 #include "mega/file_service/file_callbacks.h"
 #include "mega/file_service/file_id.h"
@@ -36396,14 +36397,83 @@ int MegaHTTPServer::onMessageComplete(http_parser *parser)
 }
 
 bool MegaHTTPServer::startStream(MegaHTTPContext* httpctx,
-                                 NodeHandle h,
                                  std::uint64_t offset,
                                  std::uint64_t length)
 {
-    auto file = httpctx->megaApi->getMegaClient()->mFileService.open(FileID::from(h));
+    // Sanity: node should never be null.
+    assert(httpctx->node);
+
+    // Convenience.
+    using file_service::FILE_SERVICE_FILE_DOESNT_EXIST;
+
+    auto& node = static_cast<MegaNodePrivate&>(*httpctx->node);
+    auto& service = httpctx->megaApi->getMegaClient()->mFileService;
+
+    // True if this file isn't owned directly by us.
+    auto external = node.isForeign() || node.isPublic();
+
+    // Assume the file's already known to the service.
+    auto handle = NodeHandle().set6byte(node.getHandle());
+    auto id = FileID::from(handle);
+
+    // Try and open the file for reading.
+    auto file = service.open(id);
+
+    // Couldn't open the file because it hasn't been added to the service.
+    if (external && !file && file.error() == FILE_SERVICE_FILE_DOESNT_EXIST)
+    {
+        // Convenience.
+        using common::NodeKeyData;
+        using file_service::FILE_SERVICE_FILE_ALREADY_EXISTS;
+
+        // Populate node key data.
+        NodeKeyData keyData;
+
+        // Populate authentication tokens.
+        if (auto* chatAuth = node.getChatAuth(); chatAuth)
+            keyData.mChatAuth = chatAuth;
+
+        if (auto* privateAuth = node.getPrivateAuth(); !privateAuth->empty())
+            keyData.mPrivateAuth = *privateAuth;
+
+        if (auto* publicAuth = node.getPublicAuth(); !publicAuth->empty())
+            keyData.mPublicAuth = *publicAuth;
+
+        // Populate node key material.
+        if (auto* keyAndIV = node.getNodeKey(); !keyAndIV->empty())
+            keyData.mKeyAndIV = *keyAndIV;
+
+        // Remember whether the node is public or not.
+        keyData.mIsPublicHandle = node.isPublic();
+
+        // Sanity: size should never be negative.
+        assert(node.getSize() >= 0);
+
+        // Convenience.
+        auto size = static_cast<std::uint64_t>(node.getSize());
+
+        // Try and add the node to the service.
+        auto added = service.add(handle, keyData, size);
+
+        // Couldn't add the node to the service.
+        if (!added && added.error() != FILE_SERVICE_FILE_ALREADY_EXISTS)
+        {
+            LOG_err << "Failed to add file " << toNodeHandle(handle)
+                    << " to the service: " << toString(added.error());
+
+            return false;
+        }
+
+        // Try and open the file for reading.
+        file = service.open(*added);
+    }
+
+    // Couldn't open the file for reading.
     if (!file)
     {
-        LOG_err << "Failed to open file " << toNodeHandle(h) << " for streaming, " << file.error();
+        LOG_err << "Failed to open file " << toNodeHandle(handle)
+                << " for streaming: " << toString(file.error());
+
         return false;
     }
 
@@ -36588,10 +36658,7 @@ int MegaHTTPServer::streamNode(MegaHTTPContext *httpctx)
     if (start || len)
     {
         httpctx->streamingBuffer.reset(!httpctx->lastBufferLen, resstr.size());
-        if (!startStream(httpctx,
-                         NodeHandle().set6byte(node->getHandle()),
-                         static_cast<uint64_t>(start),
-                         static_cast<uint64_t>(len)))
+        if (!startStream(httpctx, static_cast<uint64_t>(start), static_cast<uint64_t>(len)))
         {
             LOG_err << httpctx->getLogName() << "Finishing due to an error of startStream";
             closeConnection(httpctx);

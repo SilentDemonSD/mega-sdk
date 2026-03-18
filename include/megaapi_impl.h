@@ -5964,10 +5964,7 @@ protected:
 
     static void sendHeaders(MegaHTTPContext *httpctx, string *headers);
     static void sendNextBytes(MegaHTTPContext *httpctx);
-    static bool startStream(MegaHTTPContext* httpctx,
-                            NodeHandle h,
-                            std::uint64_t offset,
-                            std::uint64_t length);
+    static bool startStream(MegaHTTPContext* httpctx, std::uint64_t offset, std::uint64_t length);
     static int streamNode(MegaHTTPContext *httpctx);
 
     //Utility funcitons
