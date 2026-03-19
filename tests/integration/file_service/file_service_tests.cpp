@@ -2519,9 +2519,6 @@ TEST_F(FileServiceTests, read_small_during_large_succeeds)
     auto file = mClient->fileOpen(*handle);
     ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
 
-    // Make sure our downloads don't complete too quickly.
-    mClient->setDownloadSpeed(16384);
-
     // Tweak service options.
     mClient->fileService().serviceOptions(
         [&]()
@@ -2543,6 +2540,12 @@ TEST_F(FileServiceTests, read_small_during_large_succeeds)
 
     // Kick off a large read of the entire file.
     auto waiter2 = read(*file, 0, 16_MiB);
+
+    // Make sure our ranges are being downloaded independently.
+    ASSERT_THAT(file->downloading(),
+                UnorderedElementsAreArray({FileRange(16_MiB - 12_KiB, 16_MiB - 8_KiB),
+                                           FileRange(16_MiB - 4_KiB, 16_MiB),
+                                           FileRange(0, 16_MiB)}));
 
     // Wait for our small reads to complete.
     ASSERT_NE(waiter0.wait_for(mDefaultTimeout), timeout);
@@ -2566,9 +2569,6 @@ TEST_F(FileServiceTests, read_small_during_large_succeeds)
                                              {16_MiB - 4_KiB, 16_MiB}}; // expected
 
     ASSERT_TRUE(contains(expected, computed));
-
-    // Let the client download as quickly as it can.
-    mClient->setDownloadSpeed(0);
 
     // Wait for our large read to complete.
     ASSERT_NE(waiter2.wait_for(mDefaultTimeout), timeout);
