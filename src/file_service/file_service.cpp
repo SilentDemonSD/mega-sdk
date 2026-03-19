@@ -26,8 +26,9 @@ FileService::FileService():
 
 FileService::~FileService() = default;
 
-auto FileService::add(NodeHandle handle, const NodeKeyData& keyData, std::size_t size)
-    -> FileServiceResultOr<FileID>
+auto FileService::add(NodeHandle handle,
+                      const NodeKeyData& keyData,
+                      std::uint64_t size) -> FileServiceResultOr<FileID>
 {
     SharedLock guard(mContextLock);
 

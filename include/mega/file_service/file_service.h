@@ -17,6 +17,7 @@
 #include <mega/file_service/file_service_result_or_forward.h>
 #include <mega/types.h>
 
+#include <cstdint>
 #include <string>
 
 namespace mega
@@ -41,8 +42,9 @@ public:
     ~FileService();
 
     // Add a foreign file to the service.
-    auto add(NodeHandle handle, const common::NodeKeyData& keyData, std::size_t size)
-        -> FileServiceResultOr<FileID>;
+    auto add(NodeHandle handle,
+             const common::NodeKeyData& keyData,
+             std::uint64_t size) -> FileServiceResultOr<FileID>;
 
     // Notify observer when a file changes.
     auto addObserver(FileEventObserver observer) -> FileServiceResultOr<FileEventObserverID>;

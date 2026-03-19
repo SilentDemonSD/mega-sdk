@@ -1009,8 +1009,9 @@ FileServiceContext::~FileServiceContext()
     mClient.removeEventObserver(*this);
 }
 
-auto FileServiceContext::add(NodeHandle handle, const NodeKeyData& keyData, std::size_t size)
-    -> FileServiceResultOr<FileID>
+auto FileServiceContext::add(NodeHandle handle,
+                             const NodeKeyData& keyData,
+                             std::uint64_t size) -> FileServiceResultOr<FileID>
 try
 {
     // Caller's given us a bogus key.
