@@ -12359,4 +12359,46 @@ public class MegaApiJava {
     public long getS4Container() {
         return megaApi.getS4Container();
     }
+
+    /**
+     * @brief Get the options for reclaiming storage used by MEGA's file services.
+     *
+     * The returned options are a snapshot of the current state of the file service reclaim
+     * options. Modifying the returned object won't have any effect on the actual options used
+     * by the file services.
+     *
+     * The caller takes ownership of the returned value and should use delete to release the
+     * memory when it's no longer needed.
+     */
+    public MegaFileServiceReclaimOptions fileServiceGetReclaimOptions() {
+        return megaApi.fileServiceGetReclaimOptions();
+    }
+
+    /**
+     * @brief Set the options for reclaiming storage used by MEGA's file services.
+     *
+     * The provided options will be applied to the file services, and they will affect how the
+     * file services reclaim storage.
+     *
+     * @param options Options to set for reclaiming storage used by MEGA's file services.
+     */
+    public void fileServiceSetReclaimOptions(MegaFileServiceReclaimOptions options) {
+        megaApi.fileServiceSetReclaimOptions(options);
+    }
+
+    /**
+     * @brief Trigger the file services to reclaim storage according to the current options.
+     *
+     * The associated request type with this request is MegaRequest::TYPE_FILE_SERVICE_RECLAIM.
+     *
+     * Valid data in the MegaRequest object received in onRequestFinish when the error code
+     * is MegaError::API_OK:
+     * - MegaRequest::getTotalBytes - Returns the number of bytes that were reclaimed.
+     *
+     * If the request fails, the MegaError code in onRequestFinish can be:
+     * - MegaError::API_EINTERNAL - If the reclaim process failed to run.
+     */
+    public void fileServiceReclaim(MegaRequestListenerInterface listener) {
+        megaApi.fileServiceReclaim(createDelegateRequestListener(listener, false));
+    }
 }

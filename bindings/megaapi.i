@@ -544,6 +544,7 @@ extern "C" jint JNIEXPORT JNICALL JNI_OnLoad(JavaVM *jvm, void *reserved)
 %newobject mega::MegaApi::getFirstTransfer;
 %newobject mega::MegaApi::getTransferByUniqueId;
 %newobject mega::MegaApi::getAllNodeTags;
+%newobject mega::MegaApi::fileServiceGetReclaimOptions;
 
 %newobject mega::MegaRequest::getPublicMegaNode;
 %newobject mega::MegaRequest::getMegaTimeZoneDetails;
