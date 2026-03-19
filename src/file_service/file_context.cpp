@@ -1657,6 +1657,25 @@ void FileContext::append(FileAppendRequest request)
     executeOrQueue(std::move(request));
 }
 
+FileRangeVector FileContext::downloading() const
+{
+    FileRangeVector downloading;
+
+    // So we have exclusive access to the range trees.
+    std::lock_guard guard(mLock);
+
+    // What large ranges are being downloaded?
+    for (const auto& [range, _]: mDownloading.mLarge)
+        downloading.emplace_back(range);
+
+    // What small ranges are being downloaded?
+    for (const auto& [range, _]: mDownloading.mSmall)
+        downloading.emplace_back(range);
+
+    // Let our caller know which ranges are being downloaded.
+    return downloading;
+}
+
 AutoFileHandle FileContext::dupFileDescriptor()
 {
     assert(mFile);

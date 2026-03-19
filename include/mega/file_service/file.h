@@ -48,6 +48,9 @@ public:
     // Append data to the end of this file.
     void append(const void* buffer, FileAppendCallback callback, std::uint64_t length);
 
+    // What ranges are currently being downloaded?
+    FileRangeVector downloading() const;
+
     // Duplicate OS file descriptor of storage file, returns an unset AutoFileHandle on errors
     AutoFileHandle dupFileDescriptor();
 

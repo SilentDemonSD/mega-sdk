@@ -299,6 +299,9 @@ public:
     // Duplicate OS file descriptor of storage file, return an unset AutoFileHandle on errors
     AutoFileHandle dupFileDescriptor();
 
+    // What ranges are currently being downloaded?
+    FileRangeVector downloading() const;
+
     // Fetch all of this file's data from the cloud.
     void fetch(FileFetchRequest request);
 
