@@ -68,6 +68,14 @@ std::optional<std::string> fromCharPointer(const char* maybeString)
     return std::nullopt;
 }
 
+std::optional<std::string> fromStringPointer(const std::string* maybeString)
+{
+    if (maybeString && !maybeString->empty())
+        return *maybeString;
+
+    return std::nullopt;
+}
+
 std::int64_t now()
 {
     // Convenience.
@@ -84,6 +92,14 @@ const char* toCharPointer(const std::optional<std::string>& maybeString)
 {
     if (maybeString)
         return maybeString->data();
+
+    return nullptr;
+}
+
+const std::string* toStringPointer(const std::optional<std::string>& maybeString)
+{
+    if (maybeString)
+        return &*maybeString;
 
     return nullptr;
 }
