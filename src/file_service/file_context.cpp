@@ -978,15 +978,15 @@ void FileContext::execute(FileReadRequest& request)
 // When this request is executed, any pending downloads will have completed.
 void FileContext::execute(FileReclaimRequest& request)
 {
-    // Cancel any pending downloads.
-    cancel(FileRange(0, mInfo->size()));
-
     // Make sure no one is messing with our range maps.
     std::lock_guard guard(mLock);
 
-    // Sanity: All downloads should be complete.
-    assert(mDownloading.mLarge.empty());
-    assert(mDownloading.mSmall.empty());
+    // All downloads should be completed.
+    if (!mDownloading.mLarge.empty() || !mDownloading.mSmall.empty())
+        return completed(std::move(request), FILE_FAILED);
+
+    // Sanity: no pending read.
+    assert(mPendingReadRequests.empty());
 
     // Convenience.
     auto& database = mService.database();
