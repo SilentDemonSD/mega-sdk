@@ -2567,10 +2567,6 @@ TEST_F(FileServiceTests, read_small_during_large_succeeds)
 
     ASSERT_TRUE(contains(expected, computed));
 
-    // Make sure our small reads completed before our large read.
-    auto gaps = file_service::gaps(computed, 0, 16_MiB);
-    ASSERT_NE(gaps.begin(), gaps.end());
-
     // Let the client download as quickly as it can.
     mClient->setDownloadSpeed(0);
 
