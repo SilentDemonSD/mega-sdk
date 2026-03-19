@@ -107,6 +107,9 @@ class FileContext final: public std::enable_shared_from_this<FileContext>
     template<typename Dispatcher>
     void dispatch(Dispatcher&& dispatcher, const FileRange& range);
 
+    // Large download bitrate
+    std::uint64_t downloadBitrate() const;
+
     // Check if a request can be executed.
     bool executable(std::unique_lock<std::mutex>& lock, bool queuing, const FileRequest& request);
 
@@ -295,9 +298,6 @@ public:
 
     // Duplicate OS file descriptor of storage file, return an unset AutoFileHandle on errors
     AutoFileHandle dupFileDescriptor();
-
-    // Large download bitrate
-    std::uint64_t downloadBitrate() const;
 
     // Fetch all of this file's data from the cloud.
     void fetch(FileFetchRequest request);

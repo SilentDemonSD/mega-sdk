@@ -505,6 +505,12 @@ void FileContext::dispatch(Dispatcher&& dispatcher, const FileRange& range)
     }
 }
 
+std::uint64_t FileContext::downloadBitrate() const
+{
+    // Bitrate should always be larger than zero.get_speed
+    return std::max<uint64_t>(1, mAverageLargeDownloadBitrate.getValue());
+}
+
 bool FileContext::executable(std::unique_lock<std::mutex>& lock,
                              bool queuing,
                              const FileRequest& request)
@@ -1656,12 +1662,6 @@ AutoFileHandle FileContext::dupFileDescriptor()
     assert(mFile);
 
     return mFile->dupFileDescriptor();
-}
-
-std::uint64_t FileContext::downloadBitrate() const
-{
-    // Bitrate should always be larger than zero.get_speed
-    return std::max<uint64_t>(1, mAverageLargeDownloadBitrate.getValue());
 }
 
 void FileContext::fetch(FileFetchRequest request)
