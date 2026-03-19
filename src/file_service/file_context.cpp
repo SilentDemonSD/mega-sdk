@@ -983,7 +983,7 @@ void FileContext::execute(FileReclaimRequest& request)
 
     // All downloads should be completed.
     if (!mDownloading.mLarge.empty() || !mDownloading.mSmall.empty())
-        return completed(std::move(request), FILE_FAILED);
+        return completed(std::move(request), UINT64_C(0));
 
     // Sanity: no pending read.
     assert(mPendingReadRequests.empty());
