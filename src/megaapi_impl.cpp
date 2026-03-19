@@ -30,6 +30,7 @@
 
 #include "mega/canceller.h"
 #include "mega/common/node_key_data.h"
+#include "mega/common/utility.h"
 #include "mega/file_service/file.h"
 #include "mega/file_service/file_callbacks.h"
 #include "mega/file_service/file_id.h"
@@ -36423,6 +36424,8 @@ bool MegaHTTPServer::startStream(MegaHTTPContext* httpctx,
     if (external && !file && file.error() == FILE_SERVICE_FILE_DOESNT_EXIST)
     {
         // Convenience.
+        using common::fromCharPointer;
+        using common::fromStringPointer;
         using common::NodeKeyData;
         using file_service::FILE_SERVICE_FILE_ALREADY_EXISTS;
 
@@ -36430,14 +36433,9 @@ bool MegaHTTPServer::startStream(MegaHTTPContext* httpctx,
         NodeKeyData keyData;
 
         // Populate authentication tokens.
-        if (auto* chatAuth = node.getChatAuth(); chatAuth)
-            keyData.mChatAuth = chatAuth;
-
-        if (auto* privateAuth = node.getPrivateAuth(); !privateAuth->empty())
-            keyData.mPrivateAuth = *privateAuth;
-
-        if (auto* publicAuth = node.getPublicAuth(); !publicAuth->empty())
-            keyData.mPublicAuth = *publicAuth;
+        keyData.mChatAuth = fromCharPointer(node.getChatAuth());
+        keyData.mPrivateAuth = fromStringPointer(node.getPrivateAuth());
+        keyData.mPublicAuth = fromStringPointer(node.getPublicAuth());
 
         // Populate node key material.
         if (auto* keyAndIV = node.getNodeKey(); !keyAndIV->empty())
