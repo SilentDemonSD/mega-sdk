@@ -1371,24 +1371,6 @@ catch (std::runtime_error& exception)
     return unexpected(FILE_SERVICE_UNEXPECTED);
 }
 
-void FileServiceContext::serviceOptions(const ServiceOptions& serviceOptions)
-{
-    // Make sure no one else is modifying our options.
-    UniqueLock writeLock(mOptionsLock);
-
-    // Update our options.
-    mServiceOptions = serviceOptions;
-}
-
-ServiceOptions FileServiceContext::serviceOptions()
-{
-    // Make sure no one else is modifying our options.
-    SharedLock guard(mOptionsLock);
-
-    // Return current options to our caller.
-    return mServiceOptions;
-}
-
 LocalPath FileServiceContext::path(FileID id) const
 {
     return mStorage.userFilePath(id);
@@ -1616,6 +1598,24 @@ catch (std::runtime_error& exception)
     FSWarningF("Unable to purge %s from storage: %s",
                toString(context.id()).c_str(),
                exception.what());
+}
+
+void FileServiceContext::serviceOptions(const ServiceOptions& serviceOptions)
+{
+    // Make sure no one else is modifying our options.
+    UniqueLock writeLock(mOptionsLock);
+
+    // Update our options.
+    mServiceOptions = serviceOptions;
+}
+
+ServiceOptions FileServiceContext::serviceOptions()
+{
+    // Make sure no one else is modifying our options.
+    SharedLock guard(mOptionsLock);
+
+    // Return current options to our caller.
+    return mServiceOptions;
 }
 
 auto FileServiceContext::storageUsed() -> FileServiceResultOr<std::uint64_t>

@@ -216,12 +216,6 @@ public:
     auto open(NodeHandle parent, const std::string& name) -> FileServiceResultOr<File>;
     auto open(FileID id) -> FileServiceResultOr<File>;
 
-    // Update the service's options.
-    void serviceOptions(const ServiceOptions& serviceOptions);
-
-    // Retrieve the service's current options.
-    ServiceOptions serviceOptions();
-
     // Find out where the service is storing the specified file.
     LocalPath path(FileID id) const;
 
@@ -251,6 +245,12 @@ public:
 
     // Remove a file info context from our index.
     void removeFromIndex(FileInfoContextBadge badge, FileInfoContext& context);
+
+    // Update the service's options.
+    void serviceOptions(const ServiceOptions& serviceOptions);
+
+    // Retrieve the service's current options.
+    ServiceOptions serviceOptions();
 
     // How much storage space is the service using?
     auto storageUsed() -> FileServiceResultOr<std::uint64_t>;
