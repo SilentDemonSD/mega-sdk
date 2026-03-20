@@ -713,6 +713,7 @@ try
 
     // Convenience.
     const auto sizeThreshold = mReclaimOptions.mSizeThreshold;
+    const auto sizeTarget = mReclaimOptions.mSizeTarget;
 
     // No quota? No need to reclaim anything.
     if (!sizeThreshold)
@@ -747,7 +748,7 @@ try
     FileIDVector ids;
 
     // Collect as many IDs for reclamation as necessary.
-    for (query.execute(); query && used > sizeThreshold.value(); ++query)
+    for (query.execute(); query && used > sizeTarget; ++query)
     {
         // Latch the file's ID and allocated size.
         auto id = query.field("id").get<FileID>();

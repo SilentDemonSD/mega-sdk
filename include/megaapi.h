@@ -28117,6 +28117,26 @@ public:
      */
     virtual void setReclaimSizeThreshold(int64_t bytes) = 0;
 
+    /**
+     * @brief
+     * Get the reclaim target size.
+     *
+     * @return
+     * The target size in bytes that the used space should be reduced to when a reclaim operation is
+     * triggered.
+     */
+    virtual uint64_t getReclaimSizeTarget() const = 0;
+
+    /**
+     * @brief
+     * Set the reclaim target size.
+     *
+     * @param bytes
+     * The target size in bytes that the used space should be reduced to when a reclaim operation is
+     * triggered.
+     */
+    virtual void setReclaimSizeTarget(uint64_t bytes) = 0;
+
 }; // MegaFileServiceReclaimOptions
 }
 

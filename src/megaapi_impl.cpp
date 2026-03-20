@@ -42354,6 +42354,16 @@ void MegaFileServiceReclaimOptionsPrivate::setReclaimPeriod(uint64_t seconds)
     mReclaim.mPeriod = std::chrono::seconds(seconds);
 }
 
+uint64_t MegaFileServiceReclaimOptionsPrivate::getReclaimSizeTarget() const
+{
+    return mReclaim.mSizeTarget;
+}
+
+void MegaFileServiceReclaimOptionsPrivate::setReclaimSizeTarget(uint64_t bytes)
+{
+    mReclaim.mSizeThreshold = bytes;
+}
+
 int64_t MegaFileServiceReclaimOptionsPrivate::getReclaimSizeThreshold() const
 {
     const auto& sizeThreshold = mReclaim.mSizeThreshold;
