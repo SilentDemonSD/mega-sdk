@@ -4459,18 +4459,11 @@ bool contains(const FileRangeVector& expected, const FileRangeSet& ranges)
         return false;
 
     // Check that each range in [current, end) is fully contained by ranges.
-    for (; current != end; ++current)
-    {
-        // Check if our current range is fully contained by ranges.
-        auto gaps = file_service::gaps(ranges, *current);
+    while (current != end && gaps(ranges, *current).empty())
+        ++current;
 
-        // Current range isn't fully contained by ranges.
-        if (gaps.begin() != gaps.end())
-            return false;
-    }
-
-    // Each range in [current, end) is fully contained by ranges.
-    return true;
+    // Let our caller know if ranges fully contains each range in expected.
+    return current == end;
 }
 
 template<typename Function, typename... Parameters>

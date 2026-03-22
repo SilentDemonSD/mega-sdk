@@ -171,6 +171,11 @@ public:
         return *this;
     }
 
+    bool empty() const
+    {
+        return begin() == end();
+    }
+
     FileRangeGapIterator end() const
     {
         return FileRangeGapIterator();
