@@ -1931,6 +1931,10 @@ try
             // But act as if we did.
             mRange.mEnd = range.mEnd;
 
+            // We have no more gaps to fill so cancel the download.
+            if (gaps(onDisk, mRange.mEnd, mIterator->first.mEnd).empty())
+                return Abort();
+
             // Continue the download.
             return Continue();
         }
@@ -1965,6 +1969,10 @@ try
 
     // Couldn't write all of the data to disk.
     if (current != end)
+        return Abort();
+
+    // We have no more gaps to fill so cancel the download.
+    if (gaps(onDisk, mRange.mEnd, mIterator->first.mEnd).empty())
         return Abort();
 
     // Continue the download.
