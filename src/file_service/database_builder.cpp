@@ -13,18 +13,21 @@ static void downgrade10(Query& query);
 static void downgrade21(Query& query);
 static void downgrade32(Query& query);
 static void downgrade43(Query& query);
+static void downgrade54(Query& query);
 
 static void upgrade01(Query& query);
 static void upgrade12(Query& query);
 static void upgrade23(Query& query);
 static void upgrade34(Query& query);
+static void upgrade45(Query& query);
 
 const DatabaseVersionVector& DatabaseBuilder::versions() const
 {
     static const DatabaseVersionVector versions = {{&downgrade10, &upgrade01},
                                                    {&downgrade21, &upgrade12},
                                                    {&downgrade32, &upgrade23},
-                                                   {&downgrade43, &upgrade34}}; // versions
+                                                   {&downgrade43, &upgrade34},
+                                                   {&downgrade54, &upgrade45}}; // versions
 
     return versions;
 }
@@ -99,6 +102,13 @@ void downgrade43(Query& query)
     query.execute();
 
     query = "alter table file_key_data_new rename to file_key_data";
+
+    query.execute();
+}
+
+void downgrade54(Query& query)
+{
+    query = "drop index if exists idx_files_storage_sizes";
 
     query.execute();
 }
@@ -282,6 +292,15 @@ void upgrade34(Query& query)
     query.execute();
 
     query = "alter table file_key_data_new rename to file_key_data";
+
+    query.execute();
+}
+
+void upgrade45(Query& query)
+{
+    // Index for mGetStorageSize query
+    query = " create index if not exists idx_files_storage_sizes "
+            " on files (removed, accessed, allocated_size, reported_size, size)";
 
     query.execute();
 }
