@@ -76,9 +76,6 @@ class FileContext::DownloadContext: private PartialDownloadCallback
     // Keeps our manager alive until we're dead.
     Activity mActivity;
 
-    // When did we begin this download?
-    std::optional<steady_clock::time_point> mBegan;
-
     // Callbacks to execute when this range's fetch completes.
     std::vector<FileFetchCallback> mCallbacks;
 
@@ -1475,18 +1472,6 @@ auto FileContext::shrink(std::uint64_t newSize, std::uint64_t oldSize)
     return std::make_pair(std::move(databaseLock), std::move(transaction));
 }
 
-milliseconds FileContext::timeToFirstByte() const
-{
-    // Compute average time to first byte.
-    auto ttfb = std::ceil(mAverageTimeToFirstByte.get().value_or(0));
-
-    // Time to first byte should never be negative.
-    ttfb = std::max(0.0, ttfb);
-
-    // Return computed time to first byte.
-    return milliseconds(static_cast<milliseconds::rep>(ttfb));
-}
-
 void FileContext::updateAccessAndModificationTimes(std::int64_t accessed,
                                                    std::int64_t modified,
                                                    Transaction& transaction)
@@ -1595,7 +1580,6 @@ FileContext::FileContext(Activity activity,
     mInstanceLogger("FileContext", *this, logger()),
     mActivity(std::move(activity)),
     mAverageLargeDownloadBitrate(256),
-    mAverageTimeToFirstByte(),
     mBuffer(std::make_shared<SparseFileBuffer>(*file, *info)),
     mDownloading(),
     mInfo(std::move(info)),
@@ -1627,15 +1611,6 @@ FileContext::FileContext(Activity activity,
 
     // Prime average bitrate based on of the two bitrates above.
     mAverageLargeDownloadBitrate.update(std::max(fileBitrate, serviceBitrate));
-
-    // Convenience.
-    auto timeToFirstByte = serviceOptions().mEstimatedTimeToFirstByte.count();
-
-    // Sanity: Estimated time to first byte should always be greater than zero.
-    assert(timeToFirstByte >= 0);
-
-    // Prime averager with the service's default time to first byte.
-    mAverageTimeToFirstByte(static_cast<std::uint64_t>(timeToFirstByte));
 }
 
 FileContext::~FileContext()
@@ -1862,22 +1837,6 @@ try
     // Reset retry counter.
     mRetries = 0;
 
-    // Need to compute average time to first byte.
-    if (mBegan)
-    {
-        // What's the current time?
-        auto now = steady_clock::now();
-
-        // How long did it take for our first byte to arrive?
-        auto elapsed = duration_cast<milliseconds>(now - *mBegan).count();
-
-        // Feed elapsed time into our file's TTFB averager.
-        mContext.mAverageTimeToFirstByte(static_cast<std::uint64_t>(elapsed));
-
-        // Clear mBegan so we don't do this more than once per download.
-        mBegan.reset();
-    }
-
     // Update our file's average large download bitrate.
     const auto fileBitrate = mContext.mInfo->bitrate().value_or(0);
     if (isLargeDownload())
@@ -2018,7 +1977,6 @@ FileContext::DownloadContext::DownloadContext(Activity activity,
     PartialDownloadCallback(),
     mInstanceLogger("FileContext::DownloadContext", *this, logger()),
     mActivity(std::move(activity)),
-    mBegan(),
     mCallbacks(),
     mContext(context),
     mDownload(),
@@ -2070,9 +2028,6 @@ auto FileContext::DownloadContext::download() -> PartialDownloadPtr
     // Couldn't create the download.
     if (!download)
         return completed(download.error()), nullptr;
-
-    // For simplicity, consider now to be the time the download began.
-    mBegan = steady_clock::now();
 
     // Grab download.
     mDownload = std::move(*download);

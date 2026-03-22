@@ -184,9 +184,6 @@ class FileContext final: public std::enable_shared_from_this<FileContext>
     auto shrink(std::uint64_t newSize, std::uint64_t oldSize)
         -> std::pair<common::UniqueLock<common::Database>, common::Transaction>;
 
-    // Return the average time until a download receives its first byte.
-    std::chrono::milliseconds timeToFirstByte() const;
-
     // Update this file's access and modification time in the database.
     void updateAccessAndModificationTimes(std::int64_t accessed,
                                           std::int64_t modified,
@@ -206,9 +203,6 @@ class FileContext final: public std::enable_shared_from_this<FileContext>
 
     // What's the average bitrate of our large downloads?
     common::EmaInteger mAverageLargeDownloadBitrate;
-
-    // Average time to first byte over all our downloads.
-    common::Averager<std::uint64_t, 5> mAverageTimeToFirstByte;
 
     // Wraps mFile and unifies logic.
     FileBufferPtr mBuffer;
