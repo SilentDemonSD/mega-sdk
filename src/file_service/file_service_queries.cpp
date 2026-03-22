@@ -24,6 +24,7 @@ FileServiceQueries::FileServiceQueries(Database& database):
     mGetFreeFileID(database.query()),
     mGetNextFileID(database.query()),
     mGetReclaimableFiles(database.query()),
+    mGetStorageSize(database.query()),
     mGetStorageUsed(database.query()),
     mRemoveFile(database.query()),
     mRemoveFileID(database.query()),
@@ -118,6 +119,34 @@ FileServiceQueries::FileServiceQueries(Database& database):
                            "   and accessed <= :accessed "
                            "   and removed = 0 "
                            " order by accessed desc";
+
+    // ifnull(...) is necessary as there may be no files to sum.
+    mGetStorageSize =
+        " WITH TargetStats AS ("
+        "    SELECT SUM(allocated_size) AS total_allocated_now"
+        "         , SUM(reported_size) AS total_reported_now"
+        "         , SUM(size) AS total_size_now"
+        "      from files"
+        "     where removed = 0"
+        " ),"
+        " reclaimablerows as ("
+        "    select f.allocated_size"
+        "         , sum(f.allocated_size) over (order by f.accessed asc) as running_reclaimed"
+        "         , ts.total_allocated_now"
+        "         , ts.total_reported_now"
+        "         , ts.total_size_now"
+        "      from files f"
+        "     cross join targetstats ts"
+        "     where f.removed = 0 "
+        "       and f.allocated_size <> 0 "
+        "       and f.accessed <= :accessed"
+        " )"
+        " select ifnull(sum(allocated_size), 0) as size_to_reclaim"
+        "     , ifnull(max(total_allocated_now), 0) as total_allocated_size"
+        "     , ifnull(max(total_reported_now), 0) as total_reported_size"
+        "     , ifnull(max(total_size_now), 0) as total_size"
+        "   from reclaimablerows"
+        " where (total_allocated_now - running_reclaimed) >= :target_remaining_size";
 
     // ifnull(...) is necessary as there may be no files to sum.
     mGetStorageUsed = "select ifnull(sum(allocated_size), 0) as total_allocated_size "

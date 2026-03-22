@@ -27,6 +27,7 @@ struct FileServiceQueries
     common::Query mGetFreeFileID;
     common::Query mGetNextFileID;
     common::Query mGetReclaimableFiles;
+    common::Query mGetStorageSize;
     common::Query mGetStorageUsed;
     common::Query mRemoveFile;
     common::Query mRemoveFileID;
