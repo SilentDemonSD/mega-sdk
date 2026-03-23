@@ -118,7 +118,7 @@ FileServiceQueries::FileServiceQueries(Database& database):
                            " where allocated_size <> 0 "
                            "   and accessed <= :accessed "
                            "   and removed = 0 "
-                           " order by accessed desc";
+                           " order by accessed asc";
 
     // ifnull(...) is necessary as there may be no files to sum.
     mGetStorageSize =
