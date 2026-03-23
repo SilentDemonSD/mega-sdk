@@ -4895,6 +4895,8 @@ public:
 
         void fileServiceReclaim(MegaRequestListener* listener);
 
+        MegaFileServiceStorageSize* fileServiceGetStorageSize();
+
     private:
         void init(MegaApi* publicApi,
                   std::unique_ptr<GfxProc> gfxproc,
@@ -6882,6 +6884,19 @@ public:
 
     file_service::ReclaimOptions getOptions() const;
 }; // MegaFileServiceReclaimOptionsPrivate
+
+class MegaFileServiceStorageSizePrivate: public MegaFileServiceStorageSize
+{
+private:
+    file_service::StorageSize mStorageSize;
+
+public:
+    MegaFileServiceStorageSizePrivate(const file_service::StorageSize& storageSize);
+
+    uint64_t getReclaimableSize() const override;
+
+    uint64_t getAllocatedSize() const override;
+}; // MegaFileServiceStorageSizePrivate
 
 std::unique_ptr<FileSystemAccess> createFSA();
 }

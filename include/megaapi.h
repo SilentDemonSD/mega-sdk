@@ -131,6 +131,7 @@ class MegaCompleteUploadData;
 class MegaNotificationList;
 class MegaCancelSubscriptionReasonList;
 class MegaFileServiceReclaimOptions;
+class MegaFileServiceStorageSize;
 
 #if defined(SWIG)
     #define MEGA_DEPRECATED
@@ -24928,6 +24929,16 @@ class MegaApi
          */
         void fileServiceReclaim(MegaRequestListener* listener);
 
+        /**
+         * @brief Get the file service storage size information.
+         * The returned information is a snapshot of the current state of the file service storage
+         * size.
+         *
+         * The caller takes ownership of the returned value and should use delete to release the
+         * memory when it's no longer needed.
+         */
+        MegaFileServiceStorageSize* fileServiceGetStorageSize();
+
     protected:
         MegaApiImpl *pImpl = nullptr;
         friend class MegaApiImpl;
@@ -28138,6 +28149,34 @@ public:
     virtual void setReclaimSizeTarget(uint64_t bytes) = 0;
 
 }; // MegaFileServiceReclaimOptions
+
+class MegaFileServiceStorageSize
+{
+protected:
+    MegaFileServiceStorageSize();
+
+public:
+    virtual ~MegaFileServiceStorageSize();
+
+    /**
+     * @brief
+     * Get the size that can be reclaimed by the file service. The reclaimable space is up to
+     * reclaim option settings
+     *
+     * @return
+     * The size in bytes that can be reclaimed by the file service.
+     */
+    virtual uint64_t getReclaimableSize() const = 0;
+
+    /**
+     * @brief
+     * Get the size that is currently allocated by the file service.
+     *
+     * @return
+     * The size in bytes that is currently allocated by the file service.
+     */
+    virtual uint64_t getAllocatedSize() const = 0;
+}; // MegaFileServiceStorageSize
 }
 
 #endif //MEGAAPI_H
