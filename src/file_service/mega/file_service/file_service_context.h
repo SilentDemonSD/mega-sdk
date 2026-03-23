@@ -23,6 +23,7 @@
 #include <mega/file_service/file_service_options.h>
 #include <mega/file_service/file_service_queries.h>
 #include <mega/file_service/file_service_result_or_forward.h>
+#include <mega/file_service/file_service_storage_size.h>
 #include <mega/file_service/file_storage.h>
 #include <mega/file_service/from_file_id_map.h>
 
@@ -106,6 +107,9 @@ class FileServiceContext: common::NodeEventObserver
     bool removeFromIndex(FileID id, FromFileIDMap<T>& map);
 
     void purgeRemovedFiles();
+
+    template<typename Lock, typename Transaction>
+    auto storageSize(Lock&& lock, Transaction&& transaction) -> StorageSize;
 
     template<typename Lock, typename Transaction>
     auto storageUsed(Lock&& lock, Transaction&& transaction) -> std::uint64_t;
@@ -253,6 +257,11 @@ public:
     ServiceOptions serviceOptions();
 
     // How much storage space is the service using?
+    // Get storage size information in detail such as reclaimable storage size
+    auto storageSize() -> FileServiceResultOr<StorageSize>;
+
+    // How much storage space is the service using? Better performance than storageSize but with
+    // less information
     auto storageUsed() -> FileServiceResultOr<std::uint64_t>;
 }; // FileServiceContext
 

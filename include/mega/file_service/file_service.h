@@ -15,6 +15,7 @@
 #include <mega/file_service/file_service_options_forward.h>
 #include <mega/file_service/file_service_result_forward.h>
 #include <mega/file_service/file_service_result_or_forward.h>
+#include <mega/file_service/file_service_storage_size.h>
 #include <mega/types.h>
 
 #include <cstdint>
@@ -96,7 +97,11 @@ public:
     // Remove a previously added file observer.
     auto removeObserver(FileEventObserverID id) -> FileServiceResult;
 
-    // How much storage is the service using?
+    // Get storage size information in detail such as reclaimable storage size
+    auto storageSize() -> FileServiceResultOr<StorageSize>;
+
+    // How much storage space is the service using? Better performance than storageSize but with
+    // less information
     auto storageUsed() -> FileServiceResultOr<std::uint64_t>;
 }; // FileService
 

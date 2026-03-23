@@ -220,6 +220,16 @@ auto FileService::removeObserver(FileEventObserverID id) -> FileServiceResult
     return FILE_SERVICE_SUCCESS;
 }
 
+auto FileService::storageSize() -> FileServiceResultOr<StorageSize>
+{
+    SharedLock guard(mContextLock);
+
+    if (!mContext)
+        return unexpected(FILE_SERVICE_UNINITIALIZED);
+
+    return mContext->storageSize();
+}
+
 auto FileService::storageUsed() -> FileServiceResultOr<std::uint64_t>
 {
     SharedLock guard(mContextLock);
