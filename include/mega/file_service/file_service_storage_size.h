@@ -10,22 +10,22 @@ namespace file_service
 struct StorageSize
 {
     // How many bytes reclaimable
-    std::uint64_t mSizeToReclaim = 0;
+    std::uint64_t mReclaimableSize = 0;
 
     // How many bytes the storage allocates physically
-    std::uint64_t mTotalAllocatedSize = 0;
+    std::uint64_t mAllocatedSize = 0;
 
-    // How many bytes the storage reports, usually not less than mTotalAllocatedSize
-    std::uint64_t mTotalReportedSize = 0;
+    // How many bytes the storage reports, usually not less than mAllocatedSize
+    std::uint64_t mReportedSize = 0;
 
     // How many bytes the cloud reports
     std::uint64_t mTotalSize = 0;
 
     bool operator==(const StorageSize& other) const
     {
-        return mSizeToReclaim == other.mSizeToReclaim &&
-               mTotalAllocatedSize == other.mTotalAllocatedSize &&
-               mTotalReportedSize == other.mTotalReportedSize && mTotalSize == other.mTotalSize;
+        return mReclaimableSize == other.mReclaimableSize &&
+               mAllocatedSize == other.mAllocatedSize && mReportedSize == other.mReportedSize &&
+               mTotalSize == other.mTotalSize;
     }
 };
 

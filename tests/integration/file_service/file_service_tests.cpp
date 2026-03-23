@@ -2934,7 +2934,7 @@ TEST_F(FileServiceTests, reclaim_all_succeeds)
     ASSERT_EQ(sizeBefore.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
 
     // Make sure we're using only as much as we read.
-    ASSERT_EQ(totalAllocated, sizeBefore->mTotalAllocatedSize);
+    ASSERT_EQ(totalAllocated, sizeBefore->mAllocatedSize);
 
     // Try and reclaim some storage.
     //
@@ -2946,7 +2946,7 @@ TEST_F(FileServiceTests, reclaim_all_succeeds)
     // Make sure no storage was reclaimed.
     auto sizeAfter = mClient->fileService().storageSize();
     ASSERT_EQ(sizeAfter.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
-    ASSERT_EQ(sizeAfter->mTotalAllocatedSize, sizeBefore->mTotalAllocatedSize);
+    ASSERT_EQ(sizeAfter->mAllocatedSize, sizeBefore->mAllocatedSize);
 
     ReclaimOptions reclaimOptions{};
     // Let the service know it should store no more than 512K and triggered above 544K.
@@ -2961,9 +2961,9 @@ TEST_F(FileServiceTests, reclaim_all_succeeds)
     // Nothing can be reclaimed as we accessed recently
     sizeBefore = mClient->fileService().storageSize();
     ASSERT_EQ(sizeBefore.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
-    ASSERT_EQ(0, sizeBefore->mSizeToReclaim);
-    ASSERT_EQ(totalAllocated, sizeBefore->mTotalAllocatedSize);
-    ASSERT_EQ(totalReported, sizeBefore->mTotalReportedSize);
+    ASSERT_EQ(0, sizeBefore->mReclaimableSize);
+    ASSERT_EQ(totalAllocated, sizeBefore->mAllocatedSize);
+    ASSERT_EQ(totalReported, sizeBefore->mReportedSize);
     ASSERT_EQ(totalSize, sizeBefore->mTotalSize);
 
     // Try and reclaim storage.
@@ -2977,7 +2977,7 @@ TEST_F(FileServiceTests, reclaim_all_succeeds)
     sizeAfter = mClient->fileService().storageSize();
 
     ASSERT_EQ(sizeAfter.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
-    ASSERT_EQ(sizeBefore->mTotalAllocatedSize, sizeAfter->mTotalAllocatedSize);
+    ASSERT_EQ(sizeBefore->mAllocatedSize, sizeAfter->mAllocatedSize);
 
     // Let the service know it can reclaim files regardless of access time.
     reclaimOptions.mAgeThreshold = std::chrono::hours(0);
@@ -2990,22 +2990,22 @@ TEST_F(FileServiceTests, reclaim_all_succeeds)
     // One file cannot be reclaimed
     sizeBefore = mClient->fileService().storageSize();
     ASSERT_EQ(sizeBefore.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
-    ASSERT_EQ(512_KiB * 3, sizeBefore->mSizeToReclaim);
-    ASSERT_EQ(totalAllocated, sizeBefore->mTotalAllocatedSize);
-    ASSERT_EQ(totalReported, sizeBefore->mTotalReportedSize);
+    ASSERT_EQ(512_KiB * 3, sizeBefore->mReclaimableSize);
+    ASSERT_EQ(totalAllocated, sizeBefore->mAllocatedSize);
+    ASSERT_EQ(totalReported, sizeBefore->mReportedSize);
     ASSERT_EQ(totalSize, sizeBefore->mTotalSize);
 
     // Try and reclaim storage.
     reclaimed = execute(reclaimAll, mClient);
     ASSERT_EQ(reclaimed.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
-    ASSERT_EQ(*reclaimed, sizeBefore->mSizeToReclaim);
+    ASSERT_EQ(*reclaimed, sizeBefore->mReclaimableSize);
 
     // Make sure storage was reclaimed.
     sizeAfter = mClient->fileService().storageSize();
     ASSERT_EQ(sizeAfter.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
-    ASSERT_EQ(0, sizeAfter->mSizeToReclaim);
-    ASSERT_EQ(totalAllocated - sizeBefore->mSizeToReclaim, sizeAfter->mTotalAllocatedSize);
-    ASSERT_GE(sizeAfter->mTotalReportedSize, sizeAfter->mTotalAllocatedSize);
+    ASSERT_EQ(0, sizeAfter->mReclaimableSize);
+    ASSERT_EQ(totalAllocated - sizeBefore->mReclaimableSize, sizeAfter->mAllocatedSize);
+    ASSERT_GE(sizeAfter->mReportedSize, sizeAfter->mAllocatedSize);
     ASSERT_EQ(totalSize, sizeAfter->mTotalSize);
 
     // For later comparison.

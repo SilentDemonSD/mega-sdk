@@ -934,11 +934,9 @@ auto FileServiceContext::storageSize([[maybe_unused]] Lock&& lock,
 
     // Populate values
     StorageSize storageSize;
-    storageSize.mSizeToReclaim = query.field("size_to_reclaim").template get<std::uint64_t>();
-    storageSize.mTotalAllocatedSize =
-        query.field("total_allocated_size").template get<std::uint64_t>();
-    storageSize.mTotalReportedSize =
-        query.field("total_reported_size").template get<std::uint64_t>();
+    storageSize.mReclaimableSize = query.field("size_to_reclaim").template get<std::uint64_t>();
+    storageSize.mAllocatedSize = query.field("total_allocated_size").template get<std::uint64_t>();
+    storageSize.mReportedSize = query.field("total_reported_size").template get<std::uint64_t>();
     storageSize.mTotalSize = query.field("total_size").template get<std::uint64_t>();
 
     return storageSize;
