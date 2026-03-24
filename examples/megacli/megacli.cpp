@@ -5319,11 +5319,11 @@ static void exec_fileserviceStorage(autocomplete::ACState&)
 
     if (const auto result = client->mFileService.storageSize(); !result)
     {
-        conlock(std::cout) << "Get storage size failed: " << result.error() << std::endl;
+        conlock(std::cerr) << "Get storage size failed: " << result.error() << std::endl;
     }
     else
     {
-        conlock(std::cerr) << "Storage Size:\n"
+        conlock(std::cout) << "Storage Size:\n"
                            << "  reclaimable: " << result->mReclaimableSize << " bytes." << "\n"
                            << "  allocated  : " << result->mAllocatedSize << " bytes." << "\n"
                            << "  reported   : " << result->mReportedSize << " bytes." << "\n"
