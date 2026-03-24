@@ -14,5 +14,6 @@ target_sources(test_integration PRIVATE
                                 file_service/database_builder_tests.cpp
                                 file_service/file_service_benchmarks.cpp
                                 file_service/file_service_tests.cpp
+                                file_service/file_services_queries_tests.cpp
                                 file_service/real_client.cpp
 )
