@@ -2061,6 +2061,9 @@ void FileContext::DownloadContext::range(const FileRange& range)
     if (mIterator->first == range)
         return;
 
+    // Sanity: Ranges should never be extended.
+    assert(range.length() < mIterator->first.length());
+
     // Keep ourselves alive.
     auto context = std::move(mIterator->second);
 
