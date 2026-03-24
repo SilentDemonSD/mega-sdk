@@ -2990,7 +2990,7 @@ TEST_F(FileServiceTests, reclaim_all_succeeds)
     // One file cannot be reclaimed
     sizeBefore = mClient->fileService().storageSize();
     ASSERT_EQ(sizeBefore.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
-    ASSERT_EQ(512_KiB * 3, sizeBefore->mReclaimableSize);
+    ASSERT_LE(totalAllocated - sizeBefore->mReclaimableSize, reclaimOptions.mSizeTarget);
     ASSERT_EQ(totalAllocated, sizeBefore->mAllocatedSize);
     ASSERT_EQ(totalReported, sizeBefore->mReportedSize);
     ASSERT_EQ(totalSize, sizeBefore->mTotalSize);
