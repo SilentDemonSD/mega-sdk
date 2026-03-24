@@ -5313,6 +5313,24 @@ static void exec_fileserviceReclaim(autocomplete::ACState&)
     }
 }
 
+static void exec_fileserviceStorage(autocomplete::ACState&)
+{
+    using file_service::FileServiceResultOr;
+
+    if (const auto result = client->mFileService.storageSize(); !result)
+    {
+        conlock(std::cout) << "Get storage size failed: " << result.error() << std::endl;
+    }
+    else
+    {
+        conlock(std::cerr) << "Storage Size:\n"
+                           << "  reclaimable: " << result->mReclaimableSize << " bytes." << "\n"
+                           << "  allocated  : " << result->mAllocatedSize << " bytes." << "\n"
+                           << "  reported   : " << result->mReportedSize << " bytes." << "\n"
+                           << "  total(cloud)   : " << result->mTotalSize << " bytes." << std::endl;
+    }
+}
+
 autocomplete::ACN autocompleteSyntax()
 {
     using namespace autocomplete;
@@ -5967,6 +5985,7 @@ autocomplete::ACN autocompleteSyntax()
                     opt(sequence(flag("-period"), wholenumber("seconds", 2 * 60 * 60))),
                     opt(sequence(flag("-size-threshold"), wholenumber("seconds", 0)))));
     p->Add(exec_fileserviceReclaim, sequence(text("file-service"), text("reclaim")));
+    p->Add(exec_fileserviceStorage, sequence(text("file-service"), text("storage")));
 
     return autocompleteTemplate = std::move(p);
 }
