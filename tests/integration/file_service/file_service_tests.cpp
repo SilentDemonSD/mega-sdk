@@ -3005,7 +3005,7 @@ TEST_F(FileServiceTests, reclaim_all_succeeds)
     ASSERT_EQ(sizeAfter.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
     ASSERT_EQ(0, sizeAfter->mReclaimableSize);
     ASSERT_EQ(totalAllocated - sizeBefore->mReclaimableSize, sizeAfter->mAllocatedSize);
-    ASSERT_GE(sizeAfter->mReportedSize, sizeAfter->mAllocatedSize);
+    ASSERT_GE(sizeAfter->mAllocatedSize, sizeAfter->mReportedSize);
     ASSERT_EQ(totalSize, sizeAfter->mTotalSize);
 
     // For later comparison.
