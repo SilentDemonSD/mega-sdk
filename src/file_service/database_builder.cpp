@@ -300,7 +300,7 @@ void upgrade45(Query& query)
 {
     // Index for mGetStorageSize query
     query = " create index if not exists idx_files_storage_sizes "
-            " on files (removed, accessed, allocated_size, reported_size, size)";
+            " on files (removed, accessed, id, allocated_size, reported_size, size)";
 
     query.execute();
 }

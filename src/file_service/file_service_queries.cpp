@@ -121,36 +121,36 @@ FileServiceQueries::FileServiceQueries(Database& database):
                            " order by accessed asc";
 
     // ifnull(...) is necessary as there may be no files to sum.
-    mGetStorageSize =
-        "with TargetStats as ( "
-        "    select sum(allocated_size) as total_allocated_now "
-        "         , sum(reported_size) as total_reported_now "
-        "         , sum(size) as total_size_now "
-        "      from files "
-        "), "
-        "ReclaimableRows as ( "
-        "    select f.allocated_size "
-        "         , sum(f.allocated_size) over (order by f.accessed asc) as running_reclaimed "
-        "         , ts.total_allocated_now "
-        "      from files f "
-        "      cross join TargetStats ts "
-        "     where f.removed = 0 "
-        "       and f.allocated_size <> 0 "
-        "       and f.accessed <= :accessed "
-        ") "
-        "select "
-        "    ifnull(( "
-        "        select sum(allocated_size) "
-        "        from ReclaimableRows "
-        // Include this file if, before subtracting it, was still above the target. Reclaim enough
-        // space to no more than the target size
-        "        where (total_allocated_now - running_reclaimed + allocated_size) > "
-        ":target_remaining_size "
-        "    ), 0) as size_to_reclaim, "
-        "    ifnull(total_allocated_now, 0) as total_allocated_size, "
-        "    ifnull(total_reported_now, 0) as total_reported_size, "
-        "    ifnull(total_size_now, 0) as total_size "
-        "from TargetStats ";
+    mGetStorageSize = "with TargetStats as ( "
+                      "    select sum(allocated_size) as total_allocated_now "
+                      "         , sum(reported_size) as total_reported_now "
+                      "         , sum(size) as total_size_now "
+                      "      from files "
+                      "), "
+                      "ReclaimableRows as ( "
+                      "    select f.allocated_size "
+                      "         , sum(f.allocated_size) over (order by f.accessed asc, f.id asc) "
+                      "as running_reclaimed "
+                      "         , ts.total_allocated_now "
+                      "      from files f "
+                      "      cross join TargetStats ts "
+                      "     where f.removed = 0 "
+                      "       and f.allocated_size <> 0 "
+                      "       and f.accessed <= :accessed "
+                      ") "
+                      "select "
+                      "    ifnull(( "
+                      "        select sum(allocated_size) "
+                      "        from ReclaimableRows "
+                      // Include this file if, before subtracting it, was still above the target.
+                      // Reclaim enough space to no more than the target size
+                      "        where (total_allocated_now - running_reclaimed + allocated_size) > "
+                      ":target_remaining_size "
+                      "    ), 0) as size_to_reclaim, "
+                      "    ifnull(total_allocated_now, 0) as total_allocated_size, "
+                      "    ifnull(total_reported_now, 0) as total_reported_size, "
+                      "    ifnull(total_size_now, 0) as total_size "
+                      "from TargetStats ";
 
     // ifnull(...) is necessary as there may be no files to sum.
     mGetStorageUsed = "select ifnull(sum(allocated_size), 0) as total_allocated_size "
