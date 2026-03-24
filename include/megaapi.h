@@ -28102,7 +28102,7 @@ public:
 
     /**
      * @brief
-     * Returns the configured reclaim trigger threshold.
+     * Returns the configured reclaim trigger threshold in bytes.
      *
      * @return
      * The threshold in bytes that, when the used space exceeds it (and other
@@ -28112,11 +28112,11 @@ public:
      * - 0  : No minimum threshold (reclaim may run immediately).
      * - -1 : Automatic reclamation is disabled.
      */
-    virtual int64_t getReclaimSizeThreshold() const = 0;
+    virtual int64_t getReclaimThreshold() const = 0;
 
     /**
      * @brief
-     * Sets the reclaim trigger threshold.
+     * Sets the reclaim trigger threshold in bytes.
      *
      * @param bytes
      * The threshold in bytes that, when exceeded by the used space (and other
@@ -28126,7 +28126,7 @@ public:
      * - 0  : No minimum threshold (reclaim may run immediately).
      * - -1 : Automatic reclamation is disabled.
      */
-    virtual void setReclaimSizeThreshold(int64_t bytes) = 0;
+    virtual void setReclaimThreshold(int64_t bytes) = 0;
 
     /**
      * @brief

@@ -27,7 +27,7 @@ struct ReclaimOptions
     std::chrono::seconds mPeriod = std::chrono::hours(2);
 
     // How many bytes can the service store before it needs to reclaim space?
-    std::optional<std::uint64_t> mSizeThreshold{};
+    std::optional<std::uint64_t> mReclaimThreshold{};
 
     // How many bytes should the service target when reclaiming space starts?
     std::uint64_t mSizeTarget = 0u;

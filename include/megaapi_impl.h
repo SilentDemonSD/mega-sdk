@@ -6878,9 +6878,9 @@ public:
 
     void setReclaimSizeTarget(uint64_t bytes) override;
 
-    int64_t getReclaimSizeThreshold() const override;
+    int64_t getReclaimThreshold() const override;
 
-    void setReclaimSizeThreshold(int64_t bytes) override;
+    void setReclaimThreshold(int64_t bytes) override;
 
     file_service::ReclaimOptions getOptions() const;
 }; // MegaFileServiceReclaimOptionsPrivate

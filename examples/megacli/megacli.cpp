@@ -5230,7 +5230,7 @@ static void exec_fileserviceReclaimOptions(autocomplete::ACState& state)
         auto batchSize = state.extractflagparam("-batch-size");
         auto delay = state.extractflagparam("-delay");
         auto period = state.extractflagparam("-period");
-        auto sizeThreshold = state.extractflagparam("-size-threshold");
+        auto reclaimThreshold = state.extractflagparam("-reclaim-threshold");
 
         if (ageThreshold)
             options.mAgeThreshold = minutes(stoul(*ageThreshold));
@@ -5244,10 +5244,15 @@ static void exec_fileserviceReclaimOptions(autocomplete::ACState& state)
         if (period)
             options.mPeriod = seconds(stoul(*period));
 
-        if (sizeThreshold)
-            options.mSizeThreshold = stoul(*sizeThreshold);
+        if (reclaimThreshold)
+        {
+            if (auto v = stol(*reclaimThreshold); v >= 0)
+                options.mReclaimThreshold = v;
+            else
+                options.mReclaimThreshold = std::nullopt;
+        }
 
-        return ageThreshold || batchSize || delay || period || sizeThreshold;
+        return ageThreshold || batchSize || delay || period || reclaimThreshold;
     };
 
     // Try and retrieve current reclaim options.
@@ -5272,14 +5277,14 @@ static void exec_fileserviceReclaimOptions(autocomplete::ACState& state)
     }
 
     // Print reclaim options.
-    const auto& threshold = options->mSizeThreshold;
+    const auto& threshold = options->mReclaimThreshold;
 
     conlock(std::cout) << "Reclaim options:\n"
                        << "Age Threshold: " << options->mAgeThreshold.count() << "m\n"
                        << "Batch Size: " << options->mBatchSize << "\n"
                        << "Delay: " << options->mDelay.count() << "s\n"
                        << "Period: " << options->mPeriod.count() << "s\n"
-                       << "Size Threshold (BYTES): "
+                       << "Reclaim Threshold (BYTES): "
                        << (threshold ? std::to_string(*threshold).c_str() : "Disabled")
                        << std::endl;
 }
@@ -5983,7 +5988,7 @@ autocomplete::ACN autocompleteSyntax()
                     opt(sequence(flag("-batch-size"), wholenumber("count", 4))),
                     opt(sequence(flag("-delay"), wholenumber("seconds", 30 * 60))),
                     opt(sequence(flag("-period"), wholenumber("seconds", 2 * 60 * 60))),
-                    opt(sequence(flag("-size-threshold"), wholenumber("seconds", 0)))));
+                    opt(sequence(flag("-reclaim-threshold"), wholenumber("bytes", 0)))));
     p->Add(exec_fileserviceReclaim, sequence(text("file-service"), text("reclaim")));
     p->Add(exec_fileserviceStorage, sequence(text("file-service"), text("storage")));
 

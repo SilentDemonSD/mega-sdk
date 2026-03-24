@@ -42370,24 +42370,24 @@ uint64_t MegaFileServiceReclaimOptionsPrivate::getReclaimSizeTarget() const
 
 void MegaFileServiceReclaimOptionsPrivate::setReclaimSizeTarget(uint64_t bytes)
 {
-    mReclaim.mSizeThreshold = bytes;
+    mReclaim.mSizeTarget = bytes;
 }
 
-int64_t MegaFileServiceReclaimOptionsPrivate::getReclaimSizeThreshold() const
+int64_t MegaFileServiceReclaimOptionsPrivate::getReclaimThreshold() const
 {
-    const auto& sizeThreshold = mReclaim.mSizeThreshold;
-    if (sizeThreshold)
-        return static_cast<int64_t>(*sizeThreshold);
+    const auto& reclaimThreshold = mReclaim.mReclaimThreshold;
+    if (reclaimThreshold)
+        return static_cast<int64_t>(*reclaimThreshold);
     else
         return -1;
 }
 
-void MegaFileServiceReclaimOptionsPrivate::setReclaimSizeThreshold(int64_t bytes)
+void MegaFileServiceReclaimOptionsPrivate::setReclaimThreshold(int64_t bytes)
 {
     if (bytes >= 0)
-        mReclaim.mSizeThreshold = static_cast<uint64_t>(bytes);
+        mReclaim.mReclaimThreshold = static_cast<uint64_t>(bytes);
     else
-        mReclaim.mSizeThreshold = std::nullopt;
+        mReclaim.mReclaimThreshold = std::nullopt;
 }
 
 file_service::ReclaimOptions MegaFileServiceReclaimOptionsPrivate::getOptions() const

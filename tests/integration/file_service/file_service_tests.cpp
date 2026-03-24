@@ -367,7 +367,7 @@ static const ReclaimOptions DisableReclaim = {
     DefaultReclaimOptions.mBatchSize,
     DefaultReclaimOptions.mDelay,
     DefaultReclaimOptions.mPeriod,
-    std::nullopt, // mSizeThreshold
+    std::nullopt, // mReclaimThreshold
     DefaultReclaimOptions.mSizeTarget,
 };
 
@@ -2950,7 +2950,7 @@ TEST_F(FileServiceTests, reclaim_all_succeeds)
 
     ReclaimOptions reclaimOptions{};
     // Let the service know it should store no more than 512K and triggered above 544K.
-    reclaimOptions.mSizeThreshold = 544_KiB;
+    reclaimOptions.mReclaimThreshold = 544_KiB;
     reclaimOptions.mSizeTarget = 512_KiB;
 
     // Reclaim files that haven't been accessed for three hours.
@@ -3196,7 +3196,7 @@ TEST_F(FileServiceTests, reclaim_periodic_succeeds)
     // Enable storage reclamation.
     reclaimOptions.mAgeThreshold = hours(0);
     reclaimOptions.mPeriod = seconds(15);
-    reclaimOptions.mSizeThreshold = 512_KiB;
+    reclaimOptions.mReclaimThreshold = 512_KiB;
     reclaimOptions.mSizeTarget = 512_KiB;
 
     mClient->fileService().reclaimOptions(reclaimOptions);

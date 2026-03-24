@@ -712,11 +712,11 @@ try
     auto reclaimOptions = this->reclaimOptions();
 
     // Convenience.
-    const auto sizeThreshold = mReclaimOptions.mSizeThreshold;
+    const auto reclaimThreshold = mReclaimOptions.mReclaimThreshold;
     const auto sizeTarget = mReclaimOptions.mSizeTarget;
 
     // No quota? No need to reclaim anything.
-    if (!sizeThreshold)
+    if (!reclaimThreshold)
         return FileIDVector();
 
     // So we have exclusive access to the database.
@@ -729,7 +729,7 @@ try
     auto used = storageUsed(lock, transaction);
 
     // No need to reclaim any storage.
-    if (sizeThreshold.value() >= used)
+    if (reclaimThreshold.value() >= used)
         return FileIDVector();
 
     // Get the allocated size and ID of all files in storage.
@@ -995,7 +995,7 @@ FileServiceContext::FileServiceContext(Client& client,
     purgeRemovedFiles();
 
     // User hasn't specified any storage quota.
-    if (!mReclaimOptions.mSizeThreshold)
+    if (!mReclaimOptions.mReclaimThreshold)
         return;
 
     // Assume user's specified an initial reclamation delay.
@@ -2145,7 +2145,7 @@ std::optional<std::uint32_t> extractDuration(const std::string& attributes,
 
 bool reclamationEnabled(const ReclaimOptions& options)
 {
-    return options.mBatchSize && options.mPeriod.count() && options.mSizeThreshold;
+    return options.mBatchSize && options.mPeriod.count() && options.mReclaimThreshold;
 }
 
 } // file_service
