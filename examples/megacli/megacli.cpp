@@ -5231,6 +5231,7 @@ static void exec_fileserviceReclaimOptions(autocomplete::ACState& state)
         auto delay = state.extractflagparam("-delay");
         auto period = state.extractflagparam("-period");
         auto reclaimThreshold = state.extractflagparam("-reclaim-threshold");
+        auto reclaimTarget = state.extractflagparam("-reclaim-target");
 
         if (ageThreshold)
             options.mAgeThreshold = minutes(stoul(*ageThreshold));
@@ -5252,7 +5253,10 @@ static void exec_fileserviceReclaimOptions(autocomplete::ACState& state)
                 options.mReclaimThreshold = std::nullopt;
         }
 
-        return ageThreshold || batchSize || delay || period || reclaimThreshold;
+        if (reclaimTarget)
+            options.mReclaimTarget = stoul(*reclaimTarget);
+
+        return ageThreshold || batchSize || delay || period || reclaimThreshold || reclaimTarget;
     };
 
     // Try and retrieve current reclaim options.
@@ -5285,8 +5289,8 @@ static void exec_fileserviceReclaimOptions(autocomplete::ACState& state)
                        << "Delay: " << options->mDelay.count() << "s\n"
                        << "Period: " << options->mPeriod.count() << "s\n"
                        << "Reclaim Threshold (BYTES): "
-                       << (threshold ? std::to_string(*threshold).c_str() : "Disabled")
-                       << std::endl;
+                       << (threshold ? std::to_string(*threshold).c_str() : "Disabled\n")
+                       << "Reclaim Target (BYTES): " << options->mReclaimTarget << std::endl;
 }
 
 static void exec_fileserviceReclaim(autocomplete::ACState&)
@@ -5988,7 +5992,8 @@ autocomplete::ACN autocompleteSyntax()
                     opt(sequence(flag("-batch-size"), wholenumber("count", 4))),
                     opt(sequence(flag("-delay"), wholenumber("seconds", 30 * 60))),
                     opt(sequence(flag("-period"), wholenumber("seconds", 2 * 60 * 60))),
-                    opt(sequence(flag("-reclaim-threshold"), wholenumber("bytes", 0)))));
+                    opt(sequence(flag("-reclaim-threshold"), wholenumber("bytes", 0))),
+                    opt(sequence(flag("-reclaim-target"), wholenumber("bytes", 0)))));
     p->Add(exec_fileserviceReclaim, sequence(text("file-service"), text("reclaim")));
     p->Add(exec_fileserviceStorage, sequence(text("file-service"), text("storage")));
 

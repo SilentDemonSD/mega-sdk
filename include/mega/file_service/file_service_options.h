@@ -30,7 +30,7 @@ struct ReclaimOptions
     std::optional<std::uint64_t> mReclaimThreshold{};
 
     // How many bytes should the service target when reclaiming space starts?
-    std::uint64_t mSizeTarget = 0u;
+    std::uint64_t mReclaimTarget = 0u;
 };
 
 struct ServiceOptions

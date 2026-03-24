@@ -713,7 +713,7 @@ try
 
     // Convenience.
     const auto reclaimThreshold = mReclaimOptions.mReclaimThreshold;
-    const auto sizeTarget = mReclaimOptions.mSizeTarget;
+    const auto reclaimTarget = mReclaimOptions.mReclaimTarget;
 
     // No quota? No need to reclaim anything.
     if (!reclaimThreshold)
@@ -749,7 +749,7 @@ try
 
     // Collect as many IDs for reclamation as necessary until we are no longer above our target
     // storage usage. Condition should be aligned with the one in mGetStorageSize.
-    for (query.execute(); query && used > sizeTarget; ++query)
+    for (query.execute(); query && used > reclaimTarget; ++query)
     {
         // Latch the file's ID and allocated size.
         auto id = query.field("id").get<FileID>();
@@ -911,7 +911,7 @@ auto FileServiceContext::storageSize([[maybe_unused]] Lock&& lock,
 
     // Convenience.
     const auto ageThreshold = reclaimOptions.mAgeThreshold;
-    const auto sizeTarget = reclaimOptions.mSizeTarget;
+    const auto reclaimTarget = reclaimOptions.mReclaimTarget;
 
     // Compute the storage used by all files in storage.
     auto query = transaction.query(mQueries.mGetStorageSize);
@@ -920,7 +920,7 @@ auto FileServiceContext::storageSize([[maybe_unused]] Lock&& lock,
     auto accessed = system_clock::to_time_t(system_clock::now() - ageThreshold);
     query.param(":accessed").set(accessed);
 
-    query.param(":target_remaining_size").set(sizeTarget);
+    query.param(":target_remaining_size").set(reclaimTarget);
 
     query.execute();
 

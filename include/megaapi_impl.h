@@ -6874,9 +6874,9 @@ public:
 
     void setReclaimPeriod(uint64_t seconds) override;
 
-    uint64_t getReclaimSizeTarget() const override;
+    uint64_t getReclaimTarget() const override;
 
-    void setReclaimSizeTarget(uint64_t bytes) override;
+    void setReclaimTarget(uint64_t bytes) override;
 
     int64_t getReclaimThreshold() const override;
 

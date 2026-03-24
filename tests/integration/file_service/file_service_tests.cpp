@@ -368,7 +368,7 @@ static const ReclaimOptions DisableReclaim = {
     DefaultReclaimOptions.mDelay,
     DefaultReclaimOptions.mPeriod,
     std::nullopt, // mReclaimThreshold
-    DefaultReclaimOptions.mSizeTarget,
+    DefaultReclaimOptions.mReclaimTarget,
 };
 
 static constexpr auto MaxTestRunTime = std::chrono::minutes(15);
@@ -2951,7 +2951,7 @@ TEST_F(FileServiceTests, reclaim_all_succeeds)
     ReclaimOptions reclaimOptions{};
     // Let the service know it should store no more than 512K and triggered above 544K.
     reclaimOptions.mReclaimThreshold = 544_KiB;
-    reclaimOptions.mSizeTarget = 512_KiB;
+    reclaimOptions.mReclaimTarget = 512_KiB;
 
     // Reclaim files that haven't been accessed for three hours.
     reclaimOptions.mAgeThreshold = std::chrono::hours(3);
@@ -2990,7 +2990,7 @@ TEST_F(FileServiceTests, reclaim_all_succeeds)
     // One file cannot be reclaimed
     sizeBefore = mClient->fileService().storageSize();
     ASSERT_EQ(sizeBefore.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
-    ASSERT_LE(totalAllocated - sizeBefore->mReclaimableSize, reclaimOptions.mSizeTarget);
+    ASSERT_LE(totalAllocated - sizeBefore->mReclaimableSize, reclaimOptions.mReclaimTarget);
     ASSERT_EQ(totalAllocated, sizeBefore->mAllocatedSize);
     ASSERT_EQ(totalReported, sizeBefore->mReportedSize);
     ASSERT_EQ(totalSize, sizeBefore->mTotalSize);
@@ -3197,7 +3197,7 @@ TEST_F(FileServiceTests, reclaim_periodic_succeeds)
     reclaimOptions.mAgeThreshold = hours(0);
     reclaimOptions.mPeriod = seconds(15);
     reclaimOptions.mReclaimThreshold = 512_KiB;
-    reclaimOptions.mSizeTarget = 512_KiB;
+    reclaimOptions.mReclaimTarget = 512_KiB;
 
     mClient->fileService().reclaimOptions(reclaimOptions);
 
@@ -3209,7 +3209,7 @@ TEST_F(FileServiceTests, reclaim_periodic_succeeds)
             auto used = mClient->fileService().storageUsed();
 
             // Have we fallen below the reclamation threshold?
-            return used && *used <= reclaimOptions.mSizeTarget;
+            return used && *used <= reclaimOptions.mReclaimTarget;
         },
         minutes(5)));
 
@@ -3217,7 +3217,7 @@ TEST_F(FileServiceTests, reclaim_periodic_succeeds)
     auto usedAfter = mClient->fileService().storageUsed();
     ASSERT_EQ(usedAfter.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
     EXPECT_LT(*usedAfter, *usedBefore);
-    EXPECT_GE(reclaimOptions.mSizeTarget, *usedAfter);
+    EXPECT_GE(reclaimOptions.mReclaimTarget, *usedAfter);
 }
 
 TEST_F(FileServiceTests, reclaim_single_succeeds)

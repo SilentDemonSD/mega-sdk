@@ -42363,14 +42363,14 @@ void MegaFileServiceReclaimOptionsPrivate::setReclaimPeriod(uint64_t seconds)
     mReclaim.mPeriod = std::chrono::seconds(seconds);
 }
 
-uint64_t MegaFileServiceReclaimOptionsPrivate::getReclaimSizeTarget() const
+uint64_t MegaFileServiceReclaimOptionsPrivate::getReclaimTarget() const
 {
-    return mReclaim.mSizeTarget;
+    return mReclaim.mReclaimTarget;
 }
 
-void MegaFileServiceReclaimOptionsPrivate::setReclaimSizeTarget(uint64_t bytes)
+void MegaFileServiceReclaimOptionsPrivate::setReclaimTarget(uint64_t bytes)
 {
-    mReclaim.mSizeTarget = bytes;
+    mReclaim.mReclaimTarget = bytes;
 }
 
 int64_t MegaFileServiceReclaimOptionsPrivate::getReclaimThreshold() const
