@@ -922,11 +922,6 @@ auto FileServiceContext::storageSize([[maybe_unused]] Lock&& lock,
 
     query.param(":target_remaining_size").set(sizeTarget);
 
-    FSInfoF("Calculating storage size with age threshold of %lld seconds and target remaining size "
-            "of %lld bytes",
-            accessed,
-            sizeTarget);
-
     query.execute();
 
     // Sanity.
@@ -1679,7 +1674,7 @@ try
 }
 catch (std::runtime_error& exception)
 {
-    FSErrorF("Unable to determine storage detail footprint: %s", exception.what());
+    FSErrorF("Unable to determine detailed storage size: %s", exception.what());
 
     return unexpected(FILE_SERVICE_UNEXPECTED);
 }
