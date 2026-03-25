@@ -166,7 +166,8 @@ auto FileService::purge() -> FileServiceResult
     return mContext->purge();
 }
 
-auto FileService::reclaim(ReclaimCallback callback) -> FileServiceResult
+auto FileService::reclaim(ReclaimCallback callback,
+                          std::optional<ReclaimOptions> reclaimOptions) -> FileServiceResult
 {
     SharedLock guard(mContextLock);
 
@@ -177,9 +178,11 @@ auto FileService::reclaim(ReclaimCallback callback) -> FileServiceResult
     auto& executor = mContext->executor();
 
     executor.execute(
-        [this, callback = std::move(callback)](const common::Task&)
+        [this, callback = std::move(callback), reclaimOptions = std::move(reclaimOptions)](
+            const common::Task&)
         {
-            mContext->reclaim(std::move(callback));
+            mContext->reclaim(std::move(callback),
+                              reclaimOptions.value_or(mContext->reclaimOptions()));
         },
         true);
 

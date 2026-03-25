@@ -29487,6 +29487,16 @@ void MegaApiImpl::fileServiceReclaim(MegaRequestListener* listener)
 
     request->performRequest = [this, callback = std::move(callback)]()
     {
+        // Get reclaim options
+        auto reclaimOptions = client->mFileService.reclaimOptions();
+        if (!reclaimOptions)
+        {
+            return API_EINTERNAL;
+        }
+
+        // Set so reclaim can run immediately
+        reclaimOptions->mReclaimThreshold = 0;
+
         // Start a reclaim task
         const auto ret = this->client->mFileService.reclaim(std::move(callback));
         // Started successfully or not

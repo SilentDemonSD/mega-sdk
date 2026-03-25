@@ -12,7 +12,7 @@
 #include <mega/file_service/file_service_callbacks.h>
 #include <mega/file_service/file_service_context_pointer.h>
 #include <mega/file_service/file_service_forward.h>
-#include <mega/file_service/file_service_options_forward.h>
+#include <mega/file_service/file_service_options.h>
 #include <mega/file_service/file_service_result_forward.h>
 #include <mega/file_service/file_service_result_or_forward.h>
 #include <mega/file_service/file_service_storage_size.h>
@@ -86,7 +86,8 @@ public:
     auto purge() -> FileServiceResult;
 
     // Start a background task to reclaim storage space immediately
-    auto reclaim(ReclaimCallback callback) -> FileServiceResult;
+    auto reclaim(ReclaimCallback callback,
+                 std::optional<ReclaimOptions> reclaimOptions = std::nullopt) -> FileServiceResult;
 
     // Update the file service's reclaim options.
     auto reclaimOptions(const ReclaimOptions& options) -> FileServiceResult;

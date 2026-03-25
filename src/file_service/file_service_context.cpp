@@ -164,7 +164,7 @@ public:
     void queue(ReclaimCallback callback);
 
     // Reclaim zero or more files.
-    void reclaim(ReclaimContextPtr context);
+    void reclaim(ReclaimContextPtr context, const ReclaimOptions& reclaimOptions);
 }; // ReclaimContext
 
 static Database createDatabase(const LocalPath& databasePath);
@@ -702,18 +702,16 @@ void FileServiceContext::reclaimTaskCallback(Activity& activity,
     }; // reclaimed
 
     // Try and reclaim storage.
-    reclaim(std::move(reclaimed));
+    reclaim(std::move(reclaimed), reclaimOptions());
 }
 
-auto FileServiceContext::reclaimable() -> FileServiceResultOr<FileIDVector>
+auto FileServiceContext::reclaimable(const ReclaimOptions& reclaimOptions)
+    -> FileServiceResultOr<FileIDVector>
 try
 {
-    // Get our hands on our current options.
-    auto reclaimOptions = this->reclaimOptions();
-
     // Convenience.
-    const auto reclaimThreshold = mReclaimOptions.mReclaimThreshold;
-    const auto reclaimTarget = mReclaimOptions.mReclaimTarget;
+    const auto reclaimThreshold = reclaimOptions.mReclaimThreshold;
+    const auto reclaimTarget = reclaimOptions.mReclaimTarget;
 
     // No quota? No need to reclaim anything.
     if (!reclaimThreshold)
@@ -1481,7 +1479,7 @@ catch (std::runtime_error& exception)
     return FILE_SERVICE_UNEXPECTED;
 }
 
-void FileServiceContext::reclaim(ReclaimCallback callback)
+void FileServiceContext::reclaim(ReclaimCallback callback, const ReclaimOptions& reclaimOptions)
 {
     // Acquire reclaim context lock.
     std::unique_lock lock(mReclaimContextLock);
@@ -1503,7 +1501,7 @@ void FileServiceContext::reclaim(ReclaimCallback callback)
     lock.unlock();
 
     // Reclaim storage space.
-    mReclaimContext->reclaim(mReclaimContext);
+    mReclaimContext->reclaim(mReclaimContext, reclaimOptions);
 }
 
 void FileServiceContext::removeObserver(FileEventObserverID id)
@@ -2088,14 +2086,17 @@ void FileServiceContext::ReclaimContext::queue(ReclaimCallback callback)
     mCallbacks.emplace_back(std::move(callback));
 }
 
-void FileServiceContext::ReclaimContext::reclaim(ReclaimContextPtr context)
+void FileServiceContext::ReclaimContext::reclaim(ReclaimContextPtr context,
+                                                 const ReclaimOptions& reclaimOptions)
 {
     // Try and figure out what files we can reclaim.
-    auto ids = mService.reclaimable();
+    auto ids = mService.reclaimable(reclaimOptions);
 
     // Couldn't determine how many files to reclaim.
     if (!ids)
         return completed(ids.error());
+
+    FSInfoF("reclaim task is started: %d files", ids->size());
 
     // Remember what file's we're reclaiming.
     mIDs = std::move(*ids);

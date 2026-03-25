@@ -89,7 +89,7 @@ class FileServiceContext: common::NodeEventObserver
                              std::chrono::steady_clock::time_point when,
                              const common::Task& task);
 
-    auto reclaimable() -> FileServiceResultOr<FileIDVector>;
+    auto reclaimable(const ReclaimOptions& reclaimOptions) -> FileServiceResultOr<FileIDVector>;
 
     template<typename ContextLock, typename DatabaseLock>
     void remove(ContextLock&& contextLock,
@@ -230,7 +230,7 @@ public:
     auto purge() -> FileServiceResult;
 
     // Reclaim storage space.
-    void reclaim(ReclaimCallback callback);
+    void reclaim(ReclaimCallback callback, const ReclaimOptions& reclaimOptions);
 
     // Remove an observer.
     void removeObserver(FileEventObserverID id);

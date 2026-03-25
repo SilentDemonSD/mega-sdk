@@ -5289,13 +5289,27 @@ static void exec_fileserviceReclaimOptions(autocomplete::ACState& state)
                        << "Delay: " << options->mDelay.count() << "s\n"
                        << "Period: " << options->mPeriod.count() << "s\n"
                        << "Reclaim Threshold (BYTES): "
-                       << (threshold ? std::to_string(*threshold).c_str() : "Disabled\n")
+                       << (threshold ? std::to_string(*threshold).c_str() : "Disabled") << "\n"
                        << "Reclaim Target (BYTES): " << options->mReclaimTarget << std::endl;
 }
 
 static void exec_fileserviceReclaim(autocomplete::ACState&)
 {
     using file_service::FileServiceResultOr;
+
+    // get reclaim options
+    auto reclaimOptions = client->mFileService.reclaimOptions();
+    if (!reclaimOptions)
+    {
+        conlock(std::cerr) << "Reclaim options failed: "
+                           << file_service::toString(reclaimOptions.error()) << std::endl;
+        return;
+    }
+
+    // Set so reclaim can run immediately
+    reclaimOptions->mReclaimThreshold = 0;
+
+    // reclaim
     const auto result = client->mFileService.reclaim(
         [](FileServiceResultOr<std::uint64_t> reclaimResult)
         {
@@ -5309,7 +5323,8 @@ static void exec_fileserviceReclaim(autocomplete::ACState&)
 
             conlock(std::cout) << "Reclaim process completed. Reclaimed " << *reclaimResult
                                << " bytes." << std::endl;
-        });
+        },
+        *reclaimOptions);
 
     if (result == file_service::FILE_SERVICE_SUCCESS)
     {
