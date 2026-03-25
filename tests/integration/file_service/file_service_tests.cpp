@@ -2915,12 +2915,12 @@ TEST_F(FileServiceTests, reclaim_all_succeeds)
         // How much space has this file been allocated?
         auto allocated = file->info().allocatedSize();
         auto reported = file->info().reportedSize();
-        auto theSize = file->info().size();
+        auto nodeSize = file->info().size();
 
         // Factor this file's into our total.
         totalAllocated += allocated;
         totalReported += reported;
-        totalSize += theSize;
+        totalSize += nodeSize;
 
         // Make sure the service doesn't purge the file.
         files.emplace_back(std::move(*file));
