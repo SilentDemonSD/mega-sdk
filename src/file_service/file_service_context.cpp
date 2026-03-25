@@ -1973,6 +1973,8 @@ catch (std::runtime_error& exception)
 
 void FileServiceContext::ReclaimContext::reclaim(ReclaimContextPtr context, FileID id)
 {
+    FSInfoF("Reclaim file started: %s", id.toString().c_str());
+
     // Sanity.
     assert(context);
 
@@ -2033,6 +2035,8 @@ void FileServiceContext::ReclaimContext::reclaimBatch(ReclaimContextPtr context,
 void FileServiceContext::ReclaimContext::reclaimed(ReclaimContextPtr context,
                                                    FileResultOr<std::uint64_t> result)
 {
+    FSInfoF("Reclaim file result: %d, %" PRIu64, result.errorOr(FILE_SUCCESS), result.valueOr(0));
+
     // Make sure no one else changes our members.
     std::unique_lock lock(mLock);
 
