@@ -2021,7 +2021,7 @@ void FileServiceContext::ReclaimContext::reclaimBatch(ReclaimContextPtr context,
     assert(lock.owns_lock());
 
     // There are no files left to reclaim.
-    if (mIDs.empty())
+    if (mIDs.empty() && mNumPending == 0)
     {
         // We were able to reclaim some space or encountered no failures.
         if (mReclaimed || mResult == FILE_SERVICE_SUCCESS)
@@ -2073,8 +2073,7 @@ void FileServiceContext::ReclaimContext::reclaimed(ReclaimContextPtr context,
         mResult = FILE_SERVICE_UNEXPECTED;
 
     // Reclaim remaning files if any.
-    if (mNumPending == 0)
-        reclaimBatch(std::move(context), std::move(lock));
+    reclaimBatch(std::move(context), std::move(lock));
 }
 
 FileServiceContext::ReclaimContext::ReclaimContext(FileServiceContext& service):

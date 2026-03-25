@@ -2853,6 +2853,98 @@ TEST_F(FileServiceTests, read_write_sequence)
     EXPECT_TRUE(compare(*readResult2, expected, 0, expected.size()));
 }
 
+TEST_F(FileServiceTests, reclaim_all_batched_succeeds)
+{
+    // Handles of our test files.
+    std::vector<NodeHandle> handles;
+
+    // Create some test files for us to play with.
+    for (auto i = 0; i < 4; ++i)
+    {
+        // Generate some data for our file.
+        auto data = randomBytes(1_MiB);
+
+        // Generate a name for our file.
+        auto name = randomName();
+
+        // Try and upload our test file.
+        auto handle = mClient->upload(data, name, mRootHandle);
+
+        // Make sure the upload succeeded.
+        ASSERT_EQ(handle.errorOr(API_OK), API_OK);
+
+        // Remember the file's node handle.
+        handles.emplace_back(*handle);
+    }
+
+    // Tracks each file that we've opened.
+    std::vector<File> files;
+
+    // No minimum range size.
+    mClient->fileService().serviceOptions(
+        [&]()
+        {
+            auto options = DefaultOptions;
+            options.mImmediateDownloadThreshold = 512_KiB;
+            options.mMinimumRangeSize = 0;
+            return options;
+        }());
+
+    std::uint64_t totalAllocated = 0;
+
+    // Open and read each file.
+    for (auto handle: handles)
+    {
+        // Try and open the file.
+        auto file = mClient->fileOpen(handle);
+
+        // Make sure we could open the file.
+        ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+
+        // Read some data from the file.
+        auto data = execute(read, *file, 0, 512_KiB);
+
+        // Make sure the read succeeded.
+        ASSERT_EQ(data.errorOr(FILE_SUCCESS), FILE_SUCCESS);
+
+        // Update our running total.
+        totalAllocated += file->info().allocatedSize();
+
+        // Make sure the service doesn't purge the file.
+        files.emplace_back(std::move(*file));
+    }
+
+    // So we'll reclaim all files currently in storage.
+    mClient->fileService().reclaimOptions(
+        []()
+        {
+            auto options = DefaultReclaimOptions;
+            options.mAgeThreshold = std::chrono::minutes(0);
+            options.mBatchSize = SIZE_MAX;
+            options.mReclaimThreshold = 0;
+            return options;
+        }());
+
+    // Determine how much storage the service is using.
+    auto sizeBefore = mClient->fileService().storageInfo();
+    ASSERT_EQ(sizeBefore.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+
+    // Make sure we're using only as much as we read.
+    ASSERT_EQ(totalAllocated, sizeBefore->mAllocatedSize);
+
+    // Make sure we'll actually reclaim something.
+    EXPECT_GT(sizeBefore->mReclaimableSize, 0u);
+
+    // Try and reclaim all files in storage.
+    auto reclaimed = execute(reclaimAll, mClient);
+    EXPECT_EQ(reclaimed.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+    EXPECT_EQ(reclaimed.valueOr(0ul), sizeBefore->mReclaimableSize);
+
+    // Make sure storage was reclaimed.
+    auto sizeAfter = mClient->fileService().storageInfo();
+    EXPECT_EQ(sizeAfter->mReportedSize, 0ul);
+}
+
 TEST_F(FileServiceTests, reclaim_all_succeeds)
 {
     // Handles of our test files.
