@@ -649,6 +649,8 @@ void FileServiceContext::reclaimTaskCallback(Activity& activity,
                                              steady_clock::time_point when,
                                              const Task& task)
 {
+    FSInfo1("reclaim task callback");
+
     // Exchange mReclaimTask with task.
     auto exchange = [this](Task task)
     {
@@ -664,7 +666,10 @@ void FileServiceContext::reclaimTaskCallback(Activity& activity,
 
     // Client's shutting down or reclamation has been disabled.
     if (task.aborted())
+    {
+        FSInfo1("reclaim task is aborted");
         return exchange(Task());
+    }
 
     // Schedule another reclamation in the future.
     auto reschedule = [activity = std::move(activity), exchange, this]()
@@ -674,10 +679,15 @@ void FileServiceContext::reclaimTaskCallback(Activity& activity,
 
         // Reclamation has been disabled.
         if (!reclamationEnabled(reclaimOptions))
+        {
+            FSInfo1("reclaim task is disabled");
             return exchange(Task());
+        }
 
         // When should the next reclamation occur?
         const auto when = steady_clock::now() + reclaimOptions.mPeriod;
+
+        FSInfoF("reclaim task is scheduled in %d seconds", reclaimOptions.mPeriod.count());
 
         // Keep exchange below simple.
         auto callback = std::bind(&FileServiceContext::reclaimTaskCallback,
@@ -1009,6 +1019,8 @@ FileServiceContext::FileServiceContext(Client& client,
 
     // When should we perform the reclamation?
     auto when = steady_clock::now() + delay;
+
+    FSInfoF("reclaim task is scheduled in %d seconds", delay.count());
 
     // Schedule initial reclamation for later execution.
     mReclaimTask = mExecutor.execute(std::bind(&FileServiceContext::reclaimTaskCallback,
@@ -1542,7 +1554,10 @@ void FileServiceContext::reclaimOptions(const ReclaimOptions& options)
 
     // Caller wants to disable periodic reclamation.
     if (!reclamationEnabled(options))
+    {
+        FSInfo1("reclaim task is aborted: disabled");
         return mReclaimTask.abort(), void();
+    }
 
     // Convenience.
     auto newPeriod = options.mPeriod;
@@ -1555,10 +1570,15 @@ void FileServiceContext::reclaimOptions(const ReclaimOptions& options)
     //
     // Send it a cancellation so it reschedules itself.
     if (mReclaimTask)
+    {
+        FSInfo1("reclaim task is cancelled");
         return mReclaimTask.cancel(), void();
+    }
 
     // When should we perform the reclamation?
     auto when = steady_clock::now() + newPeriod;
+
+    FSInfoF("reclaim task is scheduled in %d seconds", newPeriod.count());
 
     // Schedule a reclamation for some time in the future.
     mReclaimTask = mExecutor.execute(std::bind(&FileServiceContext::reclaimTaskCallback,
