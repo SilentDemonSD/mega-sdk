@@ -6893,9 +6893,9 @@ private:
 public:
     MegaFileServiceStorageInfoPrivate(const file_service::StorageInfo& storageInfo);
 
-    uint64_t getReclaimableSize() const override;
-
     uint64_t getAllocatedSize() const override;
+
+    uint64_t getReclaimableSize() const override;
 }; // MegaFileServiceStorageInfoPrivate
 
 std::unique_ptr<FileSystemAccess> createFSA();

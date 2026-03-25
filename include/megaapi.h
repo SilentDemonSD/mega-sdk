@@ -28157,6 +28157,14 @@ protected:
 
 public:
     virtual ~MegaFileServiceStorageInfo();
+    /**
+     * @brief
+     * Get the size that is currently allocated by the file service.
+     *
+     * @return
+     * The size in bytes that is currently allocated by the file service.
+     */
+    virtual uint64_t getAllocatedSize() const = 0;
 
     /**
      * @brief
@@ -28167,15 +28175,6 @@ public:
      * The size in bytes that can be reclaimed by the file service.
      */
     virtual uint64_t getReclaimableSize() const = 0;
-
-    /**
-     * @brief
-     * Get the size that is currently allocated by the file service.
-     *
-     * @return
-     * The size in bytes that is currently allocated by the file service.
-     */
-    virtual uint64_t getAllocatedSize() const = 0;
 }; // MegaFileServiceStorageInfo
 }
 
