@@ -52,6 +52,18 @@ class JiraProject:
         self._check_all_tickets_are_resolved_or_closed()
         self._check_all_tickets_have_release_number_affected()
 
+    def check_no_resolved_tickets_missing_fix_version(self):
+        jql_query = (
+            f'project = "{self._project_key}" AND status = Resolved '
+            f'AND resolution = Done AND fixVersion is EMPTY'
+        )
+        issues = self._jira.search_issues(jql_query, maxResults=200)
+
+        assert not issues, (
+            "The following resolved tickets are missing Fix Version/s:\n"
+            + "\n".join(f"- {issue.key}" for issue in issues)
+        )
+
     @staticmethod
     def _parse_target_apps_from_version_description(description: str) -> list[str]:
         """Extract target apps from a Jira Version description.

@@ -41,6 +41,7 @@ class ReleaseProcess:
 
     def set_release_version_to_make(self, version: str):
         assert self._jira is not None
+        self._jira.check_no_resolved_tickets_missing_fix_version()
         self._jira.setup_release()
         if not version:
             v = self._jira.get_next_version()
