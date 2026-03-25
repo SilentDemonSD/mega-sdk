@@ -33,6 +33,9 @@ TEST(FileServiceDatabaseBuilder, CreateAndDowngrade)
 
     // Downgrade
     ASSERT_NO_THROW(DatabaseBuilder(database).downgrade(0));
+
+    // Upgrade
+    ASSERT_NO_THROW(DatabaseBuilder(database).upgrade(std::numeric_limits<std::size_t>::max()));
 }
 
 } // testing
