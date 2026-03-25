@@ -131,7 +131,7 @@ class MegaCompleteUploadData;
 class MegaNotificationList;
 class MegaCancelSubscriptionReasonList;
 class MegaFileServiceReclaimOptions;
-class MegaFileServiceStorageSize;
+class MegaFileServiceStorageInfo;
 
 #if defined(SWIG)
     #define MEGA_DEPRECATED
@@ -24937,7 +24937,7 @@ class MegaApi
          * The caller takes ownership of the returned value and should use delete to release the
          * memory when it's no longer needed.
          */
-        MegaFileServiceStorageSize* fileServiceGetStorageSize();
+        MegaFileServiceStorageInfo* fileServiceGetStorageInfo();
 
     protected:
         MegaApiImpl *pImpl = nullptr;
@@ -28150,13 +28150,13 @@ public:
 
 }; // MegaFileServiceReclaimOptions
 
-class MegaFileServiceStorageSize
+class MegaFileServiceStorageInfo
 {
 protected:
-    MegaFileServiceStorageSize();
+    MegaFileServiceStorageInfo();
 
 public:
-    virtual ~MegaFileServiceStorageSize();
+    virtual ~MegaFileServiceStorageInfo();
 
     /**
      * @brief
@@ -28176,7 +28176,7 @@ public:
      * The size in bytes that is currently allocated by the file service.
      */
     virtual uint64_t getAllocatedSize() const = 0;
-}; // MegaFileServiceStorageSize
+}; // MegaFileServiceStorageInfo
 }
 
 #endif //MEGAAPI_H

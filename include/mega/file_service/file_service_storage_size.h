@@ -7,7 +7,7 @@ namespace mega
 namespace file_service
 {
 
-struct StorageSize
+struct StorageInfo
 {
     // How many bytes reclaimable
     std::uint64_t mReclaimableSize = 0;
@@ -21,7 +21,7 @@ struct StorageSize
     // How many bytes the cloud reports
     std::uint64_t mTotalSize = 0;
 
-    bool operator==(const StorageSize& other) const
+    bool operator==(const StorageInfo& other) const
     {
         return mReclaimableSize == other.mReclaimableSize &&
                mAllocatedSize == other.mAllocatedSize && mReportedSize == other.mReportedSize &&

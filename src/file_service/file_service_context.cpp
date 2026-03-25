@@ -748,7 +748,7 @@ try
     FileIDVector ids;
 
     // Collect as many IDs for reclamation as necessary until we are no longer above our target
-    // storage usage. Condition should be aligned with the one in mGetStorageSize.
+    // storage usage. Condition should be aligned with the one in mGetStorageInfo.
     for (query.execute(); query && used > reclaimTarget; ++query)
     {
         // Latch the file's ID and allocated size.
@@ -898,8 +898,8 @@ bool FileServiceContext::removeFromIndex(FileID id, FromFileIDMap<T>& map)
 }
 
 template<typename Lock, typename Transaction>
-auto FileServiceContext::storageSize([[maybe_unused]] Lock&& lock,
-                                     Transaction&& transaction) -> StorageSize
+auto FileServiceContext::storageInfo([[maybe_unused]] Lock&& lock,
+                                     Transaction&& transaction) -> StorageInfo
 {
     // Sanity.
     assert(lock.mutex() == &mDatabase);
@@ -914,7 +914,7 @@ auto FileServiceContext::storageSize([[maybe_unused]] Lock&& lock,
     const auto reclaimTarget = reclaimOptions.mReclaimTarget;
 
     // Compute the storage used by all files in storage.
-    auto query = transaction.query(mQueries.mGetStorageSize);
+    auto query = transaction.query(mQueries.mGetStorageInfo);
 
     // Compute maximum reclaimable access time.
     auto accessed = system_clock::to_time_t(system_clock::now() - ageThreshold);
@@ -928,13 +928,13 @@ auto FileServiceContext::storageSize([[maybe_unused]] Lock&& lock,
     assert(query);
 
     // Populate values
-    StorageSize storageSize;
-    storageSize.mReclaimableSize = query.field("size_to_reclaim").template get<std::uint64_t>();
-    storageSize.mAllocatedSize = query.field("total_allocated_size").template get<std::uint64_t>();
-    storageSize.mReportedSize = query.field("total_reported_size").template get<std::uint64_t>();
-    storageSize.mTotalSize = query.field("total_size").template get<std::uint64_t>();
+    StorageInfo storageInfo;
+    storageInfo.mReclaimableSize = query.field("size_to_reclaim").template get<std::uint64_t>();
+    storageInfo.mAllocatedSize = query.field("total_allocated_size").template get<std::uint64_t>();
+    storageInfo.mReportedSize = query.field("total_reported_size").template get<std::uint64_t>();
+    storageInfo.mTotalSize = query.field("total_size").template get<std::uint64_t>();
 
-    return storageSize;
+    return storageInfo;
 }
 
 template<typename Lock, typename Transaction>
@@ -1660,7 +1660,7 @@ ServiceOptions FileServiceContext::serviceOptions()
     return mServiceOptions;
 }
 
-auto FileServiceContext::storageSize() -> FileServiceResultOr<StorageSize>
+auto FileServiceContext::storageInfo() -> FileServiceResultOr<StorageInfo>
 try
 {
     // Make sure no one else is changing the database.
@@ -1670,7 +1670,7 @@ try
     auto transaction = mDatabase.transaction();
 
     // Let the caller know how much storage space we're using.
-    return storageSize(lock, transaction);
+    return storageInfo(lock, transaction);
 }
 catch (std::runtime_error& exception)
 {

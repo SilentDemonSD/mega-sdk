@@ -5326,7 +5326,7 @@ static void exec_fileserviceStorage(autocomplete::ACState&)
 {
     using file_service::FileServiceResultOr;
 
-    if (const auto result = client->mFileService.storageSize(); !result)
+    if (const auto result = client->mFileService.storageInfo(); !result)
     {
         conlock(std::cerr) << "Get storage size failed: " << result.error() << std::endl;
     }

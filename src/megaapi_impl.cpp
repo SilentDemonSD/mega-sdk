@@ -29497,13 +29497,13 @@ void MegaApiImpl::fileServiceReclaim(MegaRequestListener* listener)
     waiter->notify();
 }
 
-MegaFileServiceStorageSize* MegaApiImpl::fileServiceGetStorageSize()
+MegaFileServiceStorageInfo* MegaApiImpl::fileServiceGetStorageInfo()
 {
-    const auto storageSize = client->mFileService.storageSize();
-    if (!storageSize)
+    const auto storageInfo = client->mFileService.storageInfo();
+    if (!storageInfo)
         return nullptr;
 
-    return new MegaFileServiceStorageSizePrivate(*storageSize);
+    return new MegaFileServiceStorageInfoPrivate(*storageInfo);
 }
 
 /* END MEGAAPIIMPL */
@@ -42395,19 +42395,19 @@ file_service::ReclaimOptions MegaFileServiceReclaimOptionsPrivate::getOptions() 
     return mReclaim;
 }
 
-MegaFileServiceStorageSizePrivate::MegaFileServiceStorageSizePrivate(
-    const file_service::StorageSize& storageSize):
-    mStorageSize(storageSize)
+MegaFileServiceStorageInfoPrivate::MegaFileServiceStorageInfoPrivate(
+    const file_service::StorageInfo& storageInfo):
+    mStorageInfo(storageInfo)
 {}
 
-uint64_t MegaFileServiceStorageSizePrivate::getReclaimableSize() const
+uint64_t MegaFileServiceStorageInfoPrivate::getReclaimableSize() const
 {
-    return mStorageSize.mReclaimableSize;
+    return mStorageInfo.mReclaimableSize;
 }
 
-uint64_t MegaFileServiceStorageSizePrivate::getAllocatedSize() const
+uint64_t MegaFileServiceStorageInfoPrivate::getAllocatedSize() const
 {
-    return mStorageSize.mAllocatedSize;
+    return mStorageInfo.mAllocatedSize;
 }
 
 std::unique_ptr<FileSystemAccess> createFSA()

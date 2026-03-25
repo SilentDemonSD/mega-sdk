@@ -98,9 +98,9 @@ public:
     auto removeObserver(FileEventObserverID id) -> FileServiceResult;
 
     // Get storage size information in detail such as reclaimable storage size
-    auto storageSize() -> FileServiceResultOr<StorageSize>;
+    auto storageInfo() -> FileServiceResultOr<StorageInfo>;
 
-    // How much storage space is the service using? Better performance than storageSize but with
+    // How much storage space is the service using? Better performance than storageInfo but with
     // less information
     auto storageUsed() -> FileServiceResultOr<std::uint64_t>;
 }; // FileService

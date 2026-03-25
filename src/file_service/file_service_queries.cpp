@@ -24,7 +24,7 @@ FileServiceQueries::FileServiceQueries(Database& database):
     mGetFreeFileID(database.query()),
     mGetNextFileID(database.query()),
     mGetReclaimableFiles(database.query()),
-    mGetStorageSize(database.query()),
+    mGetStorageInfo(database.query()),
     mGetStorageUsed(database.query()),
     mRemoveFile(database.query()),
     mRemoveFileID(database.query()),
@@ -121,7 +121,7 @@ FileServiceQueries::FileServiceQueries(Database& database):
                            " order by accessed asc";
 
     // ifnull(...) is necessary as there may be no files to sum.
-    mGetStorageSize = "with TargetStats as ( "
+    mGetStorageInfo = "with TargetStats as ( "
                       "    select sum(allocated_size) as total_allocated_now "
                       "         , sum(reported_size) as total_reported_now "
                       "         , sum(size) as total_size_now "

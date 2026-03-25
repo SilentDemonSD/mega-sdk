@@ -6424,9 +6424,9 @@ void MegaApi::fileServiceReclaim(MegaRequestListener* listener)
     pImpl->fileServiceReclaim(listener);
 }
 
-MegaFileServiceStorageSize* MegaApi::fileServiceGetStorageSize()
+MegaFileServiceStorageInfo* MegaApi::fileServiceGetStorageInfo()
 {
-    return pImpl->fileServiceGetStorageSize();
+    return pImpl->fileServiceGetStorageInfo();
 }
 
 /* END MEGAAPI */
@@ -8870,7 +8870,7 @@ MegaFileServiceReclaimOptions* MegaFileServiceReclaimOptions::create()
     return new MegaFileServiceReclaimOptionsPrivate();
 }
 
-MegaFileServiceStorageSize::MegaFileServiceStorageSize() = default;
+MegaFileServiceStorageInfo::MegaFileServiceStorageInfo() = default;
 
-MegaFileServiceStorageSize::~MegaFileServiceStorageSize() = default;
+MegaFileServiceStorageInfo::~MegaFileServiceStorageInfo() = default;
 }
