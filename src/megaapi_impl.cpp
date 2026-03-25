@@ -42323,42 +42323,42 @@ MegaFileServiceReclaimOptions* MegaFileServiceReclaimOptionsPrivate::copy() cons
     return new MegaFileServiceReclaimOptionsPrivate(*this);
 }
 
-int MegaFileServiceReclaimOptionsPrivate::getReclaimAgeThreshold() const
+int MegaFileServiceReclaimOptionsPrivate::getAgeThreshold() const
 {
     return static_cast<int>(mReclaim.mAgeThreshold.count());
 }
 
-void MegaFileServiceReclaimOptionsPrivate::setReclaimAgeThreshold(int ageThreshold)
+void MegaFileServiceReclaimOptionsPrivate::setAgeThreshold(int ageThreshold)
 {
     mReclaim.mAgeThreshold = std::chrono::minutes(ageThreshold);
 }
 
-std::size_t MegaFileServiceReclaimOptionsPrivate::getReclaimBatchSize() const
+std::size_t MegaFileServiceReclaimOptionsPrivate::getBatchSize() const
 {
     return mReclaim.mBatchSize;
 }
 
-void MegaFileServiceReclaimOptionsPrivate::setReclaimBatchSize(std::size_t batchSize)
+void MegaFileServiceReclaimOptionsPrivate::setBatchSize(std::size_t batchSize)
 {
     mReclaim.mBatchSize = batchSize;
 }
 
-uint64_t MegaFileServiceReclaimOptionsPrivate::getReclaimDelay() const
+uint64_t MegaFileServiceReclaimOptionsPrivate::getDelay() const
 {
     return static_cast<uint64_t>(mReclaim.mDelay.count());
 }
 
-void MegaFileServiceReclaimOptionsPrivate::setReclaimDelay(uint64_t seconds)
+void MegaFileServiceReclaimOptionsPrivate::setDelay(uint64_t seconds)
 {
     mReclaim.mDelay = std::chrono::seconds(seconds);
 }
 
-uint64_t MegaFileServiceReclaimOptionsPrivate::getReclaimPeriod() const
+uint64_t MegaFileServiceReclaimOptionsPrivate::getPeriod() const
 {
     return static_cast<uint64_t>(mReclaim.mPeriod.count());
 }
 
-void MegaFileServiceReclaimOptionsPrivate::setReclaimPeriod(uint64_t seconds)
+void MegaFileServiceReclaimOptionsPrivate::setPeriod(uint64_t seconds)
 {
     mReclaim.mPeriod = std::chrono::seconds(seconds);
 }

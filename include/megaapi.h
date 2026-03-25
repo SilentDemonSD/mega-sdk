@@ -28033,7 +28033,7 @@ public:
      * The reclaim age threshold in minutes. How old should the files be before they are considered
      * for reclamation?
      */
-    virtual int getReclaimAgeThreshold() const = 0;
+    virtual int getAgeThreshold() const = 0;
 
     /**
      * @brief
@@ -28043,7 +28043,7 @@ public:
      * The reclaim age threshold in minutes. How old should the files be before they are considered
      * for reclamation?
      */
-    virtual void setReclaimAgeThreshold(int ageThreshold) = 0;
+    virtual void setAgeThreshold(int ageThreshold) = 0;
 
     /**
      * @brief
@@ -28052,7 +28052,7 @@ public:
      * @return
      * The reclaim batch size. How many files should be processed in each batch of reclaim process?
      */
-    virtual std::size_t getReclaimBatchSize() const = 0;
+    virtual std::size_t getBatchSize() const = 0;
 
     /**
      * @brief
@@ -28062,7 +28062,7 @@ public:
      * The reclaim batch size. How many files should be processed in each batch of reclaim process?
      * This size is rarely needed to be changed.
      */
-    virtual void setReclaimBatchSize(std::size_t batchSize) = 0;
+    virtual void setBatchSize(std::size_t batchSize) = 0;
 
     /**
      * @brief
@@ -28071,7 +28071,7 @@ public:
      * @return
      * The reclaim delay in seconds. How long after startup should we wait until we reclaim space?
      */
-    virtual uint64_t getReclaimDelay() const = 0;
+    virtual uint64_t getDelay() const = 0;
 
     /**
      * @brief
@@ -28080,7 +28080,7 @@ public:
      * @param seconds
      * How long after startup should we wait until we reclaim space?
      */
-    virtual void setReclaimDelay(uint64_t seconds) = 0;
+    virtual void setDelay(uint64_t seconds) = 0;
 
     /**
      * @brief
@@ -28089,7 +28089,7 @@ public:
      * @return
      * The reclaim period in seconds. How long should we wait between consecutive reclaims?
      */
-    virtual uint64_t getReclaimPeriod() const = 0;
+    virtual uint64_t getPeriod() const = 0;
 
     /**
      * @brief
@@ -28098,7 +28098,7 @@ public:
      * @param seconds
      * How long should we wait between consecutive reclaims?
      */
-    virtual void setReclaimPeriod(uint64_t seconds) = 0;
+    virtual void setPeriod(uint64_t seconds) = 0;
 
     /**
      * @brief

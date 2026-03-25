@@ -6858,21 +6858,21 @@ public:
 
     MegaFileServiceReclaimOptions* copy() const override;
 
-    int getReclaimAgeThreshold() const override;
+    int getAgeThreshold() const override;
 
-    void setReclaimAgeThreshold(int ageThreshold) override;
+    void setAgeThreshold(int ageThreshold) override;
 
-    std::size_t getReclaimBatchSize() const override;
+    std::size_t getBatchSize() const override;
 
-    void setReclaimBatchSize(std::size_t batchSize) override;
+    void setBatchSize(std::size_t batchSize) override;
 
-    uint64_t getReclaimDelay() const override;
+    uint64_t getDelay() const override;
 
-    void setReclaimDelay(uint64_t seconds) override;
+    void setDelay(uint64_t seconds) override;
 
-    uint64_t getReclaimPeriod() const override;
+    uint64_t getPeriod() const override;
 
-    void setReclaimPeriod(uint64_t seconds) override;
+    void setPeriod(uint64_t seconds) override;
 
     uint64_t getReclaimTarget() const override;
 
