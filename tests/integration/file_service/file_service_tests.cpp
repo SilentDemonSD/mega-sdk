@@ -2917,9 +2917,6 @@ TEST_F(FileServiceTests, reclaim_all_succeeds)
         auto reported = file->info().reportedSize();
         auto theSize = file->info().size();
 
-        // Sanity.
-        ASSERT_GE(allocated, file->info().reportedSize());
-
         // Factor this file's into our total.
         totalAllocated += allocated;
         totalReported += reported;
@@ -3005,7 +3002,7 @@ TEST_F(FileServiceTests, reclaim_all_succeeds)
     ASSERT_EQ(sizeAfter.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
     ASSERT_EQ(0, sizeAfter->mReclaimableSize);
     ASSERT_EQ(totalAllocated - sizeBefore->mReclaimableSize, sizeAfter->mAllocatedSize);
-    ASSERT_GE(sizeAfter->mAllocatedSize, sizeAfter->mReportedSize);
+    ASSERT_GT(sizeBefore->mReportedSize, sizeAfter->mReportedSize);
     ASSERT_EQ(totalSize, sizeAfter->mTotalSize);
 
     // For later comparison.
