@@ -2942,6 +2942,7 @@ TEST_F(FileServiceTests, reclaim_all_batched_succeeds)
 
     // Make sure storage was reclaimed.
     auto sizeAfter = mClient->fileService().storageInfo();
+    ASSERT_EQ(sizeAfter.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
     EXPECT_EQ(sizeAfter->mReportedSize, 0ul);
 }
 

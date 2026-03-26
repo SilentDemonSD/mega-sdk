@@ -2075,7 +2075,7 @@ void FileServiceContext::ReclaimContext::reclaimed(ReclaimContextPtr context,
     if (!result)
         mResult = FILE_SERVICE_UNEXPECTED;
 
-    // Reclaim remaning files if any.
+    // Reclaim remaining files if any.
     reclaimBatch(std::move(context), std::move(lock));
 }
 
