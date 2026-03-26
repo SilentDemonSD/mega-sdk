@@ -23,9 +23,9 @@
 #include <mega/file_service/file_service_options.h>
 #include <mega/file_service/file_service_queries.h>
 #include <mega/file_service/file_service_result_or_forward.h>
-#include <mega/file_service/file_service_storage_size.h>
 #include <mega/file_service/file_storage.h>
 #include <mega/file_service/from_file_id_map.h>
+#include <mega/file_service/storage_info.h>
 
 #include <chrono>
 #include <condition_variable>

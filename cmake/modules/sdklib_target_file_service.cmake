@@ -55,7 +55,6 @@ target_sources(SDKlib PRIVATE
                       include/mega/file_service/file_service_result_forward.h
                       include/mega/file_service/file_service_result_or.h
                       include/mega/file_service/file_service_result_or_forward.h
-                      include/mega/file_service/file_service_storage_size.h
                       include/mega/file_service/file_stream_result.h
                       include/mega/file_service/file_stream_result_forward.h
                       include/mega/file_service/file_touch_event.h
@@ -69,6 +68,7 @@ target_sources(SDKlib PRIVATE
                       include/mega/file_service/sink_forward.h
                       include/mega/file_service/source.h
                       include/mega/file_service/source_forward.h
+                      include/mega/file_service/storage_info.h
                       include/mega/file_service/utility.h
 )
 

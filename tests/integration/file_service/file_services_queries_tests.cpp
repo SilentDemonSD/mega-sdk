@@ -7,7 +7,7 @@
 #include <mega/common/transaction.h>
 #include <mega/file_service/database_builder.h>
 #include <mega/file_service/file_service_queries.h>
-#include <mega/file_service/file_service_storage_size.h>
+#include <mega/file_service/storage_info.h>
 #include <mega/localpath.h>
 
 #include <cstdint>

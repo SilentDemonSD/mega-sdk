@@ -15,7 +15,7 @@
 #include <mega/file_service/file_service_options.h>
 #include <mega/file_service/file_service_result_forward.h>
 #include <mega/file_service/file_service_result_or_forward.h>
-#include <mega/file_service/file_service_storage_size.h>
+#include <mega/file_service/storage_info.h>
 #include <mega/types.h>
 
 #include <cstdint>
