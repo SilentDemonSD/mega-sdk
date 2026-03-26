@@ -652,16 +652,17 @@ void FileServiceContext::reclaimTaskCallback(Activity& activity,
     FSInfo1("reclaim task callback");
 
     // Exchange mReclaimTask with task.
-    auto exchange = [this](Task task)
+    auto exchange = [oldTask = task, this](Task task)
     {
         // Acquire task lock.
         std::lock_guard guard(mReclaimTaskLock);
 
-        // For ADL lookup.
-        using std::swap;
+        // We've been superceded by another task.
+        if (oldTask != mReclaimTask)
+            return;
 
-        // Exchange the task.
-        swap(mReclaimTask, task);
+        // Update the context's reclamation task.
+        mReclaimTask = std::move(task);
     }; // exchange
 
     // Client's shutting down or reclamation has been disabled.
@@ -1555,30 +1556,32 @@ void FileServiceContext::reclaimOptions(const ReclaimOptions& options)
     // Caller wants to disable periodic reclamation.
     if (!reclamationEnabled(options))
     {
-        FSInfo1("reclaim task is aborted: disabled");
+        FSInfo1("Aborting reclaim task");
+
         return mReclaimTask.abort(), void();
     }
 
     // Convenience.
     auto newPeriod = options.mPeriod;
 
-    // Caller isn't changing reclamation period.
-    if (newPeriod == oldPeriod)
-        return;
-
     // Periodic reclamation is already scheduled.
-    //
-    // Send it a cancellation so it reschedules itself.
-    if (mReclaimTask)
+    if (mReclaimTask && !mReclaimTask.completed())
     {
-        FSInfo1("reclaim task is cancelled");
+        // And the caller isn't changing the reclamation period.
+        if (newPeriod == oldPeriod)
+            return;
+
+        // Leave a trail so we know what we've done.
+        FSInfo1("Cancelling reclaim task");
+
+        // Send it a cancellation so it reschedules itself.
         return mReclaimTask.cancel(), void();
     }
 
     // When should we perform the reclamation?
     auto when = steady_clock::now() + newPeriod;
 
-    FSInfoF("reclaim task is scheduled in %d seconds", newPeriod.count());
+    FSInfoF("Reclaim task is scheduled to execute in %d seconds", newPeriod.count());
 
     // Schedule a reclamation for some time in the future.
     mReclaimTask = mExecutor.execute(std::bind(&FileServiceContext::reclaimTaskCallback,
