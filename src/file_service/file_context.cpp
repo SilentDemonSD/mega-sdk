@@ -675,10 +675,9 @@ void FileContext::execute(FileReadRequest& request)
 
     // Update the file's access time.
     withTransaction(mService.database(),
-                    std::bind(&FileContext::updateAccessAndModificationTimes,
+                    std::bind(&FileContext::updateAccessTimes,
                               this,
                               mInfo->accessed(now()),
-                              mInfo->modified(),
                               std::placeholders::_1));
 
     // Add a download for a given range to the specified map.
@@ -1476,6 +1475,16 @@ auto FileContext::shrink(std::uint64_t newSize, std::uint64_t oldSize)
 
     // Return the transaction to our caller.
     return std::make_pair(std::move(databaseLock), std::move(transaction));
+}
+
+void FileContext::updateAccessTimes(std::int64_t accessed, common::Transaction& transaction)
+{
+    auto query = transaction.query(mService.queries().mSetFileAccessTime);
+
+    query.param(":accessed").set(accessed);
+    query.param(":id").set(mInfo->id());
+
+    query.execute();
 }
 
 void FileContext::updateAccessAndModificationTimes(std::int64_t accessed,
