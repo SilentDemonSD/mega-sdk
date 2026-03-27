@@ -71,11 +71,13 @@ FileInfoContext::~FileInfoContext()
     mService.removeFromIndex(FileInfoContextBadge(), *this);
 }
 
-void FileInfoContext::accessed(std::int64_t accessed)
+std::int64_t FileInfoContext::accessed(std::int64_t accessed)
 {
     std::lock_guard guard(mLock);
 
     mAccessed = std::max(accessed, mAccessed);
+
+    return mAccessed;
 }
 
 std::int64_t FileInfoContext::accessed() const

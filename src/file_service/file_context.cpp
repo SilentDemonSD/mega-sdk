@@ -1,5 +1,6 @@
 #include <mega/common/client.h>
 #include <mega/common/database.h>
+#include <mega/common/database_utilities.h>
 #include <mega/common/lock.h>
 #include <mega/common/node_info.h>
 #include <mega/common/partial_download.h>
@@ -653,9 +654,6 @@ void FileContext::execute(FileReadRequest& request)
     if (request.mRange.empty())
         return completed(mBuffer, std::move(request));
 
-    // Update the file's access time.
-    mInfo->accessed(now());
-
     // Get a snapshot of the current service options.
     const auto options = mService.serviceOptions();
 
@@ -674,6 +672,14 @@ void FileContext::execute(FileReadRequest& request)
 
     // Acquire lock.
     std::unique_lock lock(mLock);
+
+    // Update the file's access time.
+    withTransaction(mService.database(),
+                    std::bind(&FileContext::updateAccessAndModificationTimes,
+                              this,
+                              mInfo->accessed(now()),
+                              mInfo->modified(),
+                              std::placeholders::_1));
 
     // Add a download for a given range to the specified map.
     auto addDownload = [&](auto& map, const auto& range)

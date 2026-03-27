@@ -93,7 +93,7 @@ public:
     ~FileInfoContext();
 
     // Set the file's last access time.
-    void accessed(std::int64_t accessed);
+    std::int64_t accessed(std::int64_t accessed);
 
     // When was this file last accessed?
     std::int64_t accessed() const;

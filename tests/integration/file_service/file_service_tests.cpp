@@ -2632,6 +2632,9 @@ TEST_F(FileServiceTests, read_small_size_extension_succeeds)
 
 TEST_F(FileServiceTests, read_succeeds)
 {
+    // Convenience.
+    using std::chrono::seconds;
+
     // Open a file for reading.
     auto file = mClient->fileOpen(mFileHandle);
     ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
@@ -2648,11 +2651,14 @@ TEST_F(FileServiceTests, read_succeeds)
     // Latch the file's access time.
     auto accessed = file->info().accessed();
 
+    // Make sure we can differentiate the read's access time.
+    std::this_thread::sleep_for(2s);
+
     // We should be able to read 64KiB from the beginning of the file.
     auto result = execute(read, *file, 0, 64_KiB);
 
     // Make sure the file's access time have been bumped.
-    EXPECT_GE(file->info().accessed(), accessed);
+    EXPECT_GT(file->info().accessed(), accessed);
 
     // Make sure the read completed successfully.
     ASSERT_EQ(result.errorOr(FILE_SUCCESS), FILE_SUCCESS);
@@ -2666,11 +2672,14 @@ TEST_F(FileServiceTests, read_succeeds)
     // Latch the file's access time.
     accessed = file->info().accessed();
 
+    // Make sure we can differentiate the read's access time.
+    std::this_thread::sleep_for(2s);
+
     // Read another 64KiB.
     result = execute(read, *file, 64_KiB, 64_KiB);
 
     // Make sure the file's access time have been bumped.
-    EXPECT_GE(file->info().accessed(), accessed);
+    EXPECT_GT(file->info().accessed(), accessed);
 
     // Make sure the read completed successfully.
     ASSERT_EQ(result.errorOr(FILE_SUCCESS), FILE_SUCCESS);
@@ -2684,6 +2693,9 @@ TEST_F(FileServiceTests, read_succeeds)
     // Latch the file's access time.
     accessed = file->info().accessed();
 
+    // Make sure we can differentiate the read's access time.
+    std::this_thread::sleep_for(2s);
+
     // Kick off two reads in parallel.
     auto waiter0 = read(*file, 128_KiB, 64_KiB);
     auto waiter1 = read(*file, 192_KiB, 64_KiB);
@@ -2693,7 +2705,7 @@ TEST_F(FileServiceTests, read_succeeds)
     ASSERT_NE(waiter1.wait_for(mDefaultTimeout), timeout);
 
     // Make sure the file's access time have been bumped.
-    EXPECT_GE(file->info().accessed(), accessed);
+    EXPECT_GT(file->info().accessed(), accessed);
 
     // Make sure both reads succeeded.
     auto result0 = waiter0.get();
@@ -2733,6 +2745,9 @@ TEST_F(FileServiceTests, read_succeeds)
     // Latch the file's access time.
     accessed = file->info().accessed();
 
+    // Make sure we can differentiate the read's access time.
+    std::this_thread::sleep_for(2s);
+
     // Make sure zero length reads are handled correctly.
     result = execute(read, *file, 0, 0);
     ASSERT_EQ(result.errorOr(FILE_SUCCESS), FILE_SUCCESS);
@@ -2747,7 +2762,7 @@ TEST_F(FileServiceTests, read_succeeds)
     EXPECT_TRUE(compare(*result, mFileContent, 768_KiB, 256_KiB));
 
     // Make sure the file's access time have been bumped.
-    EXPECT_GE(file->info().accessed(), accessed);
+    EXPECT_GT(file->info().accessed(), accessed);
 
     // Reads should never dirty a file.
     ASSERT_FALSE(file->info().dirty());
