@@ -2470,7 +2470,7 @@ void FileContext::ReclaimContext::cancel(ReclaimContextPtr& context, Lock&& lock
     assert(lock.mutex() == &context->mContext.mReclaimContextLock);
     assert(lock.owns_lock());
 
-    context->completed(context, std::forward<Lock>(lock), FILE_CANCELLED);
+    context->completed(context, std::forward<Lock>(lock), unexpected(FILE_CANCELLED));
 }
 
 void FileContext::ReclaimContext::flushed(ReclaimContextPtr& context, FileResult result)
