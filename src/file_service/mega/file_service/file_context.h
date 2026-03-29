@@ -185,7 +185,7 @@ class FileContext final: public std::enable_shared_from_this<FileContext>
         -> std::pair<common::UniqueLock<common::Database>, common::Transaction>;
 
     // Update this file's access time in the database.
-    void updateAccessTimes(std::int64_t accessed, common::Transaction& transaction);
+    void updateAccessTime(std::int64_t accessed, common::Transaction& transaction);
 
     // Update this file's access and modification time in the database.
     void updateAccessAndModificationTimes(std::int64_t accessed,

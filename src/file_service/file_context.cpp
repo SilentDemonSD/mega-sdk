@@ -675,7 +675,7 @@ void FileContext::execute(FileReadRequest& request)
 
     // Update the file's access time.
     withTransaction(mService.database(),
-                    std::bind(&FileContext::updateAccessTimes,
+                    std::bind(&FileContext::updateAccessTime,
                               this,
                               mInfo->accessed(now()),
                               std::placeholders::_1));
@@ -1477,7 +1477,7 @@ auto FileContext::shrink(std::uint64_t newSize, std::uint64_t oldSize)
     return std::make_pair(std::move(databaseLock), std::move(transaction));
 }
 
-void FileContext::updateAccessTimes(std::int64_t accessed, common::Transaction& transaction)
+void FileContext::updateAccessTime(std::int64_t accessed, Transaction& transaction)
 {
     auto query = transaction.query(mService.queries().mSetFileAccessTime);
 
