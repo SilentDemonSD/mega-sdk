@@ -295,7 +295,7 @@ void HttpReq::prepareMethod(HttpIO* clientHttpIo, const httpmethod_t reqMethod)
     lastdata = Waiter::ds;
 }
 
-void HttpReq::post(MegaClient* client, const char* data, unsigned len)
+void HttpReq::post(MegaClient* client, const char* data, size_t len)
 {
     prepareMethod(client->httpio, METHOD_POST);
     DEBUG_TEST_HOOK_HTTPREQ_POST(this)
@@ -402,13 +402,13 @@ void HttpReq::setreq(const char* u, contenttype_t t)
 }
 
 // add data to fixed or variable buffer
-void HttpReq::put(void* data, unsigned len, bool purge)
+void HttpReq::put(void* data, size_t len, bool purge)
 {
     if (buf)
     {
-        if (bufpos + len > buflen)
+        if (bufpos + static_cast<m_off_t>(len) > buflen)
         {
-            len = static_cast<unsigned>(buflen - bufpos);
+            len = static_cast<size_t>(buflen - bufpos);
         }
 
         memcpy(buf + bufpos, data, len);
@@ -424,7 +424,7 @@ void HttpReq::put(void* data, unsigned len, bool purge)
         in.append((char*)data, len);
     }
 
-    bufpos += len;
+    bufpos += static_cast<m_off_t>(len);
 }
 
 
@@ -556,10 +556,19 @@ void HttpReqDL::prepare(const char* tempurl,
     }
 
     dlpos = downloadPosition;
-    size = (unsigned)(npos - downloadPosition);
+    auto diff = npos - downloadPosition;
+
+    if (diff < 0)
+    {
+        LOG_err << "Error negative size HttpReqDL::prepare";
+        assert(diff >= 0);
+    }
+
+    size = static_cast<uint64_t>(diff);
     buffer_released = false;
 
-    if (!buf || buflen != size)
+    const auto bufferSize = static_cast<m_off_t>(size);
+    if (!buf || buflen != bufferSize)
     {
         // (re)allocate buffer
         if (buf)
@@ -570,10 +579,11 @@ void HttpReqDL::prepare(const char* tempurl,
 
         if (size)
         {
-            buf = new byte[(size + SymmCipher::BLOCKSIZE - 1) &
-                           ~(static_cast<size_t>(SymmCipher::BLOCKSIZE) - 1)];
+            const auto alignedSize = (static_cast<size_t>(size) + SymmCipher::BLOCKSIZE - 1) &
+                                     ~(static_cast<size_t>(SymmCipher::BLOCKSIZE) - 1);
+            buf = new byte[alignedSize];
         }
-        buflen = size;
+        buflen = bufferSize;
     }
 }
 
@@ -584,14 +594,14 @@ EncryptByChunks::EncryptByChunks(SymmCipher* k, chunkmac_map* m, uint64_t iv) : 
     memset(crc, 0, CRCSIZE);
 }
 
-void EncryptByChunks::updateCRC(byte* data, unsigned size, unsigned offset)
+void EncryptByChunks::updateCRC(byte* data, size_t size, size_t offset)
 {
     uint32_t *intc = (uint32_t *)crc;
 
-    unsigned ol = offset % CRCSIZE;
+    size_t ol = offset % CRCSIZE;
     if (ol)
     {
-        unsigned ll = CRCSIZE - ol;
+        size_t ll = CRCSIZE - ol;
         if (ll > size) //last chunks could be smaller than CRCSIZE!
         {
             ll = size;
@@ -605,8 +615,8 @@ void EncryptByChunks::updateCRC(byte* data, unsigned size, unsigned offset)
     }
 
     uint32_t *intdata = (uint32_t *)data;
-    int ll = size % CRCSIZE;
-    int l = size / CRCSIZE;
+    size_t ll = size % CRCSIZE;
+    size_t l = size / CRCSIZE;
     if (l)
     {
         l *= 3;
@@ -620,7 +630,7 @@ void EncryptByChunks::updateCRC(byte* data, unsigned size, unsigned offset)
     }
     if (ll)
     {
-        data += (size - static_cast<size_t>(ll));
+        data += (size - ll);
         while (ll--)
         {
             crc[ll] ^= data[ll];
@@ -637,7 +647,7 @@ bool EncryptByChunks::encrypt(m_off_t pos, m_off_t npos, string& urlSuffix)
     m_off_t chunksize = endpos - startpos;
     while (chunksize)
     {
-        buf = nextbuffer(unsigned(chunksize));
+        buf = nextbuffer(static_cast<size_t>(chunksize));
         if (!buf) return false;
 
         // The chunk is fully encrypted but finished==false for now,
@@ -645,14 +655,15 @@ bool EncryptByChunks::encrypt(m_off_t pos, m_off_t npos, string& urlSuffix)
         macs->ctr_encrypt(startpos,
                           key,
                           buf,
-                          unsigned(chunksize),
+                          // ChunkedHash bounds each encrypted chunk to 8 * ChunkedHash::SEGSIZE.
+                          static_cast<unsigned>(chunksize),
                           startpos,
                           static_cast<int64_t>(ctriv),
                           false);
 
         LOG_debug << "Encrypted chunk: " << startpos << " - " << endpos << "   Size: " << chunksize;
 
-        updateCRC(buf, unsigned(chunksize), unsigned(startpos - pos));
+        updateCRC(buf, static_cast<size_t>(chunksize), static_cast<size_t>(startpos - pos));
 
         startpos = endpos;
         endpos = ChunkedHash::chunkceil(startpos, finalpos);
@@ -675,7 +686,7 @@ EncryptBufferByChunks::EncryptBufferByChunks(byte* b, SymmCipher* k, chunkmac_ma
 {
 }
 
-byte* EncryptBufferByChunks::nextbuffer(unsigned bufsize)
+byte* EncryptBufferByChunks::nextbuffer(size_t bufsize)
 {
     byte* pos = chunkstart;
     chunkstart += bufsize;
@@ -695,8 +706,8 @@ void HttpReqUL::prepare(const char* tempurl,
     eb.encrypt(uploadPosition, npos, urlSuffix);
 
     // unpad for POSTing
-    size = (unsigned)(npos - uploadPosition);
-    out->resize(size);
+    size = static_cast<uint64_t>(npos - uploadPosition);
+    out->resize(static_cast<size_t>(size));
 
     setreq((tempurl + urlSuffix).c_str(), REQ_BINARY);
 }

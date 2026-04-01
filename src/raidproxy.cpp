@@ -641,7 +641,7 @@ m_off_t PartFetcher::progress() const
             }
             else
             {
-                reqsProgress = httpReq->size;
+                reqsProgress = static_cast<m_off_t>(httpReq->size);
             }
             break;
         }

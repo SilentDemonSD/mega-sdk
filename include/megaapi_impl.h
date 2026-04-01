@@ -3080,14 +3080,14 @@ class EncryptFilePieceByChunks : public EncryptByChunks
     FileAccess* faout;
     m_off_t inpos, outpos;
     string buffer;
-    unsigned lastsize;
+    size_t lastsize;
 
 public:
 
     EncryptFilePieceByChunks(FileAccess* cFain, m_off_t cInPos, FileAccess* cFaout, m_off_t cOutPos,
                              SymmCipher* cipher, chunkmac_map* chunkmacs, uint64_t ctriv);
 
-    byte* nextbuffer(unsigned bufsize) override;
+    byte* nextbuffer(size_t bufsize) override;
 };
 
 class MegaBackgroundMediaUploadPrivate : public MegaBackgroundMediaUpload
