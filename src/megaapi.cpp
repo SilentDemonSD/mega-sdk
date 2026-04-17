@@ -8018,6 +8018,11 @@ std::optional<int64_t> MegaEvent::getNumber(const std::string& /* key */) const
     return std::nullopt;
 }
 
+MegaIntegerList* MegaEvent::getIntegerList() const
+{
+    return nullptr;
+}
+
 MegaHandleList *MegaHandleList::createInstance()
 {
     return new MegaHandleListPrivate();

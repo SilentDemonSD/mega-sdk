@@ -15630,6 +15630,9 @@ string MegaClient::getTransferDBName()
 void MegaClient::resumeTransferFromDB()
 {
     TransferDbCommitter committer(tctable);
+
+    std::vector<uint32_t> resumedUniqueIds;
+
     for (unsigned int i = 0; i < cachedfiles.size(); i++)
     {
         direction_t type = NONE;
@@ -15682,6 +15685,7 @@ void MegaClient::resumeTransferFromDB()
                                    tag,
                                    std::nullopt,
                                    data.inboxTarget);
+                resumedUniqueIds.push_back(file->dbid);
                 break;
             }
         }
@@ -15721,10 +15725,17 @@ void MegaClient::resumeTransferFromDB()
                 }
                 continue;
             }
+            resumedUniqueIds.push_back(file->dbid);
         }
     }
 
     purgeOrphanTransfers(true);
+
+    // fire after the loop so only resumed transfers are reported
+    if (!resumedUniqueIds.empty())
+    {
+        app->notify_transfers_resumed(resumedUniqueIds);
+    }
 
     cachedfiles.clear();
     cachedfilesdbids.clear();

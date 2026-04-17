@@ -40242,11 +40242,13 @@ MegaEventPrivate::MegaEventPrivate(MegaEventPrivate *event)
     this->setText(event->getText());
     this->setNumber(event->getNumber());
     this->setHandle(event->getHandle());
+    mIntegerList = event->mIntegerList ? event->mIntegerList->copy() : nullptr;
 }
 
 MegaEventPrivate::~MegaEventPrivate()
 {
     delete [] text;
+    delete mIntegerList;
 }
 
 MegaEvent *MegaEventPrivate::copy()
@@ -40302,6 +40304,17 @@ MegaHandle MegaEventPrivate::getHandle() const
     return mHandle;
 }
 
+MegaIntegerList* MegaEventPrivate::getIntegerList() const
+{
+    return mIntegerList;
+}
+
+void MegaEventPrivate::setIntegerList(MegaIntegerList* integerList)
+{
+    delete mIntegerList;
+    mIntegerList = integerList;
+}
+
 const char *MegaEventPrivate::getEventString() const
 {
     return MegaEventPrivate::getEventString(type);
@@ -40339,6 +40352,8 @@ const char *MegaEventPrivate::getEventString(int type)
             return "CREDIT_CARD_EXPIRY";
         case MegaEvent::EVENT_NETWORK_ACTIVITY:
             return "NETWORK_ACTIVITY";
+        case MegaEvent::EVENT_TRANSFERS_RESUMED:
+            return "TRANSFERS_RESUMED";
     }
 
     return "UNKNOWN";
@@ -42367,6 +42382,13 @@ void MegaApiImpl::notify_network_activity(int networkActivityChannel,
     event->setNumber("channel", networkActivityChannel);
     event->setNumber("activity_type", networkActivityType);
     event->setNumber("error_code", code);
+    fireOnEvent(event);
+}
+
+void MegaApiImpl::notify_transfers_resumed(const std::vector<uint32_t>& uniqueIds)
+{
+    MegaEventPrivate* event = new MegaEventPrivate(MegaEvent::EVENT_TRANSFERS_RESUMED);
+    event->setIntegerList(new MegaIntegerListPrivate(uniqueIds));
     fireOnEvent(event);
 }
 
