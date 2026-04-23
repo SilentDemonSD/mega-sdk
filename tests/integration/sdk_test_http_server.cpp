@@ -605,6 +605,37 @@ TEST_F(SdkHttpServerTest, BasicGet)
 }
 
 /**
+ * Test basic HTTP server rate limit with GET request.
+ */
+TEST_F(SdkHttpServerTest, BasicGetWithRateLimit)
+{
+    ASSERT_NO_FATAL_FAILURE(getAccountsForTest(1));
+
+    MegaApi* api = megaApi[0].get();
+
+    // 1MBytes(8Mbits) data
+    std::string testFileContent = randomBytes(1024 * 1024);
+    std::unique_ptr<MegaNode> uploadedNode =
+        uploadFile(0, "test_http_basic_with_ratelimit.bin", testFileContent);
+    ASSERT_NE(uploadedNode, nullptr);
+
+    auto server = scopedHttpServer(api);
+    ASSERT_TRUE(server);
+
+    // 256Kbytes per second (2Mbits per second)
+    api->httpServerSetThrottleBitrate(2 * 1024 * 1024);
+
+    std::unique_ptr<char[]> link(api->httpServerGetLocalLink(uploadedNode.get()));
+    ASSERT_NE(link, nullptr);
+    std::string url = link.get();
+
+    auto response = HttpClient::get(url);
+    ASSERT_EQ(200, response.statusCode);
+    ASSERT_EQ(testFileContent.size(), response.body.size());
+    ASSERT_EQ(testFileContent.compare(response.body), 0);
+}
+
+/**
  * Test HTTP server with HEAD request.
  */
 TEST_F(SdkHttpServerTest, HeadRequest)
