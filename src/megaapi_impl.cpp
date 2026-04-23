@@ -36863,7 +36863,7 @@ static bool rateLimiting(MegaHTTPContext* httpctx)
     if (delayMs <= 1)
         return false;
 
-    LOG_verbose_timed(milliseconds{20'000}, milliseconds{200})
+    LOG_verbose_timed(milliseconds{120'000}, milliseconds{100})
         << httpctx->getLogName() << "[Throttle] TCP delay " << delayMs
         << "ms (expected=" << expectedMs << "ms, elapsed=" << elapsedMs
         << "ms, written=" << throttleWritten << ", throttle=" << throttleBps << " bps)";
