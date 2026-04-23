@@ -34,6 +34,7 @@
 #include "mega/file_service/file.h"
 #include "mega/file_service/file_callbacks.h"
 #include "mega/file_service/file_id.h"
+#include "mega/file_service/file_info.h"
 #include "mega/file_service/file_service_context.h"
 #include "mega/file_service/file_service_options.h"
 #include "mega/file_service/file_service_result.h"
@@ -7017,6 +7018,7 @@ void MegaApiImpl::init(MegaApi* publicApi,
     httpServer = NULL;
     httpServerMaxBufferSize = 0;
     httpServerMaxOutputSize = 0;
+    httpServerThrottleBitrateBps = 0;
     httpServerEnableFiles = true;
     httpServerEnableFolders = false;
     httpServerOfflineAttributeEnabled = false;
@@ -11402,6 +11404,23 @@ int MegaApiImpl::httpServerGetMaxOutputSize()
     {
         return StreamingBuffer::MAX_OUTPUT_SIZE;
     }
+}
+
+void MegaApiImpl::httpServerSetThrottleBitrate(long long bitrateBps)
+{
+    // No less than 0
+    long long newValue = std::max(bitrateBps, 0ll);
+
+    LOG_debug << "[Throttle] httpServerSetThrottleBitrate: " << httpServerThrottleBitrateBps
+              << " -> " << newValue << " bps"
+              << " (" << (newValue / 8 / 1024 / 1024) << " MB/s)";
+
+    httpServerThrottleBitrateBps = newValue;
+}
+
+long long MegaApiImpl::httpServerGetThrottleBitrate()
+{
+    return httpServerThrottleBitrateBps;
 }
 
 void MegaApiImpl::httpServerEnableFileServer(bool enable)
@@ -33550,6 +33569,8 @@ void StreamingBuffer::calcMaxBufferAndMaxOutputSize()
     maxBufferSize = (std::max(maxBufferSize, minNeededBufferSize) / maxReadChunkSize) * maxReadChunkSize;
     // Set max outputSize depending on maxDeliveryChunksPerByteRate. Limit is maxBufferSize.
     maxOutputSize = std::min(maxDeliveryChunksPerByteRate * maxReadChunkSize, maxBufferSize);
+    // Limit single TCP write size to 128KB for throttled delivery
+    maxOutputSize = std::min(maxOutputSize, static_cast<size_t>(1u << 17));
 }
 
 void StreamingBuffer::reset(bool freeData, size_t sizeToReset)
@@ -34092,6 +34113,11 @@ void MegaTCPServer::stop(bool doNotWait)
 int MegaTCPServer::getPort()
 {
     return port;
+}
+
+uv_loop_t* MegaTCPServer::getUvLoop()
+{
+    return &uv_loop;
 }
 
 bool MegaTCPServer::isLocalOnly()
@@ -36522,6 +36548,7 @@ bool MegaHTTPServer::startStream(MegaHTTPContext* httpctx,
         }
 
         const auto receivedLength = result->mLength;
+
         LOG_verbose << ctxPtr->logname << "[Streaming] callback: requested [" << offset << ","
                     << length << "] received " << receivedLength;
 
@@ -36556,7 +36583,7 @@ bool MegaHTTPServer::startStream(MegaHTTPContext* httpctx,
         if (!hasMore)
         {
             LOG_verbose << ctxPtr->logname << "[Streaming] callback: consumed " << consumedLength
-                        << "," << receivedLength << " , streaming more";
+                        << "," << receivedLength << " , calling mContinue";
             result->mContinue(receivedLength);
         }
     };
@@ -36780,6 +36807,79 @@ void MegaHTTPServer::processAsyncEvent(MegaTCPContext* tcpctx)
     sendNextBytes(httpctx);
 }
 
+// Adaptive rate limiting at TCP output — only delay when data is delivered
+// faster than the throttle rate. Uses one-shot uv_timer to avoid blocking the event loop.
+// return false if rate limit is not needed, otherwise true.
+static bool rateLimiting(MegaHTTPContext* httpctx)
+{
+    using std::chrono::duration_cast;
+    using std::chrono::milliseconds;
+    using std::chrono::steady_clock;
+
+    assert(httpctx);
+
+    const auto throttleBps = httpctx->megaApi->httpServerGetThrottleBitrate();
+    if (throttleBps <= 0)
+        return false;
+
+    // Record start time on first throttled entry for this connection
+    if (!httpctx->throttleLastChunkTime)
+    {
+        httpctx->throttleLastChunkTime = steady_clock::now();
+    }
+
+    // No data written yet
+    if (httpctx->rangeWritten <= 0)
+        return false;
+
+    const auto now = steady_clock::now();
+    const int64_t bytesPerSec = static_cast<int64_t>(throttleBps) / 8;
+    const int64_t elapsedMs =
+        duration_cast<milliseconds>(now - *httpctx->throttleLastChunkTime).count();
+    const int64_t expectedMs = static_cast<int64_t>(httpctx->rangeWritten * 1000 / bytesPerSec);
+    const int64_t delayMs = expectedMs - elapsedMs;
+
+    if (delayMs <= 1)
+        return false;
+
+    LOG_verbose_timed(milliseconds{20'000}, milliseconds{200})
+        << httpctx->getLogName() << "[Throttle] TCP delay " << delayMs
+        << "ms (expected=" << expectedMs << "ms, elapsed=" << elapsedMs
+        << "ms, written=" << httpctx->rangeWritten << ", throttle=" << throttleBps << " bps)";
+
+    auto timerHandler = [](uv_timer_t* t)
+    {
+        auto* weakHandle = static_cast<std::weak_ptr<MegaHTTPContext>*>(t->data);
+
+        uv_timer_stop(t);
+
+        uv_close(reinterpret_cast<uv_handle_t*>(t),
+                 [](uv_handle_t* h)
+                 {
+                     delete reinterpret_cast<uv_timer_t*>(h);
+                 });
+
+        if (!weakHandle)
+            return;
+
+        auto ctx = weakHandle->lock();
+        if (!ctx || ctx->finished)
+            return;
+
+        uv_async_send(&ctx->asynchandle);
+    };
+
+    // Init a timer
+    auto* timer = new uv_timer_t();
+    uv_timer_init(httpctx->server->getUvLoop(), timer);
+    timer->data = new std::weak_ptr<MegaHTTPContext>{httpctx->weak_from_this()};
+
+    // start the timer and timer's ownership belongs to the timerHandler
+    uv_timer_start(timer, timerHandler, static_cast<uint64_t>(delayMs), 0);
+
+    return true;
+}
+
 void MegaHTTPServer::sendNextBytes(MegaHTTPContext *httpctx)
 {
     if (httpctx->finished)
@@ -36794,6 +36894,9 @@ void MegaHTTPServer::sendNextBytes(MegaHTTPContext *httpctx)
                     << "[Streaming] Skipping write due to another ongoing write";
         return;
     }
+
+    if (rateLimiting(httpctx))
+        return;
 
     uv_mutex_lock(&httpctx->mutex);
     if (httpctx->lastBufferLen)
@@ -36820,7 +36923,6 @@ void MegaHTTPServer::sendNextBytes(MegaHTTPContext *httpctx)
         return;
     }
 
-    LOG_verbose << httpctx->getLogName() << "Writing " << resbuf.len << " bytes";
     httpctx->rangeWritten += resbuf.len;
     httpctx->lastBuffer = resbuf.base;
     httpctx->lastBufferLen = resbuf.len;

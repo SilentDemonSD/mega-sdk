@@ -5094,6 +5094,16 @@ int MegaApi::httpServerGetMaxOutputSize()
     return pImpl->httpServerGetMaxOutputSize();
 }
 
+void MegaApi::httpServerSetThrottleBitrate(long long bitrateBps)
+{
+    pImpl->httpServerSetThrottleBitrate(bitrateBps);
+}
+
+long long MegaApi::httpServerGetThrottleBitrate()
+{
+    return pImpl->httpServerGetThrottleBitrate();
+}
+
 //FTP Server:
 bool MegaApi::ftpServerStart(bool localOnly, int port, int dataportBegin, int dataPortEnd, bool useTLS, const char * certificatepath, const char * keypath)
 {

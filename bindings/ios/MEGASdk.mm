@@ -3578,6 +3578,17 @@ using namespace mega;
     return (NSInteger)self.megaApi->httpServerGetMaxOutputSize();
 }
 
+- (void)httpServerSetThrottleBitrate:(long long)bitrateBps {
+    if (self.megaApi) {
+        self.megaApi->httpServerSetThrottleBitrate(bitrateBps);
+    }
+}
+
+- (long long)httpServerGetThrottleBitrate {
+    if (self.megaApi == nil) return 0;
+    return self.megaApi->httpServerGetThrottleBitrate();
+}
+
 #endif
 
 + (NSString *)mimeTypeByExtension:(NSString *)extension {

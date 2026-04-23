@@ -8817,6 +8817,26 @@ typedef NS_ENUM(NSInteger, PasswordManagerNodeType) {
  */
 - (NSInteger)httpServerGetMaxOutputSize;
 
+/**
+ * @brief Set the throttle bitrate for cached data delivery (in bits per second).
+ *
+ * When serving from local cache, data delivery is throttled to this rate
+ * to prevent AVPlayer audio loss. Set to 0 to disable. Recommended: 2x video bitrate.
+ *
+ * Note: this setting is HTTP server wide. All videos being streamed at the time are
+ * affected.
+ *
+ * @param bitrateBps Throttle bitrate in bits per second, or 0 to disable
+ */
+- (void)httpServerSetThrottleBitrate:(long long)bitrateBps;
+
+/**
+ * @brief Get the current throttle bitrate setting
+ *
+ * @return Throttle bitrate in bits per second, or 0 if disabled
+ */
+- (long long)httpServerGetThrottleBitrate;
+
 #endif
 
 /**

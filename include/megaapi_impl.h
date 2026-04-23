@@ -4651,6 +4651,8 @@ public:
         int httpServerGetMaxBufferSize();
         void httpServerSetMaxOutputSize(int outputSize);
         int httpServerGetMaxOutputSize();
+        void httpServerSetThrottleBitrate(long long bitrateBps);
+        long long httpServerGetThrottleBitrate();
 
         // permissions
         void httpServerEnableFileServer(bool enable);
@@ -4975,6 +4977,7 @@ public:
         MegaHTTPServer *httpServer;
         int httpServerMaxBufferSize;
         int httpServerMaxOutputSize;
+        std::atomic_llong httpServerThrottleBitrateBps{0}; // bps, 0 = disabled
         bool httpServerEnableFiles;
         bool httpServerEnableFolders;
         bool httpServerOfflineAttributeEnabled;
@@ -5829,6 +5832,7 @@ public:
     bool start(int newPort, bool newLocalOnly = true);
     void stop(bool doNotWait = false);
     int getPort();
+    uv_loop_t* getUvLoop();
     bool isLocalOnly();
     void setMaxBufferSize(int bufferSize);
     void setMaxOutputSize(int outputSize);
@@ -5882,6 +5886,10 @@ public:
     http_parser parser;
     char *lastBuffer;
     size_t lastBufferLen;
+
+    // Rate limiting: adaptive — only delay when data arrives faster than throttle rate
+    std::optional<std::chrono::steady_clock::time_point> throttleLastChunkTime{};
+
     bool nodereceived;
     std::atomic_bool failed{false};
 

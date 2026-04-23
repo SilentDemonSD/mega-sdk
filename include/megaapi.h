@@ -21804,6 +21804,29 @@ class MegaApi
         int httpServerGetMaxOutputSize();
 
         /**
+         * @brief Set the throttle bitrate for cached data delivery (in bits per second).
+         *
+         * When the HTTP server serves data from local cache, it can deliver data
+         * at memory speed which may overwhelm AVPlayer's internal buffering.
+         * Setting a throttle bitrate limits the delivery rate to prevent audio loss.
+         *
+         * Note: this setting is HTTP server wide. All videos being streamed at the time are
+         * affected.
+         *
+         * A value of 0 disables throttling. Recommended: 2x the video bitrate and iOS only
+         *
+         * @param bitrateBps Throttle bitrate in bits per second, or 0 to disable
+         */
+        void httpServerSetThrottleBitrate(long long bitrateBps);
+
+        /**
+         * @brief Get the current throttle bitrate setting
+         *
+         * @return Throttle bitrate in bits per second, or 0 if disabled
+         */
+        long long httpServerGetThrottleBitrate();
+
+        /**
          * @brief Start an FTP server in specified port
          *
          * If this function returns true, that means that the server is
