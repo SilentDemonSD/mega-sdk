@@ -36819,6 +36819,26 @@ static bool rateLimiting(MegaHTTPContext* httpctx)
     assert(httpctx);
 
     const auto throttleBps = httpctx->megaApi->httpServerGetThrottleBitrate();
+
+    // Throttle Bps may changes for the following reasons:
+    // 1. a new playback
+    // 2. playback speed change such as from 1x to 2x
+    if (throttleBps != httpctx->throttleBps)
+    {
+        // Set to new
+        httpctx->throttleBps = throttleBps;
+
+        // Reset
+        httpctx->throttleLastChunkTime = std::nullopt;
+
+        // Remeber offset in this throttleBps started cycle
+        if (httpctx->rangeWritten > 0)
+        {
+            httpctx->throttleOffset = httpctx->rangeWritten;
+        }
+    }
+
+    // Disabled
     if (throttleBps <= 0)
         return false;
 
@@ -36828,15 +36848,16 @@ static bool rateLimiting(MegaHTTPContext* httpctx)
         httpctx->throttleLastChunkTime = steady_clock::now();
     }
 
-    // No data written yet
-    if (httpctx->rangeWritten <= 0)
+    // No more data written yet
+    if (httpctx->rangeWritten <= 0 || httpctx->rangeWritten <= httpctx->throttleOffset)
         return false;
 
+    const auto throttleWritten = httpctx->rangeWritten - httpctx->throttleOffset.value_or(0);
     const auto now = steady_clock::now();
     const int64_t bytesPerSec = static_cast<int64_t>(throttleBps) / 8;
     const int64_t elapsedMs =
         duration_cast<milliseconds>(now - *httpctx->throttleLastChunkTime).count();
-    const int64_t expectedMs = static_cast<int64_t>(httpctx->rangeWritten * 1000 / bytesPerSec);
+    const int64_t expectedMs = static_cast<int64_t>(throttleWritten * 1000 / bytesPerSec);
     const int64_t delayMs = expectedMs - elapsedMs;
 
     if (delayMs <= 1)
@@ -36845,7 +36866,7 @@ static bool rateLimiting(MegaHTTPContext* httpctx)
     LOG_verbose_timed(milliseconds{20'000}, milliseconds{200})
         << httpctx->getLogName() << "[Throttle] TCP delay " << delayMs
         << "ms (expected=" << expectedMs << "ms, elapsed=" << elapsedMs
-        << "ms, written=" << httpctx->rangeWritten << ", throttle=" << throttleBps << " bps)";
+        << "ms, written=" << throttleWritten << ", throttle=" << throttleBps << " bps)";
 
     auto timerHandler = [](uv_timer_t* t)
     {

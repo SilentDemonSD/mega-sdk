@@ -5888,7 +5888,9 @@ public:
     size_t lastBufferLen;
 
     // Rate limiting: adaptive — only delay when data arrives faster than throttle rate
+    long long throttleBps{0};
     std::optional<std::chrono::steady_clock::time_point> throttleLastChunkTime{};
+    std::optional<m_off_t> throttleOffset{};
 
     bool nodereceived;
     std::atomic_bool failed{false};
