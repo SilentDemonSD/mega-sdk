@@ -2268,6 +2268,10 @@ class MegaRequestPrivate : public MegaRequest
         const MegaDiscountCodeInfo* getMegaDiscountCodeInfo() const override;
         void setMegaDiscountCodeInfo(std::unique_ptr<MegaDiscountCodeInfo> discountCodeInfo);
 
+        const MegaFileServiceReclaimOptions* getMegaFileServiceReclaimOptions() const override;
+        // Take ownership of the options object.
+        void setMegaFileServiceReclaimOptions(MegaFileServiceReclaimOptions* options);
+
         static bool causesLocklessRequest(const int type);
 
     protected:
@@ -2341,6 +2345,8 @@ class MegaRequestPrivate : public MegaRequest
 
         unique_ptr<MegaDiscountCodeList> mMegaDiscountCodeList;
         unique_ptr<MegaDiscountCodeInfo> mMegaDiscountCodeInfo;
+
+        unique_ptr<MegaFileServiceReclaimOptions> mMegaFileServiceReclaimOptions;
 
     public:
         shared_ptr<ExecuteOnce> functionToExecute;
@@ -4895,7 +4901,8 @@ public:
 
         void fileServiceSetReclaimOptions(const MegaFileServiceReclaimOptions* options);
 
-        void fileServiceReclaim(MegaRequestListener* listener);
+        void fileServiceReclaim(const MegaFileServiceReclaimOptions* options,
+                                MegaRequestListener* listener);
 
         MegaFileServiceStorageInfo* fileServiceGetStorageInfo();
 

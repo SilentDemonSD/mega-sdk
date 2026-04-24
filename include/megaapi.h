@@ -6468,6 +6468,17 @@ class MegaRequest
          * otherwise.
          */
         virtual const MegaDiscountCodeInfo* getMegaDiscountCodeInfo() const;
+
+        /**
+         * @brief Get information about reclaim options
+         *
+         * The SDK retains the ownership of the returned value. It will be valid until
+         * the MegaRequest object is deleted.
+         *
+         * @return non-null pointer if a valid MegaApi functionality has been called, null
+         * otherwise.
+         */
+        virtual const MegaFileServiceReclaimOptions* getMegaFileServiceReclaimOptions() const;
 };
 
 /**
@@ -24939,7 +24950,8 @@ class MegaApi
         void fileServiceSetReclaimOptions(const MegaFileServiceReclaimOptions* options);
 
         /**
-         * @brief Trigger the file services to reclaim storage according to the current options.
+         * @brief Trigger the file services to reclaim storage according to the current options or
+         * input options.
          *
          * The associated request type with this request is MegaRequest::TYPE_FILE_SERVICE_RECLAIM.
          *
@@ -24949,8 +24961,15 @@ class MegaApi
          *
          * If the request fails, the MegaError code in onRequestFinish can be:
          * - MegaError::API_EINTERNAL - If the reclaim process failed to run.
+         *
+         * @param options Options to consider when reclaiming storage used by MEGA's file services.
+         * If nullptr, the current reclaim options will be used. See
+         * MegaApi::fileServiceGetReclaimOptions and MegaApi::fileServiceSetReclaimOptions.
+         *
+         * @param listener MegaRequestListener to track this request
          */
-        void fileServiceReclaim(MegaRequestListener* listener);
+        void fileServiceReclaim(const MegaFileServiceReclaimOptions* options,
+                                MegaRequestListener* listener);
 
         /**
          * @brief Get the file service storage size information.

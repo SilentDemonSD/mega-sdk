@@ -1278,6 +1278,11 @@ const MegaDiscountCodeInfo* MegaRequest::getMegaDiscountCodeInfo() const
     return nullptr;
 }
 
+const MegaFileServiceReclaimOptions* MegaRequest::getMegaFileServiceReclaimOptions() const
+{
+    return nullptr;
+}
+
 MegaTransfer::~MegaTransfer() { }
 
 MegaTransfer *MegaTransfer::copy()
@@ -6429,9 +6434,10 @@ void MegaApi::fileServiceSetReclaimOptions(const MegaFileServiceReclaimOptions* 
     pImpl->fileServiceSetReclaimOptions(options);
 }
 
-void MegaApi::fileServiceReclaim(MegaRequestListener* listener)
+void MegaApi::fileServiceReclaim(const MegaFileServiceReclaimOptions* options,
+                                 MegaRequestListener* listener)
 {
-    pImpl->fileServiceReclaim(listener);
+    pImpl->fileServiceReclaim(options, listener);
 }
 
 MegaFileServiceStorageInfo* MegaApi::fileServiceGetStorageInfo()

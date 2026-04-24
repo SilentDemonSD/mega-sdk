@@ -4459,6 +4459,9 @@ MegaRequestPrivate::MegaRequestPrivate(MegaRequestPrivate *request)
         request->mMegaDiscountCodeList ? request->mMegaDiscountCodeList->copy() : nullptr);
     this->mMegaDiscountCodeInfo.reset(
         request->mMegaDiscountCodeInfo ? request->mMegaDiscountCodeInfo->copy() : nullptr);
+    this->mMegaFileServiceReclaimOptions.reset(request->mMegaFileServiceReclaimOptions ?
+                                                   request->mMegaFileServiceReclaimOptions->copy() :
+                                                   nullptr);
 }
 
 std::shared_ptr<AccountDetails> MegaRequestPrivate::getAccountDetails() const
@@ -5463,6 +5466,16 @@ void MegaRequestPrivate::setMegaDiscountCodeInfo(
     std::unique_ptr<MegaDiscountCodeInfo> discountCodeInfo)
 {
     mMegaDiscountCodeInfo = std::move(discountCodeInfo);
+}
+
+const MegaFileServiceReclaimOptions* MegaRequestPrivate::getMegaFileServiceReclaimOptions() const
+{
+    return mMegaFileServiceReclaimOptions.get();
+}
+
+void MegaRequestPrivate::setMegaFileServiceReclaimOptions(MegaFileServiceReclaimOptions* options)
+{
+    mMegaFileServiceReclaimOptions.reset(options);
 }
 
 bool MegaRequestPrivate::causesLocklessRequest(const int type)
@@ -29487,10 +29500,28 @@ void MegaApiImpl::fileServiceSetReclaimOptions(const MegaFileServiceReclaimOptio
     client->mFileService.reclaimOptions(optionsImpl->getOptions());
 }
 
-void MegaApiImpl::fileServiceReclaim(MegaRequestListener* listener)
+static file_service::ReclaimOptions
+    toReclaimOptions(const MegaFileServiceReclaimOptions* inputOptions)
+{
+    assert(inputOptions);
+    file_service::ReclaimOptions reclaimOptions;
+    reclaimOptions.mAgeThreshold = std::chrono::minutes(inputOptions->getAgeThreshold());
+    reclaimOptions.mBatchSize = inputOptions->getBatchSize();
+    reclaimOptions.mDelay = std::chrono::seconds(inputOptions->getDelay());
+    reclaimOptions.mPeriod = std::chrono::seconds(inputOptions->getPeriod());
+    reclaimOptions.mReclaimThreshold = inputOptions->getReclaimThreshold();
+    reclaimOptions.mReclaimTarget = inputOptions->getReclaimTarget();
+    return reclaimOptions;
+}
+
+void MegaApiImpl::fileServiceReclaim(const MegaFileServiceReclaimOptions* options,
+                                     MegaRequestListener* listener)
 {
     auto request =
         std::make_unique<MegaRequestPrivate>(MegaRequest::TYPE_FILE_SERVICE_RECLAIM, listener);
+
+    if (options)
+        request->setMegaFileServiceReclaimOptions(options->copy());
 
     // Reclaim result callback
     auto callback =
@@ -29501,20 +29532,30 @@ void MegaApiImpl::fileServiceReclaim(MegaRequestListener* listener)
         this->fireOnRequestFinish(r, std::move(error));
     };
 
-    request->performRequest = [this, callback = std::move(callback)]()
+    request->performRequest = [this, callback = std::move(callback), request = request.get()]()
     {
-        // Get reclaim options
-        auto reclaimOptions = client->mFileService.reclaimOptions();
-        if (!reclaimOptions)
+        file_service::ReclaimOptions reclaimOptions;
+        if (auto* inputOptions = request->getMegaFileServiceReclaimOptions())
         {
-            return API_EINTERNAL;
+            // Use input options
+            reclaimOptions = toReclaimOptions(inputOptions);
+        }
+        else
+        {
+            // Use current file service options
+            auto result = client->mFileService.reclaimOptions();
+            if (!result)
+            {
+                return API_EINTERNAL;
+            }
+
+            // Set and let reclaim can run immediately by set mReclaimThreshold to 0
+            reclaimOptions = *result;
+            reclaimOptions.mReclaimThreshold = 0;
         }
 
-        // Set so reclaim can run immediately
-        reclaimOptions->mReclaimThreshold = 0;
-
         // Start a reclaim task
-        const auto ret = this->client->mFileService.reclaim(std::move(callback));
+        const auto ret = this->client->mFileService.reclaim(std::move(callback), reclaimOptions);
         // Started successfully or not
         return ret == file_service::FILE_SERVICE_SUCCESS ? API_OK : API_EINTERNAL;
     };
