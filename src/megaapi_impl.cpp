@@ -36810,31 +36810,29 @@ void MegaHTTPServer::processAsyncEvent(MegaTCPContext* tcpctx)
 // Adaptive rate limiting at TCP output — only delay when data is delivered
 // faster than the throttle rate. Uses one-shot uv_timer to avoid blocking the event loop.
 // return false if rate limit is not needed, otherwise true.
-static bool rateLimiting(MegaHTTPContext* httpctx)
+static bool rateLimiting(MegaHTTPContext& httpctx)
 {
     using std::chrono::duration_cast;
     using std::chrono::milliseconds;
     using std::chrono::steady_clock;
 
-    assert(httpctx);
-
-    const auto throttleBps = httpctx->megaApi->httpServerGetThrottleBitrate();
+    const auto throttleBps = httpctx.megaApi->httpServerGetThrottleBitrate();
 
     // Throttle Bps may changes for the following reasons:
     // 1. a new playback
     // 2. playback speed change such as from 1x to 2x
-    if (throttleBps != httpctx->throttleBps)
+    if (throttleBps != httpctx.throttleBps)
     {
         // Set to new
-        httpctx->throttleBps = throttleBps;
+        httpctx.throttleBps = throttleBps;
 
         // Reset
-        httpctx->throttleLastChunkTime = std::nullopt;
+        httpctx.throttleLastChunkTime = std::nullopt;
 
         // Remeber offset in this throttleBps started cycle
-        if (httpctx->rangeWritten > 0)
+        if (httpctx.rangeWritten > 0)
         {
-            httpctx->throttleOffset = httpctx->rangeWritten;
+            httpctx.throttleOffset = httpctx.rangeWritten;
         }
     }
 
@@ -36843,20 +36841,20 @@ static bool rateLimiting(MegaHTTPContext* httpctx)
         return false;
 
     // Record start time on first throttled entry for this connection
-    if (!httpctx->throttleLastChunkTime)
+    if (!httpctx.throttleLastChunkTime)
     {
-        httpctx->throttleLastChunkTime = steady_clock::now();
+        httpctx.throttleLastChunkTime = steady_clock::now();
     }
 
     // No more data written yet
-    if (httpctx->rangeWritten <= 0 || httpctx->rangeWritten <= httpctx->throttleOffset)
+    if (httpctx.rangeWritten <= 0 || httpctx.rangeWritten <= httpctx.throttleOffset)
         return false;
 
-    const auto throttleWritten = httpctx->rangeWritten - httpctx->throttleOffset.value_or(0);
+    const auto throttleWritten = httpctx.rangeWritten - httpctx.throttleOffset.value_or(0);
     const auto now = steady_clock::now();
     const int64_t bytesPerSec = static_cast<int64_t>(throttleBps) / 8;
     const int64_t elapsedMs =
-        duration_cast<milliseconds>(now - *httpctx->throttleLastChunkTime).count();
+        duration_cast<milliseconds>(now - *httpctx.throttleLastChunkTime).count();
     const int64_t expectedMs = static_cast<int64_t>(throttleWritten * 1000 / bytesPerSec);
     const int64_t delayMs = expectedMs - elapsedMs;
 
@@ -36864,7 +36862,7 @@ static bool rateLimiting(MegaHTTPContext* httpctx)
         return false;
 
     LOG_verbose_timed(milliseconds{120'000}, milliseconds{100})
-        << httpctx->getLogName() << "[Throttle] TCP delay " << delayMs
+        << httpctx.getLogName() << "[Throttle] TCP delay " << delayMs
         << "ms (expected=" << expectedMs << "ms, elapsed=" << elapsedMs
         << "ms, written=" << throttleWritten << ", throttle=" << throttleBps << " bps)";
 
@@ -36892,8 +36890,8 @@ static bool rateLimiting(MegaHTTPContext* httpctx)
 
     // Init a timer
     auto* timer = new uv_timer_t();
-    uv_timer_init(httpctx->server->getUvLoop(), timer);
-    timer->data = new std::weak_ptr<MegaHTTPContext>{httpctx->weak_from_this()};
+    uv_timer_init(httpctx.server->getUvLoop(), timer);
+    timer->data = new std::weak_ptr<MegaHTTPContext>{httpctx.weak_from_this()};
 
     // start the timer and timer's ownership belongs to the timerHandler
     uv_timer_start(timer, timerHandler, static_cast<uint64_t>(delayMs), 0);
@@ -36916,7 +36914,7 @@ void MegaHTTPServer::sendNextBytes(MegaHTTPContext *httpctx)
         return;
     }
 
-    if (rateLimiting(httpctx))
+    if (rateLimiting(*httpctx))
         return;
 
     uv_mutex_lock(&httpctx->mutex);
