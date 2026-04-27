@@ -11406,19 +11406,16 @@ int MegaApiImpl::httpServerGetMaxOutputSize()
     }
 }
 
-void MegaApiImpl::httpServerSetThrottleBitrate(long long bitrateBps)
+void MegaApiImpl::httpServerSetThrottleBitrate(unsigned long long bitrateBps)
 {
-    // No less than 0
-    long long newValue = std::max(bitrateBps, 0ll);
-
     LOG_debug << "[Throttle] httpServerSetThrottleBitrate: " << httpServerThrottleBitrateBps
-              << " -> " << newValue << " bps"
-              << " (" << (newValue / 8 / 1024 / 1024) << " MB/s)";
+              << " -> " << bitrateBps << " bps"
+              << " (" << (bitrateBps / 8 / 1024 / 1024) << " MB/s)";
 
-    httpServerThrottleBitrateBps = newValue;
+    httpServerThrottleBitrateBps = bitrateBps;
 }
 
-long long MegaApiImpl::httpServerGetThrottleBitrate()
+unsigned long long MegaApiImpl::httpServerGetThrottleBitrate()
 {
     return httpServerThrottleBitrateBps;
 }

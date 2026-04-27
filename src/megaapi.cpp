@@ -5094,12 +5094,12 @@ int MegaApi::httpServerGetMaxOutputSize()
     return pImpl->httpServerGetMaxOutputSize();
 }
 
-void MegaApi::httpServerSetThrottleBitrate(long long bitrateBps)
+void MegaApi::httpServerSetThrottleBitrate(unsigned long long bitrateBps)
 {
     pImpl->httpServerSetThrottleBitrate(bitrateBps);
 }
 
-long long MegaApi::httpServerGetThrottleBitrate()
+unsigned long long MegaApi::httpServerGetThrottleBitrate()
 {
     return pImpl->httpServerGetThrottleBitrate();
 }

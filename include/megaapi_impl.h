@@ -4651,8 +4651,8 @@ public:
         int httpServerGetMaxBufferSize();
         void httpServerSetMaxOutputSize(int outputSize);
         int httpServerGetMaxOutputSize();
-        void httpServerSetThrottleBitrate(long long bitrateBps);
-        long long httpServerGetThrottleBitrate();
+        void httpServerSetThrottleBitrate(unsigned long long bitrateBps);
+        unsigned long long httpServerGetThrottleBitrate();
 
         // permissions
         void httpServerEnableFileServer(bool enable);
@@ -4977,7 +4977,7 @@ public:
         MegaHTTPServer *httpServer;
         int httpServerMaxBufferSize;
         int httpServerMaxOutputSize;
-        std::atomic_llong httpServerThrottleBitrateBps{0}; // bps, 0 = disabled
+        std::atomic_ullong httpServerThrottleBitrateBps{0}; // bps, 0 = disabled
         bool httpServerEnableFiles;
         bool httpServerEnableFolders;
         bool httpServerOfflineAttributeEnabled;
@@ -5888,7 +5888,7 @@ public:
     size_t lastBufferLen;
 
     // Rate limiting: adaptive — only delay when data arrives faster than throttle rate
-    long long throttleBps{0};
+    unsigned long long throttleBps{0};
     std::optional<std::chrono::steady_clock::time_point> throttleLastChunkTime{};
     std::optional<m_off_t> throttleOffset{};
 

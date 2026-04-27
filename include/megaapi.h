@@ -21817,14 +21817,14 @@ class MegaApi
          *
          * @param bitrateBps Throttle bitrate in bits per second, or 0 to disable
          */
-        void httpServerSetThrottleBitrate(long long bitrateBps);
+        void httpServerSetThrottleBitrate(unsigned long long bitrateBps);
 
         /**
          * @brief Get the current throttle bitrate setting
          *
          * @return Throttle bitrate in bits per second, or 0 if disabled
          */
-        long long httpServerGetThrottleBitrate();
+        unsigned long long httpServerGetThrottleBitrate();
 
         /**
          * @brief Start an FTP server in specified port
