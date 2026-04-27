@@ -99,7 +99,7 @@ public:
     auto removeObserver(FileEventObserverID id) -> FileServiceResult;
 
     // Get storage size information in detail such as reclaimable storage size
-    auto storageInfo() -> FileServiceResultOr<StorageInfo>;
+    auto storageInfo(const ReclaimOptions* options = nullptr) -> FileServiceResultOr<StorageInfo>;
 
     // How much storage space is the service using? Better performance than storageInfo but with
     // less information

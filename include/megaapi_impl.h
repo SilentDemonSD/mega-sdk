@@ -4904,7 +4904,8 @@ public:
         void fileServiceReclaim(const MegaFileServiceReclaimOptions* options,
                                 MegaRequestListener* listener);
 
-        MegaFileServiceStorageInfo* fileServiceGetStorageInfo();
+        MegaFileServiceStorageInfo*
+            fileServiceGetStorageInfo(const MegaFileServiceReclaimOptions* options);
 
     private:
         void init(MegaApi* publicApi,

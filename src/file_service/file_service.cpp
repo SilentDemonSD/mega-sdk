@@ -223,14 +223,14 @@ auto FileService::removeObserver(FileEventObserverID id) -> FileServiceResult
     return FILE_SERVICE_SUCCESS;
 }
 
-auto FileService::storageInfo() -> FileServiceResultOr<StorageInfo>
+auto FileService::storageInfo(const ReclaimOptions* options) -> FileServiceResultOr<StorageInfo>
 {
     SharedLock guard(mContextLock);
 
     if (!mContext)
         return unexpected(FILE_SERVICE_UNINITIALIZED);
 
-    return mContext->storageInfo();
+    return mContext->storageInfo(options);
 }
 
 auto FileService::storageUsed() -> FileServiceResultOr<std::uint64_t>

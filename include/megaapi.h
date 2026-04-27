@@ -24963,7 +24963,7 @@ class MegaApi
          * - MegaError::API_EINTERNAL - If the reclaim process failed to run.
          *
          * @param options Options to consider when reclaiming storage used by MEGA's file services.
-         * If nullptr, the current reclaim options will be used. See
+         * If nullptr, the current file service's reclaim options will be used. See
          * MegaApi::fileServiceGetReclaimOptions and MegaApi::fileServiceSetReclaimOptions.
          *
          * @param listener MegaRequestListener to track this request
@@ -24978,8 +24978,13 @@ class MegaApi
          *
          * The caller takes ownership of the returned value and should use delete to release the
          * memory when it's no longer needed.
+         *
+         * @param options Reclaim options to consider when calculating the storage info. If nullptr,
+         * the current file service's reclaim options will be used. See
+         * MegaApi::fileServiceGetReclaimOptions and MegaApi::fileServiceSetReclaimOptions.
          */
-        MegaFileServiceStorageInfo* fileServiceGetStorageInfo();
+        MegaFileServiceStorageInfo*
+            fileServiceGetStorageInfo(const MegaFileServiceReclaimOptions* options);
 
     protected:
         MegaApiImpl *pImpl = nullptr;

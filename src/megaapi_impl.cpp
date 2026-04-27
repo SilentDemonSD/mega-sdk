@@ -29564,9 +29564,21 @@ void MegaApiImpl::fileServiceReclaim(const MegaFileServiceReclaimOptions* option
     waiter->notify();
 }
 
-MegaFileServiceStorageInfo* MegaApiImpl::fileServiceGetStorageInfo()
+MegaFileServiceStorageInfo*
+    MegaApiImpl::fileServiceGetStorageInfo(const MegaFileServiceReclaimOptions* options)
 {
-    const auto storageInfo = client->mFileService.storageInfo();
+    // Default
+    file_service::ReclaimOptions* reclaimOptionsPtr = nullptr;
+
+    // There is input options
+    file_service::ReclaimOptions reclaimOptions;
+    if (options)
+    {
+        reclaimOptions = toReclaimOptions(options);
+        reclaimOptionsPtr = &reclaimOptions;
+    }
+
+    const auto storageInfo = client->mFileService.storageInfo(reclaimOptionsPtr);
     if (!storageInfo)
         return nullptr;
 

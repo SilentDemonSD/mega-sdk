@@ -908,6 +908,7 @@ bool FileServiceContext::removeFromIndex(FileID id, FromFileIDMap<T>& map)
 
 template<typename Lock, typename Transaction>
 auto FileServiceContext::storageInfo([[maybe_unused]] Lock&& lock,
+                                     const ReclaimOptions& options,
                                      Transaction&& transaction) -> StorageInfo
 {
     // Sanity.
@@ -915,12 +916,9 @@ auto FileServiceContext::storageInfo([[maybe_unused]] Lock&& lock,
     assert(lock.owns_lock());
     assert(transaction.inProgress());
 
-    // Get our hands on our current options.
-    auto reclaimOptions = this->reclaimOptions();
-
     // Convenience.
-    const auto ageThreshold = reclaimOptions.mAgeThreshold;
-    const auto reclaimTarget = reclaimOptions.mReclaimTarget;
+    const auto ageThreshold = options.mAgeThreshold;
+    const auto reclaimTarget = options.mReclaimTarget;
 
     // Compute the storage used by all files in storage.
     auto query = transaction.query(mQueries.mGetStorageInfo);
@@ -1681,7 +1679,8 @@ ServiceOptions FileServiceContext::serviceOptions()
     return mServiceOptions;
 }
 
-auto FileServiceContext::storageInfo() -> FileServiceResultOr<StorageInfo>
+auto FileServiceContext::storageInfo(const ReclaimOptions* options)
+    -> FileServiceResultOr<StorageInfo>
 try
 {
     // Make sure no one else is changing the database.
@@ -1691,7 +1690,10 @@ try
     auto transaction = mDatabase.transaction();
 
     // Let the caller know how much storage space we're using.
-    return storageInfo(lock, transaction);
+    if (options)
+        return storageInfo(lock, *options, transaction);
+    else
+        return storageInfo(lock, this->reclaimOptions(), transaction);
 }
 catch (std::runtime_error& exception)
 {

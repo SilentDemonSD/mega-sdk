@@ -6440,9 +6440,10 @@ void MegaApi::fileServiceReclaim(const MegaFileServiceReclaimOptions* options,
     pImpl->fileServiceReclaim(options, listener);
 }
 
-MegaFileServiceStorageInfo* MegaApi::fileServiceGetStorageInfo()
+MegaFileServiceStorageInfo*
+    MegaApi::fileServiceGetStorageInfo(const MegaFileServiceReclaimOptions* options)
 {
-    return pImpl->fileServiceGetStorageInfo();
+    return pImpl->fileServiceGetStorageInfo(options);
 }
 
 /* END MEGAAPI */

@@ -109,7 +109,9 @@ class FileServiceContext: common::NodeEventObserver
     void purgeRemovedFiles();
 
     template<typename Lock, typename Transaction>
-    auto storageInfo(Lock&& lock, Transaction&& transaction) -> StorageInfo;
+    auto storageInfo(Lock&& lock,
+                     const ReclaimOptions& reclaimOptions,
+                     Transaction&& transaction) -> StorageInfo;
 
     template<typename Lock, typename Transaction>
     auto storageUsed(Lock&& lock, Transaction&& transaction) -> std::uint64_t;
@@ -258,7 +260,7 @@ public:
 
     // How much storage space is the service using?
     // Get storage size information in detail such as reclaimable storage size
-    auto storageInfo() -> FileServiceResultOr<StorageInfo>;
+    auto storageInfo(const ReclaimOptions* options) -> FileServiceResultOr<StorageInfo>;
 
     // How much storage space is the service using? Better performance than storageInfo but with
     // less information
