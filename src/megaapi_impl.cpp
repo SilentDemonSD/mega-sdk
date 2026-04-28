@@ -17574,12 +17574,9 @@ void MegaApiImpl::fireOnRequestStart(MegaRequestPrivate *request)
 
 void MegaApiImpl::fireOnRequestFinish(MegaRequestPrivate* request,
                                       unique_ptr<MegaErrorPrivate> e,
-                                      [[maybe_unused]] bool callbackIsFromSyncThread)
+                                      [[maybe_unused]] bool callbackIsFromOtherThread)
 {
-    assert(callbackIsFromSyncThread || threadId == std::this_thread::get_id());
-#ifdef ENABLE_SYNC
-    assert(!callbackIsFromSyncThread || client->syncs.onSyncThread());
-#endif
+    assert(callbackIsFromOtherThread || threadId == std::this_thread::get_id());
 
     // call from other threads like sync thread. Push to requestQueue with performFireOnRequestFinish assigned,
     // all fireOneRequestFinish is therefore handled in sendPendingRequests processed by a single thread.
@@ -29529,7 +29526,7 @@ void MegaApiImpl::fileServiceReclaim(const MegaFileServiceReclaimOptions* option
     {
         auto error = std::make_unique<MegaErrorPrivate>(result ? API_OK : API_EINTERNAL);
         r->setTotalBytes(static_cast<long long>(result.valueOr(0)));
-        this->fireOnRequestFinish(r, std::move(error));
+        this->fireOnRequestFinish(r, std::move(error), true);
     };
 
     request->performRequest = [this, callback = std::move(callback), request = request.get()]()
