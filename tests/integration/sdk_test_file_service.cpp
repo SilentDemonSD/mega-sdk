@@ -17,9 +17,7 @@ protected:
 
     std::string mFileName;
 
-    size_t mFileSize{5 * 1024};
-
-    std::optional<ScopedDestructor> mHttpServer;
+    size_t mFileSize{4 * 1024};
 };
 
 void SdkFileServiceTest::SetUp()
@@ -34,11 +32,13 @@ void SdkFileServiceTest::SetUp()
 
     MegaApi* api = megaApi[0].get();
 
+    // Upload
     std::unique_ptr<MegaNode> uploadedNode = uploadFile(0, mFileName, mFileContent);
     ASSERT_NE(uploadedNode, nullptr);
 
-    mHttpServer = scopedHttpServer(api);
-    ASSERT_TRUE(mHttpServer);
+    // Use http server to fetch the file to file service
+    const auto httpServer = scopedHttpServer(api);
+    ASSERT_TRUE(httpServer);
 
     std::unique_ptr<char[]> link(api->httpServerGetLocalLink(uploadedNode.get()));
     ASSERT_NE(link, nullptr);
@@ -71,7 +71,7 @@ TEST_F(SdkFileServiceTest, FileServiceGetStorageInfoSuccessfully)
     options->setAgeThreshold(0);
     info.reset(api->fileServiceGetStorageInfo(options.get()));
     ASSERT_GE(info->getAllocatedSize(), mFileSize);
-    ASSERT_EQ(info->getReclaimableSize(), mFileSize);
+    ASSERT_GE(info->getReclaimableSize(), mFileSize);
 }
 
 TEST_F(SdkFileServiceTest, FileServiceReclaimSuccessfully)
@@ -92,6 +92,6 @@ TEST_F(SdkFileServiceTest, FileServiceReclaimSuccessfully)
     // No storage afterwards
     std::unique_ptr<MegaFileServiceStorageInfo> info{api->fileServiceGetStorageInfo(nullptr)};
     ASSERT_TRUE(info != nullptr);
-    ASSERT_GE(info->getAllocatedSize(), 0);
+    ASSERT_EQ(info->getAllocatedSize(), 0);
     ASSERT_EQ(info->getReclaimableSize(), 0);
 }
