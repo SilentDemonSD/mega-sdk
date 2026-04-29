@@ -109,4 +109,12 @@ using namespace mega;
     return self.pricing ? self.pricing->hasMobileOfferUat((int)index) : NO;
 }
 
+- (NSString *)mobileOfferLabelAtProductIndex:(NSInteger)index {
+    return self.pricing ? [[NSString alloc] initWithUTF8String:self.pricing->getMobileOfferLabel((int)index).c_str()] : nil;
+}
+
+- (int)mobileOfferDiscountPercentageAtProductIndex:(NSInteger)index {
+    return self.pricing ? self.pricing->getMobileOfferDiscountPercentage((int)index) : 0;
+}
+
 @end

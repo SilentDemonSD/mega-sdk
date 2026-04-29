@@ -2611,6 +2611,8 @@ public:
     bool hasMobileOffers(int productIndex) const override;
     std::string getMobileOfferId(int productIndex) const override;
     bool hasMobileOfferUat(int productIndex) const override;
+    std::string getMobileOfferLabel(int productIndex) const override;
+    int getMobileOfferDiscountPercentage(int productIndex) const override;
     bool hasDiscount(int productIndex) const override;
     const char* getDiscountCode(int productIndex) const override;
     const char* getDiscountName(int productIndex) const override;

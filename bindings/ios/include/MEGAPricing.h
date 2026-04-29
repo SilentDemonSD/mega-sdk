@@ -161,6 +161,34 @@ NS_ASSUME_NONNULL_BEGIN
  */
 - (BOOL)hasMobileOfferUatAtProductIndex:(NSInteger)index;
 
+/**
+ * @brief Get the localized label of the mobile offer
+ *
+ * Returns the campaign label associated with the given product's mobile
+ * offer, already localized server-side per request language (e.g. "Easter
+ * Sale", "World Backup Day Sale").
+ *
+ * If the product does not have a mobile offer, this method returns nil.
+ *
+ * @param index Product index (from 0 to [MEGAPricing products])
+ * @return Localized mobile offer label
+ */
+- (nullable NSString *)mobileOfferLabelAtProductIndex:(NSInteger)index;
+
+/**
+ * @brief Get the discount percentage of the mobile offer
+ *
+ * Returns the percentage (e.g. 30, 45) to display alongside the mobile
+ * offer label.
+ *
+ * If the product does not have a mobile offer, this method returns 0.
+ *
+ * @param index Product index (from 0 to [MEGAPricing products])
+ * @return Mobile offer discount percentage, or 0 if there is no mobile
+ * offer
+ */
+- (int)mobileOfferDiscountPercentageAtProductIndex:(NSInteger)index;
+
 NS_ASSUME_NONNULL_END
 
 @end
