@@ -12397,8 +12397,15 @@ public class MegaApiJava {
      *
      * If the request fails, the MegaError code in onRequestFinish can be:
      * - MegaError::API_EINTERNAL - If the reclaim process failed to run.
+     *
+     * @param options Options to consider when reclaiming storage used by MEGA's file services.
+     * If null, the current file service reclaim options will be used, with an additional call
+     * to setReclaimThreshold(0). See {@link #fileServiceGetReclaimOptions()} and
+     * {@link #fileServiceSetReclaimOptions(MegaFileServiceReclaimOptions)}.
+     * @param listener MegaRequestListener to track this request.
      */
-    public void fileServiceReclaim(MegaRequestListenerInterface listener) {
-        megaApi.fileServiceReclaim(createDelegateRequestListener(listener, false));
+    public void fileServiceReclaim(MegaFileServiceReclaimOptions options,
+                                   MegaRequestListenerInterface listener) {
+        megaApi.fileServiceReclaim(options, createDelegateRequestListener(listener, false));
     }
 }
