@@ -51,6 +51,8 @@
 #import "MEGACancelToken+init.h"
 #import "MEGAPushNotificationSettings+init.h"
 #import "MEGACancelSubscriptionReasonList+init.h"
+#import "MEGAFileServiceReclaimOptions+init.h"
+#import "MEGAFileServiceStorageInfo+init.h"
 
 #import <set>
 #import <pthread.h>
@@ -4242,6 +4244,25 @@ using namespace mega;
 - (void)getRecentActionByBucketId:(NSString *)bucketId excludeSensitives:(BOOL)excludeSensitives delegate:(id<MEGARequestDelegate>)delegate {
     if (self.megaApi) {
         self.megaApi->getRecentActionById(bucketId.UTF8String, excludeSensitives, [self createDelegateMEGARequestListener:delegate singleListener:YES]);
+    }
+}
+
+#pragma mark - File Service
+
+- (MEGAFileServiceStorageInfo *)fileServiceStorageInfoWithOptions:(MEGAFileServiceReclaimOptions *)options {
+    if (self.megaApi == nil) {
+        return nil;
+    }
+    MegaFileServiceStorageInfo *cInfo = self.megaApi->fileServiceGetStorageInfo(options ? [options getCPtr] : nullptr);
+    if (cInfo == nullptr) {
+        return nil;
+    }
+    return [[MEGAFileServiceStorageInfo alloc] initWithMegaFileServiceStorageInfo:cInfo cMemoryOwn:YES];
+}
+
+- (void)fileServiceReclaimWithOptions:(MEGAFileServiceReclaimOptions *)options delegate:(id<MEGARequestDelegate>)delegate {
+    if (self.megaApi != nil) {
+        self.megaApi->fileServiceReclaim(options ? [options getCPtr] : nullptr, [self createDelegateMEGARequestListener:delegate singleListener:YES]);
     }
 }
 

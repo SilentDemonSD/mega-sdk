@@ -28,6 +28,8 @@
 #import "MEGADelegate.h"
 #import "MEGAError.h"
 #import "MEGAEvent.h"
+#import "MEGAFileServiceReclaimOptions.h"
+#import "MEGAFileServiceStorageInfo.h"
 #import "MEGAGlobalDelegate.h"
 #import "MEGANodeList.h"
 #import "MEGANode.h"
@@ -10165,6 +10167,37 @@ typedef NS_ENUM(NSInteger, PasswordManagerNodeType) {
  * @return newly generated password string, or nil if the password generation fails due to invalid length parameter.
  */
 + (nullable NSString *)generateRandomPasswordWithCapitalLetters:(BOOL)includeCapitalLetters digits:(BOOL)includeDigits symbols:(BOOL)includeSymbols length:(int)length;
+
+#pragma mark - File Service
+
+/**
+ * @brief Get the file service storage size information.
+ *
+ * The returned object is a snapshot of the current state of the file service storage size.
+ *
+ * @param options Reclaim options to consider when calculating the storage info, or nil to use the
+ * current file service's reclaim options.
+ * @return MEGAFileServiceStorageInfo with the current allocated and reclaimable sizes, or nil if unavailable.
+ */
+- (nullable MEGAFileServiceStorageInfo *)fileServiceStorageInfoWithOptions:(nullable MEGAFileServiceReclaimOptions *)options;
+
+/**
+ * @brief Trigger the file services to reclaim storage according to the current options or input options.
+ *
+ * The associated request type with this request is MEGARequestTypeFileServiceReclaim.
+ *
+ * Valid data in the MEGARequest object received in onRequestFinish when the error code
+ * is MEGAErrorTypeApiOk:
+ * - [MEGARequest totalBytes] - Returns the number of bytes that were reclaimed.
+ *
+ * In rare cases, if an automatic reclaim is already running at the time of this call, its reclaim
+ * options will be used instead, even if custom options are provided.
+ *
+ * @param options Options to consider when reclaiming storage used by MEGA's file services, or nil
+ * to use the current file service reclaim options with an additional call to setReclaimThreshold(0).
+ * @param delegate MEGARequestDelegate to track this request.
+ */
+- (void)fileServiceReclaimWithOptions:(nullable MEGAFileServiceReclaimOptions *)options delegate:(id<MEGARequestDelegate>)delegate;
 
 @end
 
