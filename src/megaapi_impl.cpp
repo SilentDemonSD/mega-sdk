@@ -35305,11 +35305,11 @@ static void onReadComplete(uv_fs_t* req)
             const auto appendedBytes =
                 httpctx->streamingBuffer.append(static_cast<const char*>(ctx->buffer.get()),
                                                 static_cast<size_t>(readSize));
-            httpctx->consumedBytes += appendedBytes;
+            httpctx->mCacheFile.mConsumedBytes += appendedBytes;
             uv_mutex_unlock(&httpctx->mutex);
         }
 
-        httpctx->isReading = false;
+        httpctx->mCacheFile.mIsReading = false;
 
         // Read complete and/or more data is in streaming buffer
         uv_async_send(&httpctx->asynchandle);
@@ -35333,13 +35333,13 @@ static void
     readFromUVFile(MegaHTTPContext* httpctx, uv_file fd, int64_t offset, unsigned int length)
 {
     // Another is reading
-    if (httpctx->isReading)
+    if (httpctx->mCacheFile.mIsReading)
     {
         LOG_debug << httpctx->getLogName() << "[Streaming] Skip reading, another is reading";
         return;
     }
 
-    httpctx->isReading = true;
+    httpctx->mCacheFile.mIsReading = true;
 
     auto ctx = std::make_unique<ReadContext>();
 
@@ -35372,10 +35372,10 @@ static void readFromUVFile(MegaHTTPContext* httpctx)
     constexpr unsigned int MAX_BUFFER_SIZE = 4 * 1024 * 1024;
 
     uv_mutex_lock(&httpctx->mutex);
-    const auto availableBytes = httpctx->availableBytes;
-    const auto consumedBytes = httpctx->consumedBytes;
+    const auto availableBytes = httpctx->mCacheFile.mAvailableBytes;
+    const auto consumedBytes = httpctx->mCacheFile.mConsumedBytes;
     const auto freeSpace = httpctx->streamingBuffer.availableSpace();
-    const auto fd = httpctx->fd.get();
+    const auto fd = httpctx->mCacheFile.mFd.get();
     uv_mutex_unlock(&httpctx->mutex);
 
     auto minOfThree = [](unsigned int a, unsigned int b, unsigned int c)
@@ -35386,7 +35386,7 @@ static void readFromUVFile(MegaHTTPContext* httpctx)
     // Read more from fd to stream buffer
     if (fd > -1 && availableBytes > consumedBytes && freeSpace)
     {
-        const auto offset = httpctx->offset + consumedBytes;
+        const auto offset = httpctx->mCacheFile.mOffset + consumedBytes;
         const auto length = minOfThree(MAX_BUFFER_SIZE,
                                        static_cast<unsigned int>(availableBytes - consumedBytes),
                                        static_cast<unsigned int>(freeSpace));
@@ -37103,17 +37103,17 @@ bool MegaHTTPServer::startStream(MegaHTTPContext* httpctx,
         LOG_err << "Failed to dup fd " << toNodeHandle(handle) << " for streaming errno: " << errno;
         return false;
     }
-    httpctx->fd = uv_open_osfhandle(fd.get());
-    if (!httpctx->fd.isSet())
+    httpctx->mCacheFile.mFd = uv_open_osfhandle(fd.get());
+    if (!httpctx->mCacheFile.mFd.isSet())
     {
         LOG_err << "Failed to uv_open_osfhandle fd " << toNodeHandle(handle) << " for streaming";
         return false;
     }
     fd.release();
 
-    httpctx->offset = static_cast<m_off_t>(offset);
-    httpctx->availableBytes = 0;
-    httpctx->consumedBytes = 0;
+    httpctx->mCacheFile.mOffset = static_cast<m_off_t>(offset);
+    httpctx->mCacheFile.mAvailableBytes = 0;
+    httpctx->mCacheFile.mConsumedBytes = 0;
     auto callback =
         [logName = httpctx->getLogName(), ctx = httpctx->weak_from_this(), offset, length](
             FileResultOr<FileStreamFDResult> result)
@@ -37156,9 +37156,10 @@ bool MegaHTTPServer::startStream(MegaHTTPContext* httpctx,
 
         // More data available in the cached file
         uv_mutex_lock(&ctxPtr->mutex);
-        assert(static_cast<m_off_t>(receivedOffset) == ctxPtr->offset + ctxPtr->availableBytes);
-        ctxPtr->availableBytes += receivedLength;
-        assert(ctxPtr->availableBytes <= static_cast<m_off_t>(length));
+        assert(static_cast<m_off_t>(receivedOffset) ==
+               ctxPtr->mCacheFile.mOffset + ctxPtr->mCacheFile.mAvailableBytes);
+        ctxPtr->mCacheFile.mAvailableBytes += receivedLength;
+        assert(ctxPtr->mCacheFile.mAvailableBytes <= static_cast<m_off_t>(length));
         uv_mutex_unlock(&ctxPtr->mutex);
 
         // notify the HTTP server

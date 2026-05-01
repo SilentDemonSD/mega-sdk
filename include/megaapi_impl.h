@@ -6002,11 +6002,16 @@ public:
     std::atomic_bool failed{false};
 
     // Cached file related
-    AutoUVFile fd;
-    m_off_t offset{0};
-    m_off_t availableBytes{0};
-    m_off_t consumedBytes{0};
-    bool isReading{false};
+    struct CacheFile
+    {
+        AutoUVFile mFd;
+        m_off_t mOffset{0};
+        m_off_t mAvailableBytes{0};
+        m_off_t mConsumedBytes{0};
+        bool mIsReading{false};
+    };
+
+    CacheFile mCacheFile{};
 
     // Request information
     bool range;
