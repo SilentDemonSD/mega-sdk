@@ -35323,36 +35323,50 @@ static void onReadComplete(uv_fs_t* req)
     uv_async_send(&httpctx->asynchandle);
 }
 
-/**
- * Reads a specific number of bytes starting from a specific offset
- * using an existing OS file descriptor.
- * @param loop   The libuv event loop
- * @param fd     The existing uv_file
- * @param offset Position to start reading from
- * @param length Number of bytes to attempt to read
- */
-static void
-    readFromUVFile(MegaHTTPContext* httpctx, uv_file fd, int64_t offset, unsigned int length)
+static void readCacheFile(MegaHTTPContext* httpctx)
 {
+    uv_mutex_lock(&httpctx->mutex);
+    const auto availableBytes = httpctx->mCacheFile.mAvailableBytes;
+    const auto consumedBytes = httpctx->mCacheFile.mConsumedBytes;
+    const auto freeSpace = httpctx->streamingBuffer.availableSpace();
+    const auto fd = httpctx->mCacheFile.mFd.get();
+    uv_mutex_unlock(&httpctx->mutex);
+
+    // Cannot read more from fd to stream buffer
+    if (fd < 0 || availableBytes <= consumedBytes || freeSpace <= 0)
+        return;
+
     // Another is reading
     if (httpctx->mCacheFile.mIsReading)
     {
-        LOG_debug << httpctx->getLogName() << "[Streaming] Skip reading, another is reading";
+        LOG_verbose << httpctx->getLogName() << "[Streaming] Skip reading, another is reading";
         return;
     }
 
-    httpctx->mCacheFile.mIsReading = true;
+    constexpr unsigned int MAX_BUFFER_SIZE = 4 * 1024 * 1024;
+    auto minOfThree = [](unsigned int a, unsigned int b, unsigned int c)
+    {
+        return std::min(a, std::min(b, c));
+    };
+    const auto offset = httpctx->mCacheFile.mOffset + consumedBytes;
+    const auto length = minOfThree(MAX_BUFFER_SIZE,
+                                   static_cast<unsigned int>(availableBytes - consumedBytes),
+                                   static_cast<unsigned int>(freeSpace));
+
+    LOG_verbose << httpctx->getLogName() << "[Streaming] Read more from file: " << offset << ", "
+                << length;
 
     auto ctx = std::make_unique<ReadContext>();
-
-    ctx->buffer = std::make_unique<char[]>(length);
-    ctx->read_req.data = ctx.get();
-    ctx->ctx = httpctx->weak_from_this();
-    ctx->iov = uv_buf_init(ctx->buffer.get(), length);
+    {
+        ctx->buffer = std::make_unique<char[]>(length);
+        ctx->read_req.data = ctx.get();
+        ctx->ctx = httpctx->weak_from_this();
+        ctx->iov = uv_buf_init(ctx->buffer.get(), length);
+    }
 
     const int r = uv_fs_read(httpctx->server->loop(), /* Loop */
                              &ctx->read_req, /* Request object */
-                             fd, /* File descriptor */
+                             httpctx->mCacheFile.mFd.get(), /* File descriptor */
                              &ctx->iov, /* Pointer to an array of buffers */
                              1, /* Number of buffers in the array */
                              offset, /* Offset in the file */
@@ -35364,39 +35378,9 @@ static void
     }
     else
     {
+        httpctx->mCacheFile.mIsReading = true;
         // Ownership belongs to the onReadComplete
         std::ignore = ctx.release();
-    }
-}
-
-static void readFromUVFile(MegaHTTPContext* httpctx)
-{
-    constexpr unsigned int MAX_BUFFER_SIZE = 4 * 1024 * 1024;
-
-    uv_mutex_lock(&httpctx->mutex);
-    const auto availableBytes = httpctx->mCacheFile.mAvailableBytes;
-    const auto consumedBytes = httpctx->mCacheFile.mConsumedBytes;
-    const auto freeSpace = httpctx->streamingBuffer.availableSpace();
-    const auto fd = httpctx->mCacheFile.mFd.get();
-    uv_mutex_unlock(&httpctx->mutex);
-
-    auto minOfThree = [](unsigned int a, unsigned int b, unsigned int c)
-    {
-        return std::min(a, std::min(b, c));
-    };
-
-    // Read more from fd to stream buffer
-    if (fd > -1 && availableBytes > consumedBytes && freeSpace)
-    {
-        const auto offset = httpctx->mCacheFile.mOffset + consumedBytes;
-        const auto length = minOfThree(MAX_BUFFER_SIZE,
-                                       static_cast<unsigned int>(availableBytes - consumedBytes),
-                                       static_cast<unsigned int>(freeSpace));
-
-        LOG_debug << httpctx->getLogName() << "[Streaming] Read more from file: " << offset << ", "
-                  << length;
-
-        readFromUVFile(httpctx, fd, offset, length);
     }
 }
 
@@ -35443,7 +35427,7 @@ void MegaHTTPServer::processWriteFinished(MegaTCPContext* tcpctx, int status)
     uv_mutex_unlock(&httpctx->mutex);
 
     // Read more from fd to stream buffer if any
-    readFromUVFile(httpctx);
+    readCacheFile(httpctx);
 
     uv_async_send(&httpctx->asynchandle);
 }
@@ -37523,7 +37507,7 @@ void MegaHTTPServer::sendNextBytes(MegaHTTPContext *httpctx)
         LOG_debug << httpctx->getLogName() << "[Streaming] Skipping write. No data available. "
                   << httpctx->streamingBuffer.bufferStatus();
         // Read more from fd to stream buffer
-        readFromUVFile(httpctx);
+        readCacheFile(httpctx);
         return;
     }
 
