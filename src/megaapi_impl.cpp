@@ -35284,41 +35284,43 @@ struct ReadContext
 
 static void onReadComplete(uv_fs_t* req)
 {
-    ReadContext* ctx = (ReadContext*)req->data;
-    do
+    assert(req);
+
+    // Take ownership
+    std::unique_ptr<ReadContext> ctx{(ReadContext*)req->data};
+
+    // Cleanup while leaving the function
+    const auto reqDestructor = ScopedDestructor(
+        [req]()
+        {
+            uv_fs_req_cleanup(req);
+        });
+
+    auto httpctx = ctx->ctx.lock();
+    if (!httpctx)
+        return;
+
+    httpctx->mCacheFile.mIsReading = false;
+
+    if (httpctx->finished)
+        return;
+
+    if (const auto readSize = req->result; readSize < 0)
     {
-        auto httpctx = ctx->ctx.lock();
-        if (!httpctx)
-            break;
-
-        if (httpctx->finished)
-            break;
-
-        const auto readSize = req->result;
-        if (readSize < 0)
-        {
-            LOG_err << "Read error: " << uv_strerror((int)req->result);
-        }
-        else if (readSize > 0)
-        {
-            uv_mutex_lock(&httpctx->mutex);
-            const auto appendedBytes =
-                httpctx->streamingBuffer.append(static_cast<const char*>(ctx->buffer.get()),
-                                                static_cast<size_t>(readSize));
-            httpctx->mCacheFile.mConsumedBytes += appendedBytes;
-            uv_mutex_unlock(&httpctx->mutex);
-        }
-
-        httpctx->mCacheFile.mIsReading = false;
-
-        // Read complete and/or more data is in streaming buffer
-        uv_async_send(&httpctx->asynchandle);
+        LOG_err << "Read error: " << uv_strerror((int)req->result);
     }
-    while (0);
+    else if (readSize > 0)
+    {
+        uv_mutex_lock(&httpctx->mutex);
+        const auto appendedBytes =
+            httpctx->streamingBuffer.append(static_cast<const char*>(ctx->buffer.get()),
+                                            static_cast<size_t>(readSize));
+        httpctx->mCacheFile.mConsumedBytes += appendedBytes;
+        uv_mutex_unlock(&httpctx->mutex);
+    }
 
-    // Cleanup
-    uv_fs_req_cleanup(req);
-    delete ctx;
+    // Read complete and/or more data is in streaming buffer
+    uv_async_send(&httpctx->asynchandle);
 }
 
 /**
