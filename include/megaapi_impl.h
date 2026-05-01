@@ -6001,8 +6001,6 @@ public:
     bool nodereceived;
     std::atomic_bool failed{false};
 
-    // Header bytes going to be written
-    m_off_t headerSize{0};
     // Cached file related
     AutoUVFile fd;
     m_off_t offset{0};

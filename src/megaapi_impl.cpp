@@ -36209,7 +36209,6 @@ int MegaHTTPServer::onMessageComplete(http_parser *parser)
     MegaHTTPContext* httpctx = (MegaHTTPContext*) parser->data;
     LOG_debug << httpctx->getLogName() << "Message complete";
     httpctx->bytesWritten = 0;
-    httpctx->headerSize = 0;
     httpctx->size = 0;
     httpctx->streamingBuffer.setMaxBufferSize(
         static_cast<unsigned>(httpctx->server->getMaxBufferSize()));
@@ -37302,7 +37301,6 @@ void MegaHTTPServer::sendHeaders(MegaHTTPContext *httpctx, string *headers)
     LOG_debug << httpctx->getLogName() << "Response headers: " << *headers;
     httpctx->streamingBuffer.append(headers->data(), headers->size());
     uv_buf_t resbuf = httpctx->streamingBuffer.nextBuffer();
-    httpctx->headerSize += headers->size();
     httpctx->size += headers->size();
     httpctx->lastBuffer = resbuf.base;
     httpctx->lastBufferLen = resbuf.len;
