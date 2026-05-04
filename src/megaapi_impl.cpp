@@ -35400,6 +35400,11 @@ static AutoUVFile dupUVFile(file_service::File& file)
         LOG_err << "Failed to uv_open_osfhandle fd " << toNodeHandle(file.info().handle())
                 << " for streaming";
     }
+    else
+    {
+        fd.release();
+    }
+
     return uvFile;
 }
 
