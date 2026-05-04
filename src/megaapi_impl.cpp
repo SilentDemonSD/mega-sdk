@@ -35384,6 +35384,25 @@ static void readCacheFile(MegaHTTPContext* httpctx)
     }
 }
 
+static AutoUVFile dupUVFile(file_service::File& file)
+{
+    auto fd = file.dupFileDescriptor();
+    if (!fd)
+    {
+        LOG_err << "Failed to dup fd " << toNodeHandle(file.info().handle())
+                << " for streaming errno: " << errno;
+        return AutoUVFile{};
+    }
+
+    AutoUVFile uvFile = uv_open_osfhandle(fd.get());
+    if (!uvFile)
+    {
+        LOG_err << "Failed to uv_open_osfhandle fd " << toNodeHandle(file.info().handle())
+                << " for streaming";
+    }
+    return uvFile;
+}
+
 void MegaHTTPServer::processWriteFinished(MegaTCPContext* tcpctx, int status)
 {
     MegaHTTPContext* httpctx = dynamic_cast<MegaHTTPContext *>(tcpctx);
@@ -37083,19 +37102,11 @@ bool MegaHTTPServer::startStream(MegaHTTPContext* httpctx,
         return false;
     }
 
-    auto fd = file->dupFileDescriptor();
-    if (!fd.isSet())
+    httpctx->mCacheFile.mFd = dupUVFile(*file);
+    if (!httpctx->mCacheFile.mFd)
     {
-        LOG_err << "Failed to dup fd " << toNodeHandle(handle) << " for streaming errno: " << errno;
         return false;
     }
-    httpctx->mCacheFile.mFd = uv_open_osfhandle(fd.get());
-    if (!httpctx->mCacheFile.mFd.isSet())
-    {
-        LOG_err << "Failed to uv_open_osfhandle fd " << toNodeHandle(handle) << " for streaming";
-        return false;
-    }
-    fd.release();
 
     httpctx->mCacheFile.mOffset = static_cast<m_off_t>(offset);
     httpctx->mCacheFile.mAvailableBytes = 0;

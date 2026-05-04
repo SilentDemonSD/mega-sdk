@@ -48,6 +48,11 @@ public:
         return h != UNSET;
     }
 
+    operator bool() const
+    {
+        return isSet();
+    }
+
     // implicit conversion, so can pass into OS API
     operator HandleType() const
     {
