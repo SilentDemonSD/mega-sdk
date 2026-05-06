@@ -20,6 +20,7 @@
 #include <mega/file_service/file_range_set.h>
 #include <mega/file_service/file_service_callbacks.h>
 #include <mega/file_service/file_service_context_forward.h>
+#include <mega/file_service/file_service_forward.h>
 #include <mega/file_service/file_service_options.h>
 #include <mega/file_service/file_service_queries.h>
 #include <mega/file_service/file_service_result_or_forward.h>
@@ -146,20 +147,11 @@ class FileServiceContext: common::NodeEventObserver
     // explicitly lock mDatabase, too.
     common::SharedMutex mLock;
 
-    // Specifies various metrics that control how the service behaves.
-    ServiceOptions mServiceOptions;
-
-    // Serializes access to mServiceOptions and mReclaimOptions
-    common::SharedMutex mOptionsLock;
-
     // Tracks any reclaim in progress.
     ReclaimContextPtr mReclaimContext;
 
     // Serializes access to mReclaimContext.
     std::mutex mReclaimContextLock;
-
-    // Specifies Reclaim options
-    ReclaimOptions mReclaimOptions;
 
     // Tracks any scheduled reclamation.
     common::Task mReclaimTask;
@@ -169,6 +161,9 @@ class FileServiceContext: common::NodeEventObserver
 
     // Responsible for event notification.
     FileEventEmitter mEventEmitter;
+
+    // What service does this context belong to?
+    FileService& mService;
 
     // This member will ensure the context isn't destroyed until any related
     // activities have been completed.
@@ -183,9 +178,7 @@ class FileServiceContext: common::NodeEventObserver
     common::TaskExecutor mExecutor;
 
 public:
-    FileServiceContext(common::Client& client,
-                       const ReclaimOptions& reclaimOptions,
-                       const ServiceOptions& serviceOptions);
+    FileServiceContext(common::Client& client, FileService& service);
 
     ~FileServiceContext();
 
@@ -240,20 +233,17 @@ public:
     // Remove an observer from a specific file.
     void removeObserver(FileID id, FileEventObserverID observerID);
 
-    // Update the file service's reclaim options.
-    void reclaimOptions(const ReclaimOptions& options);
-
     // Retrieve the file service's current reclaim options.
     ReclaimOptions reclaimOptions();
+
+    // Let the context know its reclamation options has changed.
+    void reclaimOptionsChanged(const ReclaimOptions& oldOptions);
 
     // Remove a file context from our index.
     void removeFromIndex(FileContextBadge badge, FileID id);
 
     // Remove a file info context from our index.
     void removeFromIndex(FileInfoContextBadge badge, FileInfoContext& context);
-
-    // Update the service's options.
-    void serviceOptions(const ServiceOptions& serviceOptions);
 
     // Retrieve the service's current options.
     ServiceOptions serviceOptions();

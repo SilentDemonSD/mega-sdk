@@ -29476,10 +29476,8 @@ void MegaApiImpl::getDiscountCodeInformation(const char* discountCode,
 MegaFileServiceReclaimOptions* MegaApiImpl::fileServiceGetReclaimOptions()
 {
     const auto options = client->mFileService.reclaimOptions();
-    if (!options)
-        return nullptr;
 
-    return new MegaFileServiceReclaimOptionsPrivate(*options);
+    return new MegaFileServiceReclaimOptionsPrivate(options);
 }
 
 void MegaApiImpl::fileServiceSetReclaimOptions(const MegaFileServiceReclaimOptions* options)
@@ -29540,14 +29538,9 @@ void MegaApiImpl::fileServiceReclaim(const MegaFileServiceReclaimOptions* option
         else
         {
             // Use current file service options
-            auto result = client->mFileService.reclaimOptions();
-            if (!result)
-            {
-                return API_EINTERNAL;
-            }
+            reclaimOptions = client->mFileService.reclaimOptions();
 
             // Set and let reclaim can run immediately by set mReclaimThreshold to 0
-            reclaimOptions = *result;
             reclaimOptions.mReclaimThreshold = 0;
         }
 

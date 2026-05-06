@@ -37,6 +37,18 @@ class FileService
     // Serializes access to mContext;
     common::SharedMutex mContextLock;
 
+    // Specifies how the service should perform storage reclamation.
+    ReclaimOptions mReclaimOptions;
+
+    // Serializes access to mReclaimOptions.
+    common::SharedMutex mReclaimOptionsLock;
+
+    // Specifies various metrics that control how the service behaves.
+    ServiceOptions mServiceOptions;
+
+    // Serializes access to mServiceOptions.
+    common::SharedMutex mServiceOptionsLock;
+
 public:
     FileService();
 
@@ -60,10 +72,6 @@ public:
     auto info(FileID id) -> FileServiceResultOr<FileInfo>;
 
     // Initialize the file service.
-    auto initialize(common::Client& client,
-                    const ReclaimOptions& reclaimOptions,
-                    const ServiceOptions& serviceOptions) -> FileServiceResult;
-
     auto initialize(common::Client& client) -> FileServiceResult;
 
     // Open a file for reading or writing.
@@ -71,10 +79,10 @@ public:
     auto open(FileID id) -> FileServiceResultOr<File>;
 
     // Update the file service's options.
-    auto serviceOptions(const ServiceOptions& serviceOptions) -> FileServiceResult;
+    void serviceOptions(const ServiceOptions& serviceOptions);
 
     // Retrieve the file service's current options.
-    auto serviceOptions() -> FileServiceResultOr<ServiceOptions>;
+    auto serviceOptions() -> ServiceOptions;
 
     // Purge all files from storage.
     //
@@ -90,10 +98,10 @@ public:
                  std::optional<ReclaimOptions> reclaimOptions = std::nullopt) -> FileServiceResult;
 
     // Update the file service's reclaim options.
-    auto reclaimOptions(const ReclaimOptions& options) -> FileServiceResult;
+    void reclaimOptions(const ReclaimOptions& options);
 
     // Retrieve the file service's current reclaim options.
-    auto reclaimOptions() -> FileServiceResultOr<ReclaimOptions>;
+    auto reclaimOptions() -> ReclaimOptions;
 
     // Remove a previously added file observer.
     auto removeObserver(FileEventObserverID id) -> FileServiceResult;

@@ -24936,6 +24936,8 @@ class MegaApi
          *
          * The caller takes ownership of the returned value and should use delete to release the
          * memory when it's no longer needed.
+         *
+         * @note It's safe to call this method before the client has logged in.
          */
         MegaFileServiceReclaimOptions* fileServiceGetReclaimOptions();
 
@@ -24946,6 +24948,8 @@ class MegaApi
          * file services reclaim storage.
          *
          * @param options Options to set for reclaiming storage used by MEGA's file services.
+         *
+         * @note It's safe to call this method before the client has logged in.
          */
         void fileServiceSetReclaimOptions(const MegaFileServiceReclaimOptions* options);
 
