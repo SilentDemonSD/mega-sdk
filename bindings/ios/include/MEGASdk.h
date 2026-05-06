@@ -10190,9 +10190,6 @@ typedef NS_ENUM(NSInteger, PasswordManagerNodeType) {
  * is MEGAErrorTypeApiOk:
  * - [MEGARequest totalBytes] - Returns the number of bytes that were reclaimed.
  *
- * In rare cases, if an automatic reclaim is already running at the time of this call, its reclaim
- * options will be used instead, even if custom options are provided.
- *
  * @param options Options to consider when reclaiming storage used by MEGA's file services, or nil
  * to use the current file service reclaim options with an additional call to setReclaimThreshold(0).
  * @param delegate MEGARequestDelegate to track this request.
