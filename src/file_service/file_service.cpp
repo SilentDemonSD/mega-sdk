@@ -201,7 +201,7 @@ void FileService::reclaimOptions(const ReclaimOptions& newOptions)
 
     // Let the context know it's reclamation options have changed.
     if (mContext)
-        mContext->reclaimOptionsChanged(oldOptions);
+        mContext->reclaimOptionsChanged(newOptions, oldOptions);
 }
 
 auto FileService::reclaimOptions() -> ReclaimOptions

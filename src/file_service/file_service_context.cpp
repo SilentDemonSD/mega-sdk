@@ -1530,11 +1530,9 @@ ReclaimOptions FileServiceContext::reclaimOptions()
     return mService.reclaimOptions();
 }
 
-void FileServiceContext::reclaimOptionsChanged(const ReclaimOptions& oldOptions)
+void FileServiceContext::reclaimOptionsChanged(const ReclaimOptions& newOptions,
+                                               const ReclaimOptions& oldOptions)
 {
-    // Get a snapshot of our new reclamation options,
-    const auto newOptions = mService.reclaimOptions();
-
     // Acquire task lock.
     UniqueLock taskLock(mReclaimTaskLock);
 
