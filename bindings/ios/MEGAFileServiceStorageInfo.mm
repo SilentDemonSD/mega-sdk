@@ -2,7 +2,7 @@
  * @file MEGAFileServiceStorageInfo.mm
  * @brief Storage size information about MEGA's file services.
  *
- * (c) 2013-2014 by Mega Limited, Auckland, New Zealand
+ * (c) 2026- by Mega Limited, Auckland, New Zealand
  *
  * This file is part of the MEGA SDK - Client Access Engine.
  *

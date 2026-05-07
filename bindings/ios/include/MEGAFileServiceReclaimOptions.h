@@ -2,7 +2,7 @@
  * @file MEGAFileServiceReclaimOptions.h
  * @brief Options to control how MEGA's file services reclaim local storage.
  *
- * (c) 2013-2014 by Mega Limited, Auckland, New Zealand
+ * (c) 2026- by Mega Limited, Auckland, New Zealand
  *
  * This file is part of the MEGA SDK - Client Access Engine.
  *
