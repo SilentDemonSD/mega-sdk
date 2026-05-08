@@ -1,7 +1,9 @@
 #include <mega/common/task_executor.h>
 #include <mega/common/utility.h>
 #include <mega/fuse/common/logging.h>
+#include <mega/fuse/common/mount_exception.h>
 #include <mega/fuse/common/mount_inode_id.h>
+#include <mega/fuse/common/mount_result.h>
 #include <mega/fuse/platform/constants.h>
 #include <mega/fuse/platform/mount.h>
 #include <mega/fuse/platform/mount_db.h>
@@ -12,6 +14,7 @@
 #include <mega/fuse/platform/utility.h>
 
 #include <cassert>
+#include <cerrno>
 #include <cstring>
 #include <vector>
 
@@ -120,7 +123,7 @@ Session::Session(Mount& mount):
 
     ChannelPtr channel(fuse_mount(path.c_str(), arguments.get()), mount);
     if (!channel)
-        throw FUSEErrorF("Unable to construct channel: %s", path.c_str());
+        throw FUSEMountErrorF(errno, "Unable to construct channel to mount point %s", path.c_str());
 
     nonblocking(fuse_chan_fd(channel.get()), true);
 

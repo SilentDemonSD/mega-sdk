@@ -17,6 +17,7 @@ namespace fuse
     expander(MOUNT_LOCAL_SYNCING, "Mount target is being synchronized") \
     expander(MOUNT_LOCAL_TAKEN, "A mount's already associated with the target path") \
     expander(MOUNT_LOCAL_UNKNOWN, "Mount target doesn't exist") \
+    expander(MOUNT_LOCAL_STALE, "Mount target is stale or inaccessible") \
     expander(MOUNT_NAME_TAKEN, "A mount already exists with a specified name") \
     expander(MOUNT_NAME_TOO_LONG, "The mount's name is too long") \
     expander(MOUNT_NAME_INVALID_CHAR, "The mount's name contains invalid character(s)") \
