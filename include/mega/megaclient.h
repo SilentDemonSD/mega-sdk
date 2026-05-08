@@ -1910,13 +1910,15 @@ public:
     void sc_storeSn(JSON& json);
     void sc_purgeAndCommit();
     void sc_procEoo(std::unique_lock<recursive_mutex>& nodeTreeIsChanging, bool originalAC);
+    void sc_procTerm(bool isDuringMoveOperation);
     // process an action packet
     bool sc_procActionPacket(JSON& json, std::shared_ptr<Node>& lastAPDeletedNode);
     void sc_updateStats();
     // process an action packet excluding a, i and st tags
     std::shared_ptr<Node> sc_procActionPacketWithoutCommonTags(JSON& json,
                                                                nameid name,
-                                                               bool isSelfOriginating);
+                                                               bool isSelfOriginating,
+                                                               bool* isNewSharesMerged = nullptr);
     // evaluates if the sequence tag matches
     bool sc_checkSequenceTag(const string& tag);
     // check if it is ok to process the current action packet

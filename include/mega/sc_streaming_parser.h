@@ -51,6 +51,7 @@ private:
     bool mOriginalAC;
     std::unique_ptr<CodeCounter::ScopeTimer> mCcst;
     std::shared_ptr<Node> mLastAPDeletedNode;
+    bool mIsNewSharesMerged;
 
     handle mInterimSn;
     bool mNeedToPurge;
@@ -84,6 +85,7 @@ private:
 
     void checkActionPacket();
     bool isnCanBeProcessed();
+    bool isDuringMoveOperation();
 };
 
 }
