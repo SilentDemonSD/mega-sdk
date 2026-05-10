@@ -28134,6 +28134,9 @@ public:
      *
      * @param seconds
      * How long after startup should we wait until we reclaim space?
+     *
+     * @note This option must be set before the client's logged in in order
+     * to have any effect.
      */
     virtual void setDelay(uint64_t seconds) = 0;
 
