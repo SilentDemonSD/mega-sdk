@@ -1,8 +1,10 @@
 #include <gmock/gmock.h>
 #include <mega/auto_file_handle.h>
+#include <mega/common/database.h>
 #include <mega/common/error_or.h>
 #include <mega/common/node_info.h>
 #include <mega/common/node_key_data.h>
+#include <mega/common/query.h>
 #include <mega/common/testing/cloud_path.h>
 #include <mega/common/testing/file.h>
 #include <mega/common/testing/path.h>
@@ -16,6 +18,7 @@
 #include <mega/file_service/file_event_vector.h>
 #include <mega/file_service/file_flush_event.h>
 #include <mega/file_service/file_id.h>
+#include <mega/file_service/file_id_vector.h>
 #include <mega/file_service/file_info.h>
 #include <mega/file_service/file_location.h>
 #include <mega/file_service/file_move_event.h>
@@ -46,6 +49,7 @@
 #include <chrono>
 #include <cinttypes>
 #include <cstdint>
+#include <filesystem>
 
 namespace mega
 {
@@ -136,6 +140,7 @@ using ::mega::AutoFileHandle;
 using ::testing::AnyOf;
 using ::testing::ElementsAre;
 using testing::observe;
+using ::testing::UnorderedElementsAre;
 using ::testing::UnorderedElementsAreArray;
 
 // Forward declaration so we can keep things ordered.
@@ -692,6 +697,111 @@ TEST_F(FileServiceTests, cancel_reads_that_begin_after_truncated_size)
 
     ASSERT_EQ(computed.errorOr(FILE_SUCCESS), FILE_SUCCESS);
     ASSERT_TRUE(compare(*computed, mFileContent, 0, 640_KiB));
+}
+
+TEST_F(FileServiceTests, cleans_cache_on_logout_succeeds)
+{
+    // Create a client we can safely logout.
+    auto client = CreateClient("file_service_" + randomName());
+    ASSERT_TRUE(client);
+
+    // Log the client in.
+    ASSERT_EQ(client->login(0), API_OK);
+
+    // Create two test files in the cloud.
+    const auto handle0 = client->upload(randomBytes(512), randomName(), mRootHandle);
+    ASSERT_EQ(handle0.errorOr(API_OK), API_OK);
+
+    const auto handle1 = client->upload(randomBytes(512), randomName(), mRootHandle);
+    ASSERT_EQ(handle1.errorOr(API_OK), API_OK);
+
+    // Convenience.
+    const auto id0 = FileID::from(*handle0);
+    const auto id1 = FileID::from(*handle1);
+
+    // Open the first file.
+    auto file = client->fileOpen(id0);
+    ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+
+    // Read all of the file's content.
+    ASSERT_EQ(execute(fetch, std::move(*file)), FILE_SUCCESS);
+
+    // Open the second file.
+    file = client->fileOpen(id1);
+    ASSERT_EQ(file.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+
+    // Change the file's modification time.
+    ASSERT_EQ(execute(touch, std::move(*file), now() + 5), FILE_SUCCESS);
+
+    // Where is the service storing its database?
+    const auto databasePath = client->fileService().databasePath();
+    ASSERT_EQ(databasePath.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+
+    // Where is the service storing our two files?
+    const auto path0 = client->fileService().userFilePath(id0);
+    ASSERT_EQ(path0.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+
+    const auto path1 = client->fileService().userFilePath(id1);
+    ASSERT_EQ(path1.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+
+    // Save the client's session.
+    auto sessionToken = client->sessionToken();
+    ASSERT_EQ(sessionToken.errorOr(API_OK), API_OK);
+
+    // Log out the client.
+    client->logout(true);
+
+    // Returns the IDs of each file in the database.
+    auto cachedFileIDs = [](const auto& databasePath)
+    {
+        // Convenience.
+        using common::Database;
+        using common::Query;
+
+        // Try and open the database.
+        Database database(logger(), databasePath);
+
+        // Record the ID of each file in the database.
+        FileIDVector ids;
+        auto query = database.query();
+
+        query = "select id from files";
+
+        for (query.execute(); query; ++query)
+            ids.emplace_back(query.field("id").get<FileID>());
+
+        // Return the IDs of each file in the database.
+        return ids;
+    }; // cachedFileIDs
+
+    // Convenience.
+    using std::filesystem::exists;
+
+    // The database should still be present on disk.
+    ASSERT_TRUE(exists(Path(*databasePath)));
+
+    // Both files should still be present on disk.
+    ASSERT_TRUE(exists(Path(*path0)));
+    ASSERT_TRUE(exists(Path(*path1)));
+
+    // Both files should still be present in the database.
+    ASSERT_THAT(cachedFileIDs(*databasePath), UnorderedElementsAre(id0, id1));
+
+    // Log the client back in, resuming the prior session.
+    ASSERT_EQ(client->login(*sessionToken), API_OK);
+
+    // Log the client out for real this time.
+    ASSERT_EQ(client->logout(false), API_OK);
+
+    // The database should still be present on disk.
+    ASSERT_TRUE(exists(Path(*databasePath)));
+
+    // Only the file we modified should remain on disk.
+    ASSERT_FALSE(exists(Path(*path0)));
+    ASSERT_TRUE(exists(Path(*path1)));
+
+    // Only the file we modified should remain in the database.
+    ASSERT_THAT(cachedFileIDs(*databasePath), ElementsAre(id1));
 }
 
 TEST_F(FileServiceTests, cloud_file_removed_when_parent_removed)

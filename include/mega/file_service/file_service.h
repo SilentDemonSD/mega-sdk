@@ -57,7 +57,7 @@ public:
     auto databasePath() const -> FileServiceResultOr<LocalPath>;
 
     // Deinitialize the file service.
-    void deinitialize();
+    void deinitialize(bool cleanCache);
 
     // Retrieve information about a file managed by the file service.
     auto info(FileID id) -> FileServiceResultOr<FileInfo>;

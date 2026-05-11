@@ -26,6 +26,7 @@
 #include <mega/file_service/file_storage.h>
 #include <mega/file_service/from_file_id_map.h>
 #include <mega/file_service/storage_info.h>
+#include <mega/scoped_helpers.h>
 
 #include <chrono>
 #include <condition_variable>
@@ -57,6 +58,9 @@ class FileServiceContext: common::NodeEventObserver
 
     template<typename Lock>
     FileID allocateID(Lock&& lock, common::Transaction& transaction);
+
+    // Remove unmodified files from the database and from disk.
+    void cleanCache();
 
     template<typename Lock>
     void deallocateID(FileID id, Lock&& lock, common::Transaction& transaction);
@@ -136,6 +140,9 @@ class FileServiceContext: common::NodeEventObserver
     common::Database mDatabase;
     FileServiceQueries mQueries;
 
+    // Responsible for cleaning the service's cache on destruction.
+    ScopedDestructor mCacheCleaner;
+
     FromFileIDMap<FileContextWeakPtr> mFileContexts;
     std::condition_variable_any mInfoContextRemoved;
     FromFileIDMap<FileInfoContextWeakPtr> mInfoContexts;
@@ -199,6 +206,9 @@ public:
 
     // Notify observer when a specific file changes.
     FileEventObserverID addObserver(FileID id, FileEventObserver observer);
+
+    // Let the service know it should clean the cache on destruction.
+    void cleanCacheOnDestruction();
 
     // Retrieve a reference to this service's client.
     common::Client& client();
