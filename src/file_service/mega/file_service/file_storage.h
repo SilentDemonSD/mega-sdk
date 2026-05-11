@@ -57,6 +57,7 @@ public:
     FileAccessPtr getFile(FileID id);
 
     // Remove a file from our storage area.
+    bool removeFile(FileID id, std::nothrow_t);
     void removeFile(FileID id);
 
     // Find out where the service is storing a particular file.

@@ -69,6 +69,21 @@ FileAccessPtr FileStorage::getFile(FileID id)
     return openFile(userFilePath(id), false);
 }
 
+bool FileStorage::removeFile(FileID id, std::nothrow_t)
+{
+    // Compute the file's path.
+    auto path = userFilePath(id);
+
+    // File was removed from storage.
+    if (mFilesystem->unlinklocal(path))
+        return false;
+
+    // Couldn't remove the file from storage.
+    FSWarningF("Couldn't remove file: %s", path.toPath(false).c_str());
+
+    return false;
+}
+
 void FileStorage::removeFile(FileID id)
 {
     // Compute the file's path.
