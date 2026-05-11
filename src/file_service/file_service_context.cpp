@@ -241,7 +241,7 @@ try
     for (query.execute(); query; ++query)
         mStorage.removeFile(query.field("id").get<FileID>(), std::nothrow);
 
-    // Remove unmodiifed files from the database.
+    // Remove unmodified files from the database.
     query = transaction.query(mQueries.mRemoveFiles);
 
     query.param(":dirty").set(false);
