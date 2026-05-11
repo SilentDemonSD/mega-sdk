@@ -130,7 +130,7 @@ Session::Session(Mount& mount):
     SessionPtr session(
         fuse_lowlevel_new(arguments.get(), &operations(), sizeof(fuse_lowlevel_ops), this));
     if (!session)
-        throw FUSEErrorF("Unable to construct session: %s", path.c_str());
+        throw FUSEMountErrorF(errno, "Unable to construct session to mount point %s", path.c_str());
 
     fuse_session_add_chan(session.get(), channel.get());
 
