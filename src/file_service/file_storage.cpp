@@ -76,7 +76,7 @@ bool FileStorage::removeFile(FileID id, std::nothrow_t)
 
     // File was removed from storage.
     if (mFilesystem->unlinklocal(path))
-        return false;
+        return true;
 
     // Couldn't remove the file from storage.
     FSWarningF("Couldn't remove file: %s", path.toPath(false).c_str());
