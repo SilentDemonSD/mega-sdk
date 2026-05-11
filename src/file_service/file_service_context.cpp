@@ -1726,6 +1726,11 @@ catch (std::runtime_error& exception)
     return unexpected(FILE_SERVICE_UNEXPECTED);
 }
 
+LocalPath FileServiceContext::userFilePath(FileID id) const
+{
+    return mStorage.userFilePath(id);
+}
+
 FileServiceContext::EventProcessor::EventProcessor(FileServiceContext& service):
     mService(service),
     mServiceLock(service.mLock),

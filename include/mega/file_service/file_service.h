@@ -107,6 +107,9 @@ public:
     // How much storage space is the service using? Better performance than storageInfo but with
     // less information
     auto storageUsed() -> FileServiceResultOr<std::uint64_t>;
+
+    // Find out where the service is storing a particular file.
+    auto userFilePath(FileID id) const -> FileServiceResultOr<LocalPath>;
 }; // FileService
 
 } // file_service

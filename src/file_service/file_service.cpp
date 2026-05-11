@@ -253,5 +253,15 @@ auto FileService::storageUsed() -> FileServiceResultOr<std::uint64_t>
     return mContext->storageUsed();
 }
 
+auto FileService::userFilePath(FileID id) const -> FileServiceResultOr<LocalPath>
+{
+    SharedLock guard(mContextLock);
+
+    if (mContext)
+        return mContext->userFilePath(id);
+
+    return unexpected(FILE_SERVICE_UNINITIALIZED);
+}
+
 } // file_service
 } // mega
