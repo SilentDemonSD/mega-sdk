@@ -141,6 +141,9 @@ class FileServiceContext: common::NodeEventObserver
     FileServiceQueries mQueries;
 
     // Responsible for cleaning the service's cache on destruction.
+    //
+    // Note that mCacheCleaner makes use of the mDatabase, mQueries and
+    // mStorage members directly above during destruction.
     ScopedDestructor mCacheCleaner;
 
     FromFileIDMap<FileContextWeakPtr> mFileContexts;
