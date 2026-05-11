@@ -59,6 +59,16 @@ auto FileService::create(NodeHandle parent, const std::string& name) -> FileServ
     return mContext->create(parent, name);
 }
 
+auto FileService::databasePath() const -> FileServiceResultOr<LocalPath>
+{
+    SharedLock guard(mContextLock);
+
+    if (mContext)
+        return mContext->databasePath();
+
+    return unexpected(FILE_SERVICE_UNINITIALIZED);
+}
+
 void FileService::deinitialize()
 {
     UniqueLock guard(mContextLock);

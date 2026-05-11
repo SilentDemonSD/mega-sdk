@@ -1275,6 +1275,11 @@ Database& FileServiceContext::database()
     return mDatabase;
 }
 
+LocalPath FileServiceContext::databasePath() const
+{
+    return mStorage.databasePath();
+}
+
 TaskExecutor& FileServiceContext::executor()
 {
     return mExecutor;

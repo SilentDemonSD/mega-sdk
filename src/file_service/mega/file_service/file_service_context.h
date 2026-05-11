@@ -209,6 +209,9 @@ public:
     // Retrieve a reference to this service's database.
     common::Database& database();
 
+    // Where is the service storing this user's database?
+    LocalPath databasePath() const;
+
     // Get a reference to this context's task executor.
     common::TaskExecutor& executor();
 

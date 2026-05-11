@@ -35,7 +35,7 @@ class FileService
     FileServiceContextPtr mContext;
 
     // Serializes access to mContext;
-    common::SharedMutex mContextLock;
+    mutable common::SharedMutex mContextLock;
 
 public:
     FileService();
@@ -52,6 +52,9 @@ public:
 
     // Create a new file.
     auto create(NodeHandle parent, const std::string& name) -> FileServiceResultOr<File>;
+
+    // Where is the service storing it's database?
+    auto databasePath() const -> FileServiceResultOr<LocalPath>;
 
     // Deinitialize the file service.
     void deinitialize();
