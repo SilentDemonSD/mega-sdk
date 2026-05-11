@@ -20,6 +20,7 @@
 #include <mega/file_service/file_range.h>
 #include <mega/file_service/file_remove_event.h>
 #include <mega/file_service/file_result.h>
+#include <mega/file_service/file_service.h>
 #include <mega/file_service/file_service_context.h>
 #include <mega/file_service/file_service_result.h>
 #include <mega/file_service/file_service_result_or.h>
@@ -971,9 +972,7 @@ void FileServiceContext::updated(NodeEventQueue& events)
     EventProcessor (*this)(events);
 }
 
-FileServiceContext::FileServiceContext(Client& client,
-                                       const ReclaimOptions& reclaimOptions,
-                                       const ServiceOptions& serviceOptions):
+FileServiceContext::FileServiceContext(Client& client, FileService& service):
     NodeEventObserver(),
     mInstanceLogger("FileServiceContext", *this, logger()),
     mClient(client),
@@ -984,14 +983,12 @@ FileServiceContext::FileServiceContext(Client& client,
     mInfoContextRemoved(),
     mInfoContexts(),
     mLock(),
-    mServiceOptions(serviceOptions),
-    mOptionsLock(),
     mReclaimContext(),
     mReclaimContextLock(),
-    mReclaimOptions(reclaimOptions),
     mReclaimTask(),
     mReclaimTaskLock(),
     mEventEmitter(),
+    mService(service),
     mActivities(),
     mExecutor(TaskExecutorFlags(), logger())
 {
@@ -1001,16 +998,19 @@ FileServiceContext::FileServiceContext(Client& client,
     // Purge any lingering removed files.
     purgeRemovedFiles();
 
+    // Get our hands on the service's reclamation options.
+    auto options = service.reclaimOptions();
+
     // User hasn't specified any storage quota.
-    if (!mReclaimOptions.mReclaimThreshold)
+    if (!options.mReclaimThreshold)
         return;
 
     // Assume user's specified an initial reclamation delay.
-    auto delay = mReclaimOptions.mDelay;
+    auto delay = options.mDelay;
 
     // User hasn't specified an initial reclamation delay.
     if (!delay.count())
-        delay = mReclaimOptions.mPeriod;
+        delay = options.mPeriod;
 
     // User hasn't specified a reclamation period.
     if (!delay.count())
@@ -1525,34 +1525,19 @@ void FileServiceContext::removeObserver(FileID id, FileEventObserverID observerI
     mEventEmitter.removeObserver(id, observerID);
 }
 
-void FileServiceContext::reclaimOptions(const ReclaimOptions& options)
+ReclaimOptions FileServiceContext::reclaimOptions()
 {
-    // Set later to prevent modification to our options.
-    SharedLock readLock(mOptionsLock, std::defer_lock);
+    return mService.reclaimOptions();
+}
 
-    // Keeps track of our original reclamation period.
-    seconds oldPeriod;
-
-    // Update our options.
-    {
-        // Make sure no one else is modifying our options.
-        UniqueLock writeLock(mOptionsLock);
-
-        // Latch current reclamation period.
-        oldPeriod = mReclaimOptions.mPeriod;
-
-        // Update our options.
-        mReclaimOptions = options;
-
-        // Let other threads read our options.
-        readLock = writeLock.to_shared_lock();
-    }
-
+void FileServiceContext::reclaimOptionsChanged(const ReclaimOptions& newOptions,
+                                               const ReclaimOptions& oldOptions)
+{
     // Acquire task lock.
     UniqueLock taskLock(mReclaimTaskLock);
 
     // Caller wants to disable periodic reclamation.
-    if (!reclamationEnabled(options))
+    if (!reclamationEnabled(newOptions))
     {
         FSInfo1("Aborting reclaim task");
 
@@ -1560,13 +1545,13 @@ void FileServiceContext::reclaimOptions(const ReclaimOptions& options)
     }
 
     // Convenience.
-    auto newPeriod = options.mPeriod;
+    auto newPeriod = newOptions.mPeriod;
 
     // Periodic reclamation is already scheduled.
     if (mReclaimTask && !mReclaimTask.completed())
     {
         // And the caller isn't changing the reclamation period.
-        if (newPeriod == oldPeriod)
+        if (newPeriod == oldOptions.mPeriod)
             return;
 
         // Leave a trail so we know what we've done.
@@ -1589,15 +1574,6 @@ void FileServiceContext::reclaimOptions(const ReclaimOptions& options)
                                                std::placeholders::_1),
                                      when,
                                      true);
-}
-
-ReclaimOptions FileServiceContext::reclaimOptions()
-{
-    // Make sure no one else is modifying our options.
-    SharedLock guard(mOptionsLock);
-
-    // Return current options to our caller.
-    return mReclaimOptions;
 }
 
 void FileServiceContext::removeFromIndex(FileContextBadge, FileID id)
@@ -1661,22 +1637,9 @@ catch (std::runtime_error& exception)
                exception.what());
 }
 
-void FileServiceContext::serviceOptions(const ServiceOptions& serviceOptions)
-{
-    // Make sure no one else is modifying our options.
-    UniqueLock writeLock(mOptionsLock);
-
-    // Update our options.
-    mServiceOptions = serviceOptions;
-}
-
 ServiceOptions FileServiceContext::serviceOptions()
 {
-    // Make sure no one else is modifying our options.
-    SharedLock guard(mOptionsLock);
-
-    // Return current options to our caller.
-    return mServiceOptions;
+    return mService.serviceOptions();
 }
 
 auto FileServiceContext::storageInfo(const ReclaimOptions* options)
