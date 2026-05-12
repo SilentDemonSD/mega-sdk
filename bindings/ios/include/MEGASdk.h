@@ -10196,6 +10196,16 @@ typedef NS_ENUM(NSInteger, PasswordManagerNodeType) {
  */
 - (void)fileServiceReclaimWithOptions:(nullable MEGAFileServiceReclaimOptions *)options delegate:(id<MEGARequestDelegate>)delegate;
 
+/**
+ * @brief Set the options for reclaiming storage used by MEGA's file services.
+ *
+ * The provided options will be applied to the file services, and they will affect how the
+ * file services reclaim storage.
+ *
+ * @param options Options to set for reclaiming storage used by MEGA's file services.
+ */
+- (void)setFileServiceReclaimOptions:(MEGAFileServiceReclaimOptions *)options;
+
 @end
 
 NS_ASSUME_NONNULL_END

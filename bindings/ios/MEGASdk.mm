@@ -4266,4 +4266,11 @@ using namespace mega;
     }
 }
 
+- (void)setFileServiceReclaimOptions:(MEGAFileServiceReclaimOptions *)options {
+    if (self.megaApi == nil || options == nil) {
+        return;
+    }
+    self.megaApi->fileServiceSetReclaimOptions([options getCPtr]);
+}
+
 @end
