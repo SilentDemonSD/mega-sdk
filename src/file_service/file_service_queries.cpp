@@ -91,7 +91,8 @@ FileServiceQueries::FileServiceQueries(Database& database):
 
     mGetFileIDs = "select id "
                   "  from files "
-                  " where (:removed is null or removed = :removed)";
+                  " where (:dirty is null or dirty = :dirty) "
+                  "   and (:removed is null or removed = :removed)";
 
     mGetFileIDsByParentHandle = "select id "
                                 "  from files "
@@ -172,7 +173,8 @@ FileServiceQueries::FileServiceQueries(Database& database):
                         "   and id = :id";
 
     mRemoveFiles = "delete from files "
-                   " where (:removed is null or removed = :removed)";
+                   " where (:dirty is null or dirty = :dirty) "
+                   "   and (:removed is null or removed = :removed)";
 
     mSetFileAccessTime = "update files "
                          "   set accessed = :accessed "

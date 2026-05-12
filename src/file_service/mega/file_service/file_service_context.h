@@ -27,6 +27,7 @@
 #include <mega/file_service/file_storage.h>
 #include <mega/file_service/from_file_id_map.h>
 #include <mega/file_service/storage_info.h>
+#include <mega/scoped_helpers.h>
 
 #include <chrono>
 #include <condition_variable>
@@ -58,6 +59,9 @@ class FileServiceContext: common::NodeEventObserver
 
     template<typename Lock>
     FileID allocateID(Lock&& lock, common::Transaction& transaction);
+
+    // Remove unmodified files from the database and from disk.
+    void cleanCache();
 
     template<typename Lock>
     void deallocateID(FileID id, Lock&& lock, common::Transaction& transaction);
@@ -137,6 +141,12 @@ class FileServiceContext: common::NodeEventObserver
     common::Database mDatabase;
     FileServiceQueries mQueries;
 
+    // Responsible for cleaning the service's cache on destruction.
+    //
+    // Note that mCacheCleaner makes use of the mDatabase, mQueries and
+    // mStorage members directly above during destruction.
+    ScopedDestructor mCacheCleaner;
+
     FromFileIDMap<FileContextWeakPtr> mFileContexts;
     std::condition_variable_any mInfoContextRemoved;
     FromFileIDMap<FileInfoContextWeakPtr> mInfoContexts;
@@ -193,6 +203,9 @@ public:
     // Notify observer when a specific file changes.
     FileEventObserverID addObserver(FileID id, FileEventObserver observer);
 
+    // Let the service know it should clean the cache on destruction.
+    void cleanCacheOnDestruction();
+
     // Retrieve a reference to this service's client.
     common::Client& client();
 
@@ -201,6 +214,9 @@ public:
 
     // Retrieve a reference to this service's database.
     common::Database& database();
+
+    // Where is the service storing this user's database?
+    LocalPath databasePath() const;
 
     // Get a reference to this context's task executor.
     common::TaskExecutor& executor();
@@ -255,6 +271,9 @@ public:
     // How much storage space is the service using? Better performance than storageInfo but with
     // less information
     auto storageUsed() -> FileServiceResultOr<std::uint64_t>;
+
+    // Find out where the service is storing a particular file.
+    LocalPath userFilePath(FileID id) const;
 }; // FileServiceContext
 
 } // file_service

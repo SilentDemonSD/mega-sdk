@@ -27,6 +27,7 @@
 #include <mega/file_service/logging.h>
 #include <mega/filesystem.h>
 #include <mega/mediafileattribute.h>
+#include <mega/scoped_helpers.h>
 
 #include <chrono>
 #include <stdexcept>
@@ -224,6 +225,37 @@ FileID FileServiceContext::allocateID([[maybe_unused]] Lock&& lock, Transaction&
 
     // Return the ID to our caller.
     return FileID::from(id);
+}
+
+void FileServiceContext::cleanCache()
+try
+{
+    FSDebug1("Cleaning cache...");
+
+    // No lock should be necessary as we're called during destruction.
+    auto transaction = mDatabase.transaction();
+    auto query = transaction.query(mQueries.mGetFileIDs);
+
+    query.param(":dirty").set(false);
+
+    // Remove each unmodified file from the disk.
+    for (query.execute(); query; ++query)
+        mStorage.removeFile(query.field("id").get<FileID>(), std::nothrow);
+
+    // Remove unmodified files from the database.
+    query = transaction.query(mQueries.mRemoveFiles);
+
+    query.param(":dirty").set(false);
+    query.execute();
+
+    // Persist database changes.
+    transaction.commit();
+
+    FSDebug1("Cache cleaned");
+}
+catch (std::runtime_error& exception)
+{
+    FSErrorF("Unable to clean cache: %s", exception.what());
 }
 
 template<typename Lock>
@@ -979,6 +1011,7 @@ FileServiceContext::FileServiceContext(Client& client, FileService& service):
     mStorage(mClient),
     mDatabase(createDatabase(mStorage.databasePath())),
     mQueries(mDatabase),
+    mCacheCleaner(),
     mFileContexts(),
     mInfoContextRemoved(),
     mInfoContexts(),
@@ -1147,6 +1180,14 @@ FileEventObserverID FileServiceContext::addObserver(FileID id, FileEventObserver
     return mEventEmitter.addObserver(id, std::move(observer));
 }
 
+void FileServiceContext::cleanCacheOnDestruction()
+{
+    mCacheCleaner = [this]()
+    {
+        cleanCache();
+    };
+}
+
 Client& FileServiceContext::client()
 {
     return mClient;
@@ -1273,6 +1314,11 @@ catch (std::runtime_error& exception)
 Database& FileServiceContext::database()
 {
     return mDatabase;
+}
+
+LocalPath FileServiceContext::databasePath() const
+{
+    return mStorage.databasePath();
 }
 
 TaskExecutor& FileServiceContext::executor()
@@ -1682,6 +1728,11 @@ catch (std::runtime_error& exception)
     FSErrorF("Unable to determine storage footprint: %s", exception.what());
 
     return unexpected(FILE_SERVICE_UNEXPECTED);
+}
+
+LocalPath FileServiceContext::userFilePath(FileID id) const
+{
+    return mStorage.userFilePath(id);
 }
 
 FileServiceContext::EventProcessor::EventProcessor(FileServiceContext& service):

@@ -35,7 +35,7 @@ class FileService
     FileServiceContextPtr mContext;
 
     // Serializes access to mContext;
-    common::SharedMutex mContextLock;
+    mutable common::SharedMutex mContextLock;
 
     // Specifies how the service should perform storage reclamation.
     ReclaimOptions mReclaimOptions;
@@ -65,8 +65,11 @@ public:
     // Create a new file.
     auto create(NodeHandle parent, const std::string& name) -> FileServiceResultOr<File>;
 
+    // Where is the service storing it's database?
+    auto databasePath() const -> FileServiceResultOr<LocalPath>;
+
     // Deinitialize the file service.
-    void deinitialize();
+    void deinitialize(bool cleanCache);
 
     // Retrieve information about a file managed by the file service.
     auto info(FileID id) -> FileServiceResultOr<FileInfo>;
@@ -112,6 +115,9 @@ public:
     // How much storage space is the service using? Better performance than storageInfo but with
     // less information
     auto storageUsed() -> FileServiceResultOr<std::uint64_t>;
+
+    // Find out where the service is storing a particular file.
+    auto userFilePath(FileID id) const -> FileServiceResultOr<LocalPath>;
 }; // FileService
 
 } // file_service

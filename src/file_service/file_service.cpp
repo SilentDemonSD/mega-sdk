@@ -63,10 +63,29 @@ auto FileService::create(NodeHandle parent, const std::string& name) -> FileServ
     return mContext->create(parent, name);
 }
 
-void FileService::deinitialize()
+auto FileService::databasePath() const -> FileServiceResultOr<LocalPath>
+{
+    SharedLock guard(mContextLock);
+
+    if (mContext)
+        return mContext->databasePath();
+
+    return unexpected(FILE_SERVICE_UNINITIALIZED);
+}
+
+void FileService::deinitialize(bool cleanCache)
 {
     UniqueLock guard(mContextLock);
 
+    // No context needs to be destroyed.
+    if (!mContext)
+        return;
+
+    // Caller wants to clean the service's cache.
+    if (cleanCache)
+        mContext->cleanCacheOnDestruction();
+
+    // Destroy the service's context.
     mContext.reset();
 }
 
@@ -243,6 +262,16 @@ auto FileService::storageUsed() -> FileServiceResultOr<std::uint64_t>
         return unexpected(FILE_SERVICE_UNINITIALIZED);
 
     return mContext->storageUsed();
+}
+
+auto FileService::userFilePath(FileID id) const -> FileServiceResultOr<LocalPath>
+{
+    SharedLock guard(mContextLock);
+
+    if (mContext)
+        return mContext->userFilePath(id);
+
+    return unexpected(FILE_SERVICE_UNINITIALIZED);
 }
 
 } // file_service
