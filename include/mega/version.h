@@ -10,7 +10,7 @@
 
 // Supports versions [0-255].[0-255].[0-255]
 #ifndef MEGA_SDK_BUILD_VERSION
-#define MEGA_SDK_BUILD_VERSION(major, minor, patch) ((major << 16) | (minor << 8) | (patch))
+#define MEGA_SDK_BUILD_VERSION(major, minor, patch) ((((major) << 16) | ((minor) << 8) | (patch)))
 #endif
 
 #ifndef MEGA_SDK_VERSION
