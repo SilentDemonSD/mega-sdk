@@ -90,6 +90,7 @@ MountResult MountDB::check(const Client& client, const MountInfo& info) const
             FUSEErrorF("Local path points to stale or inaccessible mount: %s (errno: %d)",
                        path.toPath(false).c_str(),
                        errorCode);
+
             return MOUNT_LOCAL_STALE;
         }
         else
