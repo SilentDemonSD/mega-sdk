@@ -41,11 +41,22 @@
 #include <openssl/err.h>
 #endif
 
+#include <limits>
 #include <string_view>
 
 #define MAX_SPEED_CONTROL_TIMEOUT_MS 500
 
 namespace mega {
+
+namespace
+{
+
+bool fitsInCurlOffT(size_t value)
+{
+    return value <= static_cast<size_t>(std::numeric_limits<curl_off_t>::max());
+}
+
+} // unnamed namespace
 
 std::atomic<bool> g_netLoggingOn{false};
 
@@ -834,15 +845,16 @@ void CurlHttpIO::send_request(CurlHttpContext* httpctx)
 {
     CurlHttpIO* httpio = httpctx->httpio;
     HttpReq* req = httpctx->req;
-    auto len = httpctx->len;
+    const auto len = httpctx->len;
     const char* data = httpctx->data;
+    const auto requestSize = data ? len : req->out->size();
 
     LOG_debug << httpctx->req->getLogName() << req->getMethodString()
               << " target URL: " << getSafeUrl(req->posturl);
 
     if (req->binary)
     {
-        LOG_debug << httpctx->req->getLogName() << "[sending " << (data ? len : req->out->size())
+        LOG_debug << httpctx->req->getLogName() << "[sending " << requestSize
                   << " bytes of raw data]";
     }
     else
@@ -876,8 +888,25 @@ void CurlHttpIO::send_request(CurlHttpContext* httpctx)
         switch (req->method)
         {
         case METHOD_POST:
+            if (!fitsInCurlOffT(requestSize))
+            {
+                LOG_err << req->getLogName()
+                        << "Request payload size cannot be represented by curl_off_t: "
+                        << requestSize;
+                req->status = REQ_FAILURE;
+                req->httpiohandle = NULL;
+                curl_easy_cleanup(curl);
+                curl_slist_free_all(httpctx->headers);
+                httpctx->req = NULL;
+                delete httpctx;
+                httpio->statechange = true;
+                return;
+            }
+
             curl_easy_setopt(curl, CURLOPT_POST, 1L);
-            curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, data ? len : req->out->size());
+            curl_easy_setopt(curl,
+                             CURLOPT_POSTFIELDSIZE_LARGE,
+                             static_cast<curl_off_t>(requestSize));
             break;
         case METHOD_GET:
             curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
@@ -1132,7 +1161,7 @@ int CurlHttpIO::debug_callback(CURL*, curl_infotype type, char* data, size_t siz
 }
 
 // POST request to URL
-void CurlHttpIO::post(HttpReq* req, const char* data, unsigned len)
+void CurlHttpIO::post(HttpReq* req, const char* data, size_t len)
 {
     CurlHttpContext* httpctx = new CurlHttpContext;
     httpctx->curl = NULL;
@@ -1725,7 +1754,7 @@ size_t CurlHttpIO::read_data(void* ptr, size_t size, size_t nmemb, void* source)
 
 size_t CurlHttpIO::write_data(void* ptr, size_t size, size_t nmemb, void* target)
 {
-    int len = int(size * nmemb);
+    size_t len = size * nmemb;
     HttpReq *req = (HttpReq*)target;
     CurlHttpIO* httpio = (CurlHttpIO*)req->httpio;
     if (httpio)
@@ -1737,19 +1766,23 @@ size_t CurlHttpIO::write_data(void* ptr, size_t size, size_t nmemb, void* target
             bool isApi = (req->type == REQ_JSON);
             if (!isApi && !isUpload)
             {
-                if ((httpio->downloadSpeed + ((httpio->partialdata[GET] + len) / static_cast<m_off_t>(SpeedController::SPEED_MEAN_CIRCULAR_BUFFER_SIZE_SECONDS))) > httpio->maxspeed[GET])
+                if ((httpio->downloadSpeed +
+                     ((httpio->partialdata[GET] + static_cast<m_off_t>(len)) /
+                      static_cast<m_off_t>(
+                          SpeedController::SPEED_MEAN_CIRCULAR_BUFFER_SIZE_SECONDS))) >
+                    httpio->maxspeed[GET])
                 {
                     httpio->pausedrequests[GET].insert(httpctx->curl);
                     httpio->arerequestspaused[GET] = true;
                     return CURL_WRITEFUNC_PAUSE;
                 }
-                httpio->partialdata[GET] += len;
+                httpio->partialdata[GET] += static_cast<m_off_t>(len);
             }
         }
 
         if (len)
         {
-            req->put(ptr, static_cast<unsigned>(len), true);
+            req->put(ptr, len, true);
             // Chunked data is logged here when written since chunks are not
             // consumed immediately upon receipt, avoiding duplicate logging.
             if (req->mChunked)
@@ -1903,6 +1936,12 @@ int CurlHttpIO::seek_data(void *userp, curl_off_t offset, int origin)
         totalsize = req->out->size();
     }
 
+    if (!fitsInCurlOffT(totalsize))
+    {
+        LOG_err << "Payload size cannot be represented by curl_off_t: " << totalsize;
+        return CURL_SEEKFUNC_FAIL;
+    }
+
     switch (origin)
     {
     case SEEK_SET:
@@ -1919,13 +1958,13 @@ int CurlHttpIO::seek_data(void *userp, curl_off_t offset, int origin)
         return CURL_SEEKFUNC_FAIL;
     }
 
-    if (newoffset > (int) totalsize || newoffset < 0)
+    if (newoffset > static_cast<curl_off_t>(totalsize) || newoffset < 0)
     {
         LOG_err << "Invalid offset " << origin << " " << offset << " " << totalsize
                 << " " << req->outbuf << " " << newoffset;
         return CURL_SEEKFUNC_FAIL;
     }
-    req->outpos = size_t(newoffset);
+    req->outpos = static_cast<size_t>(newoffset);
     LOG_debug << "Successful seek to position " << newoffset << " of " << totalsize;
     return CURL_SEEKFUNC_OK;
 }

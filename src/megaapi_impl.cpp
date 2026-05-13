@@ -1346,26 +1346,34 @@ EncryptFilePieceByChunks::EncryptFilePieceByChunks(FileAccess *cFain, m_off_t cI
 {
 }
 
-byte *EncryptFilePieceByChunks::nextbuffer(unsigned bufsize)
+byte* EncryptFilePieceByChunks::nextbuffer(size_t bufsize)
 {
     if (lastsize)
     {
         // write the last encrypted chunk
-        if (!faout->fwrite((byte*)buffer.data(), lastsize, outpos))
+        if (!faout->fwrite((byte*)buffer.data(),
+                           // EncryptByChunks writes one chunk at a time, bounded by ChunkedHash.
+                           static_cast<unsigned>(lastsize),
+                           outpos))
         {
             return NULL;
         }
-        outpos += lastsize;
+        outpos += static_cast<m_off_t>(lastsize);
     }
 
     buffer.resize(bufsize + SymmCipher::BLOCKSIZE);
     memset((void*)(buffer.data() + bufsize), 0, SymmCipher::BLOCKSIZE);
-    if (!fain->frawread((byte*)buffer.data(), bufsize, inpos, false, FSLogging::logOnError))
+    if (!fain->frawread((byte*)buffer.data(),
+                        // EncryptByChunks reads one chunk at a time, bounded by ChunkedHash.
+                        static_cast<unsigned>(bufsize),
+                        inpos,
+                        false,
+                        FSLogging::logOnError))
     {
         return NULL;
     }
     lastsize = bufsize;
-    inpos += bufsize;
+    inpos += static_cast<m_off_t>(bufsize);
     return (byte*)buffer.data();
 }
 

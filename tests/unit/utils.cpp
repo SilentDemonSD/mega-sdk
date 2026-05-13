@@ -49,7 +49,8 @@ std::shared_ptr<mega::MegaClient> makeClient(mega::MegaApp& app, mega::DbAccess*
     struct HttpIo : mega::HttpIO
     {
         void addevents(mega::Waiter*, int) override {}
-        void post(struct mega::HttpReq*, const char* = NULL, unsigned = 0) override {}
+
+        void post(struct mega::HttpReq*, const char* = NULL, size_t = 0) override {}
         void cancel(mega::HttpReq*) override {}
         m_off_t postpos(void*) override { return {}; }
         bool doio(void) override { return {}; }
