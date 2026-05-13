@@ -762,11 +762,11 @@ catch (const MountException& exception)
 {
     auto result = exception.result();
 
-    FUSEErrorF("Unable to enable mount %s: %s: %s",
+    FUSEErrorF("Unable to enable mount %s: %s: %s: %d",
                name.c_str(),
                toDescription(result),
-               exception.what());
-    FUSEErrorF("Mount enable failed with OS error code: %d", exception.errorCode());
+               exception.what(),
+               exception.errorCode());
 
     return result;
 }
