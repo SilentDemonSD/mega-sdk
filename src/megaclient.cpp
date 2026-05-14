@@ -5532,6 +5532,17 @@ void MegaClient::sc_procEoo(std::unique_lock<recursive_mutex>& nodeTreeIsChangin
 #endif
 }
 
+void MegaClient::sc_procTerm(bool isDuringMoveOperation)
+{
+    if (!isDuringMoveOperation && !useralerts.isDeletedSharedNodesStashEmpty())
+    {
+        useralerts.purgeNodeVersionsFromStash();
+        useralerts.convertStashedDeletedSharedNodes();
+    }
+    LOG_debug << "Processing of action packets for " << string(sessionid, sizeof(sessionid))
+              << " terminated.";
+}
+
 bool MegaClient::sc_checkActionPacketPreservePos(JSON& json, const Node* lastAPDeletedNode)
 {
     auto actionpacketStart = json.pos;
@@ -5589,7 +5600,8 @@ void MegaClient::sc_updateStats()
 
 std::shared_ptr<Node> MegaClient::sc_procActionPacketWithoutCommonTags(JSON& json,
                                                                        nameid name,
-                                                                       bool isSelfOriginating)
+                                                                       bool isSelfOriginating,
+                                                                       bool* isNewSharesMerged)
 {
     bool moveOperation = false; // true if "d" packet has "m":1
     std::shared_ptr<Node> lastAPDeletedNode;
@@ -5618,6 +5630,12 @@ std::shared_ptr<Node> MegaClient::sc_procActionPacketWithoutCommonTags(JSON& jso
                         useralerts.beginNotingSharedNodes();
                     handle originatingUser = sc_newnodes(json);
                     mergenewshares(1);
+
+                    if (isNewSharesMerged)
+                    {
+                        *isNewSharesMerged = true;
+                    }
+
                     if (!loggedIntoFolder())
                         useralerts.convertNotedSharedNodes(true, originatingUser);
                 }
@@ -5636,6 +5654,10 @@ std::shared_ptr<Node> MegaClient::sc_procActionPacketWithoutCommonTags(JSON& jso
                     reqtag = 0;
                     mergenewshares(1);
                     reqtag = creqtag;
+                }
+                else if (isNewSharesMerged)
+                {
+                    *isNewSharesMerged = false;
                 }
                 break;
             case name_id::c:
@@ -25653,7 +25675,7 @@ void MegaClient::processScMessageInStreaming()
         m_off_t consumed = scStreamingParser.process(pendingsc->data());
         // In case the logic changed
         assert(consumed >= 0);
-        if (consumed)
+        if (consumed > 0)
         {
             pendingsc->purge(static_cast<size_t>(consumed));
         }
@@ -25664,18 +25686,29 @@ void MegaClient::processScMessageInStreaming()
         if (!scStreamingParser.isPaused())
         {
             mStreamingContinue = false;
-            if (scStreamingParser.isLastReceived())
+
+            bool isLastReceived = scStreamingParser.isLastReceived();
+            bool isFinished = scStreamingParser.isFinished();
+            bool isFailed = scStreamingParser.isFailed();
+
+            if (isLastReceived || isFinished || isFailed)
             {
-                if (!scStreamingParser.isFinished() && !scStreamingParser.isFailed())
+                if (isLastReceived && !isFinished && !isFailed)
                 {
                     // This means we received the last part of whole JSON(action packets)
                     // But JSONSplitter did not end the process properly
                     LOG_warn << "Incompleted SC response detected";
                 }
+                else if (!isLastReceived && isFinished)
+                {
+                    LOG_warn << "Superfluous SC response detected";
+                }
 
                 clearStreamingParser();
                 resetScRequest();
 
+                // upon reception of action packets, if the cs request is waiting for a retry
+                // and it failed due to -3 or -4 error from API, we can abort the backoff
                 abortBackoffTimerForCsRequest();
             }
         }
