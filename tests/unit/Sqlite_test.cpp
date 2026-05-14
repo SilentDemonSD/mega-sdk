@@ -10,6 +10,7 @@
 #include <mega/localpath.h>
 
 #include <filesystem>
+#include <fstream>
 #include <mega.h>
 #include <set>
 #include <sqlite3.h>
@@ -105,6 +106,292 @@ TEST(Sqlite, renameDB)
         EXPECT_TRUE(std::filesystem::exists(aux))
             << "File " << aux << "doesn't exit when it should";
     }
+}
+
+namespace
+{
+
+/**
+ * @brief Computed paths for the legacy/current DB triplets seeded by
+ *        createLegacyDbTestFiles().
+ */
+struct LegacyDbTestFiles
+{
+    LocalPath legacyPath;
+    LocalPath legacyShm;
+    LocalPath legacyWal;
+    LocalPath currentPath;
+    LocalPath currentShm;
+    LocalPath currentWal;
+};
+
+/**
+ * @brief Creates the test folder and seeds DB placeholder files for
+ *        checkDbFileAndAdjustLegacy_* tests.
+ *
+ * Seeds both the legacy and the current-version triplet (main, -shm, -wal)
+ * with distinct contents ("legacy-*" and "current-*") so callers can verify
+ * reuse, rename, and delete semantics.
+ *
+ * @param folderFsPath  filesystem directory to create
+ * @param dbAccess      used to compute the legacy/current paths
+ * @param fsaccess      used by databasePath()
+ * @param dbName        DB base name
+ * @return Computed legacy and current paths (with -shm/-wal sidecars).
+ */
+LegacyDbTestFiles createLegacyDbTestFiles(const std::filesystem::path& folderFsPath,
+                                          SqliteDbAccess& dbAccess,
+                                          FileSystemAccess& fsaccess,
+                                          const std::string& dbName)
+{
+    std::filesystem::create_directory(folderFsPath);
+
+    LegacyDbTestFiles p;
+    p.legacyPath = dbAccess.databasePath(fsaccess, dbName, DbAccess::LEGACY_DB_VERSION);
+    p.legacyShm = p.legacyPath;
+    p.legacyShm.append(LocalPath::fromRelativePath("-shm"));
+    p.legacyWal = p.legacyPath;
+    p.legacyWal.append(LocalPath::fromRelativePath("-wal"));
+
+    p.currentPath = dbAccess.databasePath(fsaccess, dbName, DbAccess::DB_VERSION);
+    p.currentShm = p.currentPath;
+    p.currentShm.append(LocalPath::fromRelativePath("-shm"));
+    p.currentWal = p.currentPath;
+    p.currentWal.append(LocalPath::fromRelativePath("-wal"));
+
+    const std::vector<std::pair<LocalPath, std::string>> seed = {
+        {p.legacyPath, "legacy-main"},
+        {p.legacyShm, "legacy-shm"},
+        {p.legacyWal, "legacy-wal"},
+        {p.currentPath, "current-main"},
+        {p.currentShm, "current-shm"},
+        {p.currentWal, "current-wal"},
+    };
+
+    for (const auto& [path, contents]: seed)
+    {
+        std::ofstream{path.toPath(false)} << contents;
+        EXPECT_TRUE(std::filesystem::exists(path.toPath(false)))
+            << "Failed to create placeholder file " << path.toPath(false);
+    }
+
+    return p;
+}
+
+} // namespace
+
+/**
+ * @brief Validate checkDbFileAndAdjustLegacy method reuses legacy DB files
+ *
+ *
+ * Steps:
+ *  - Init currentDbVersion of DbAccess to LEGACY_DB_VERSION.
+ *  - Drop placeholder files at both the legacy and the current-version paths
+ *    (main, -shm, -wal sidecars) with distinct content, named with SQLite's
+ *    WAL convention.
+ *  - Call checkDbFileAndAdjustLegacy with flags 0.
+ *  - Assert dbPath now points at the legacy path and the function reports the
+ *    DB as existing.
+ *  - Verify both the legacy and current triplets are left untouched (content
+ *    unchanged); the reuse path must not modify the current-version files.
+ */
+TEST(Sqlite, checkDbFileAndAdjustLegacy_useLegacyDB)
+{
+    if (DbAccess::LEGACY_DB_VERSION == DbAccess::LAST_DB_VERSION_WITHOUT_NOD ||
+        DbAccess::LEGACY_DB_VERSION == DbAccess::LAST_DB_VERSION_WITHOUT_SRW ||
+        DbAccess::LEGACY_DB_VERSION == DbAccess::LAST_DB_VERSION_WITHOUT_VFINGERPRINT)
+    {
+        GTEST_SKIP()
+            << "use-legacy-DB branch is unreachable: LEGACY_DB_VERSION sits at a migration cutoff";
+    }
+
+    auto pathString{std::filesystem::current_path() / "folder_use_legacy"};
+
+    const MrProper cleanUp(
+        [pathString]()
+        {
+            std::filesystem::remove_all(pathString);
+        });
+
+    LocalPath folderPath = LocalPath::fromAbsolutePath(path_u8string(pathString));
+    SqliteDbAccess dbAccess{folderPath};
+
+    std::unique_ptr<FileSystemAccess> fsaccess{new FSACCESS_CLASS};
+    const std::string dbName{"dbToTest"};
+
+    const LegacyDbTestFiles paths =
+        createLegacyDbTestFiles(pathString, dbAccess, *fsaccess, dbName);
+
+    LocalPath dbPath;
+    constexpr int flags = 0;
+    dbAccess.currentDbVersion = DbAccess::LEGACY_DB_VERSION;
+    const bool exists = dbAccess.checkDbFileAndAdjustLegacy(*fsaccess, dbName, flags, dbPath);
+
+    EXPECT_TRUE(exists) << "checkDbFileAndAdjustLegacy should report the legacy DB as existing";
+    EXPECT_EQ(dbPath.toPath(false), paths.legacyPath.toPath(false))
+        << "dbPath should be the legacy path when reusing the legacy DB as-is";
+    EXPECT_EQ(dbAccess.currentDbVersion, DbAccess::LEGACY_DB_VERSION)
+        << "currentDbVersion should remain at LEGACY_DB_VERSION when reusing the legacy DB";
+
+    auto readFile = [](const LocalPath& p)
+    {
+        std::ifstream in{p.toPath(false)};
+        return std::string{std::istreambuf_iterator<char>(in), {}};
+    };
+
+    LocalPath dbShm = dbPath;
+    dbShm.append(LocalPath::fromRelativePath("-shm"));
+    LocalPath dbWal = dbPath;
+    dbWal.append(LocalPath::fromRelativePath("-wal"));
+
+    EXPECT_EQ(readFile(dbPath), "legacy-main") << "Legacy DB file should be untouched";
+    EXPECT_EQ(readFile(dbShm), "legacy-shm") << "Legacy -shm sidecar should be untouched";
+    EXPECT_EQ(readFile(dbWal), "legacy-wal") << "Legacy -wal sidecar should be untouched";
+    EXPECT_EQ(readFile(paths.currentPath), "current-main")
+        << "Current DB file should be untouched when reusing the legacy DB";
+    EXPECT_EQ(readFile(paths.currentShm), "current-shm")
+        << "Current -shm sidecar should be untouched when reusing the legacy DB";
+    EXPECT_EQ(readFile(paths.currentWal), "current-wal")
+        << "Current -wal sidecar should be untouched when reusing the legacy DB";
+}
+
+/**
+ * @brief Validate checkDbFileAndAdjustLegacy method recycles legacy DB files
+ *
+ *
+ * Steps:
+ *  - Init currentDbVersion of DbAccess to DB_VERSION.
+ *  - Drop placeholder files at the legacy paths AND the current-version paths
+ *    (main, -shm, -wal sidecars), each with distinct content so the rename is
+ *    verifiable. Files are named with SQLite's WAL convention (suffix appended
+ *    to the full filename).
+ *  - Call checkDbFileAndAdjustLegacy with flags DB_OPEN_FLAG_RECYCLE. This wipes
+ *    the stale current-version files via removeDBFiles, then renames the legacy
+ *    triplet onto the current-version paths.
+ *  - Assert all three legacy files have been removed.
+ *  - Verify the rename by comparing content: each current-version file must now
+ *    hold what was originally written to its legacy counterpart.
+ */
+TEST(Sqlite, checkDbFileAndAdjustLegacy_recycleLegacyDB)
+{
+    auto pathString{std::filesystem::current_path() / "folder_recycle_legacy"};
+
+    const MrProper cleanUp(
+        [pathString]()
+        {
+            std::filesystem::remove_all(pathString);
+        });
+
+    LocalPath folderPath = LocalPath::fromAbsolutePath(path_u8string(pathString));
+    SqliteDbAccess dbAccess{folderPath};
+
+    std::unique_ptr<FileSystemAccess> fsaccess{new FSACCESS_CLASS};
+    const std::string dbName{"dbToTest"};
+
+    const LegacyDbTestFiles paths =
+        createLegacyDbTestFiles(pathString, dbAccess, *fsaccess, dbName);
+
+    LocalPath dbPath;
+    constexpr int flags = DB_OPEN_FLAG_RECYCLE;
+    dbAccess.currentDbVersion = DbAccess::DB_VERSION;
+    const bool exists = dbAccess.checkDbFileAndAdjustLegacy(*fsaccess, dbName, flags, dbPath);
+
+    EXPECT_TRUE(exists) << "checkDbFileAndAdjustLegacy should report the legacy DB as existing";
+    EXPECT_EQ(dbPath.toPath(false), paths.currentPath.toPath(false))
+        << "dbPath should be the current path when recycling the legacy DB as-is";
+    EXPECT_TRUE(dbAccess.currentDbVersion == DbAccess::DB_VERSION)
+        << "currentDbVersion was not updated to DB_VERSION";
+
+    EXPECT_FALSE(std::filesystem::exists(paths.legacyPath.toPath(false)))
+        << "Legacy DB file " << paths.legacyPath.toPath(false) << " still exists";
+    EXPECT_FALSE(std::filesystem::exists(paths.legacyShm.toPath(false)))
+        << "Legacy -shm sidecar " << paths.legacyShm.toPath(false) << " still exists";
+    EXPECT_FALSE(std::filesystem::exists(paths.legacyWal.toPath(false)))
+        << "Legacy -wal sidecar " << paths.legacyWal.toPath(false) << " still exists";
+
+    auto readFile = [](const LocalPath& p)
+    {
+        std::ifstream in{p.toPath(false)};
+        return std::string{std::istreambuf_iterator<char>(in), {}};
+    };
+
+    LocalPath dbShm = dbPath;
+    dbShm.append(LocalPath::fromRelativePath("-shm"));
+    LocalPath dbWal = dbPath;
+    dbWal.append(LocalPath::fromRelativePath("-wal"));
+
+    EXPECT_EQ(readFile(dbPath), "legacy-main")
+        << "Current DB file content doesn't match the legacy main content";
+    EXPECT_EQ(readFile(dbShm), "legacy-shm")
+        << "Current -shm sidecar content doesn't match the legacy -shm content";
+    EXPECT_EQ(readFile(dbWal), "legacy-wal")
+        << "Current -wal sidecar content doesn't match the legacy -wal content";
+}
+
+/**
+ * @brief Validate checkDbFileAndAdjustLegacy method deletes legacy DB files
+ *
+ *
+ * Steps:
+ *  - Init currentDbVersion of DbAccess to DB_VERSION.
+ *  - Drop placeholder files at both the legacy and the current-version paths
+ *    (main, -shm, -wal sidecars), named with SQLite's WAL convention (suffix
+ *    appended to the full filename).
+ *  - Call checkDbFileAndAdjustLegacy with flags 0.
+ *  - Assert all three legacy files have been removed.
+ *  - Verify the current-version triplet is left untouched (content unchanged);
+ *    the delete path must not modify the current-version files.
+ */
+TEST(Sqlite, checkDbFileAndAdjustLegacy_deleteLegacyDB)
+{
+    auto pathString{std::filesystem::current_path() / "folder_remove_legacy"};
+
+    const MrProper cleanUp(
+        [pathString]()
+        {
+            std::filesystem::remove_all(pathString);
+        });
+
+    LocalPath folderPath = LocalPath::fromAbsolutePath(path_u8string(pathString));
+    SqliteDbAccess dbAccess{folderPath};
+
+    std::unique_ptr<FileSystemAccess> fsaccess{new FSACCESS_CLASS};
+    const std::string dbName{"dbToTest"};
+
+    const LegacyDbTestFiles paths =
+        createLegacyDbTestFiles(pathString, dbAccess, *fsaccess, dbName);
+
+    LocalPath dbPath;
+    constexpr int flags = 0;
+    dbAccess.currentDbVersion = DbAccess::DB_VERSION;
+    const bool exists = dbAccess.checkDbFileAndAdjustLegacy(*fsaccess, dbName, flags, dbPath);
+
+    EXPECT_TRUE(dbAccess.currentDbVersion == DbAccess::DB_VERSION)
+        << "currentDbVersion was not updated to DB_VERSION";
+
+    EXPECT_TRUE(exists) << "checkDbFileAndAdjustLegacy should report the current DB as existing";
+    EXPECT_EQ(dbPath.toPath(false), paths.currentPath.toPath(false))
+        << "dbPath should be the current path when deleting the legacy DB as-is";
+
+    EXPECT_FALSE(std::filesystem::exists(paths.legacyPath.toPath(false)))
+        << "Legacy DB file " << paths.legacyPath.toPath(false) << " still exists";
+    EXPECT_FALSE(std::filesystem::exists(paths.legacyShm.toPath(false)))
+        << "Legacy -shm sidecar " << paths.legacyShm.toPath(false) << " still exists";
+    EXPECT_FALSE(std::filesystem::exists(paths.legacyWal.toPath(false)))
+        << "Legacy -wal sidecar " << paths.legacyWal.toPath(false) << " still exists";
+
+    auto readFile = [](const LocalPath& p)
+    {
+        std::ifstream in{p.toPath(false)};
+        return std::string{std::istreambuf_iterator<char>(in), {}};
+    };
+
+    EXPECT_EQ(readFile(paths.currentPath), "current-main")
+        << "Current DB file should be untouched when deleting the legacy DB";
+    EXPECT_EQ(readFile(paths.currentShm), "current-shm")
+        << "Current -shm sidecar should be untouched when deleting the legacy DB";
+    EXPECT_EQ(readFile(paths.currentWal), "current-wal")
+        << "Current -wal sidecar should be untouched when deleting the legacy DB";
 }
 
 #ifdef USE_SQLITE
