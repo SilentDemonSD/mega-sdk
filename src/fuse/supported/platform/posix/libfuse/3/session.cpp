@@ -91,6 +91,7 @@ Session::Session(Mount& mount):
 {
     auto arguments = Arguments(mount.name());
     auto path = mMount.path().toPath(false);
+    errno = 0;
 
     SessionPtr session(
         fuse_session_new(arguments.get(), &operations(), sizeof(fuse_lowlevel_ops), this));

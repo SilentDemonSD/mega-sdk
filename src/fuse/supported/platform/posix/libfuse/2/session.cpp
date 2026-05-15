@@ -120,6 +120,7 @@ Session::Session(Mount& mount):
 {
     auto arguments = Arguments(mount.name());
     auto path = mMount.path().toPath(false);
+    errno = 0;
 
     ChannelPtr channel(fuse_mount(path.c_str(), arguments.get()), mount);
     if (!channel)
