@@ -5562,17 +5562,16 @@ autocomplete::ACN autocompleteSyntax()
     p->Add(exec_alerts_number, sequence(text("alerts"), wholenumber(10)));
     p->Add(exec_alerts_notify, sequence(text("alerts"), text("notify")));
     p->Add(exec_alerts_seen, sequence(text("alerts"), text("seen")));
-    p->Add(exec_alerts_test_reminder, sequence(text("alerts"), text("test_reminder")));
-    p->Add(exec_alerts_test_payment, sequence(text("alerts"), text("test_payment")));
-    p->Add(exec_alerts_test_payment_v2, sequence(text("alerts"), text("test_payment_v2")));
     p->Add(exec_alerts_add_reminder,
            sequence(text("alerts"),
                     text("add_reminder"),
-                    param("timestamp_offset"),
-                    param("expiry_offset")));
-    p->Add(
-        exec_alerts_add_payment,
-        sequence(text("alerts"), text("add_payment"), param("timestamp_offset"), param("result")));
+                    param("create_timestamp_offset"),
+                    param("expiry_timestamp_offset")));
+    p->Add(exec_alerts_add_payment,
+           sequence(text("alerts"),
+                    text("add_payment"),
+                    param("create_timestamp_offset"),
+                    param("result")));
     p->Add(exec_recentactions,
            sequence(text("recentactions"),
                     param("hours"),
@@ -9201,40 +9200,20 @@ void exec_alerts_seen(autocomplete::ACState&)
     return;
 }
 
-void exec_alerts_test_reminder(autocomplete::ACState&)
-{
-    client->useralerts.add(
-        new UserAlert::PaymentReminder(time(NULL) - 86000 * 3 / 2, client->useralerts.nextId()));
-}
-
-void exec_alerts_test_payment(autocomplete::ACState&)
-{
-    client->useralerts.add(new UserAlert::Payment(true,
-                                                  1,
-                                                  time(NULL) + 86000 * 1,
-                                                  client->useralerts.nextId(),
-                                                  name_id::psts));
-}
-
-void exec_alerts_test_payment_v2(autocomplete::ACState&)
-{
-    client->useralerts.add(new UserAlert::Payment(true,
-                                                  1,
-                                                  time(NULL) + 86000 * 1,
-                                                  client->useralerts.nextId(),
-                                                  name_id::psts_v2));
-}
-
 void exec_alerts_add_reminder(autocomplete::ACState& s)
 {
     // Parameterized command to add payment reminder
-    // Usage: alerts add_reminder <timestamp_offset> <expiry_offset>
+    // Usage: alerts add_reminder <create_timestamp_offset> <expiry_timestamp_offset>
 
     if (s.words.size() < 4)
     {
-        cout << "Usage: alerts add_reminder <timestamp_offset> <expiry_offset>" << endl;
-        cout << "  timestamp_offset: seconds from now (e.g., -86400 = 1 day ago)" << endl;
-        cout << "  expiry_offset: seconds from now for expiry (e.g., 2592000 = 30 days)" << endl;
+        cout << "Usage: alerts add_reminder <create_timestamp_offset> <expiry_timestamp_offset>"
+             << endl;
+        cout << "  create_timestamp_offset: seconds from now for when alert is created(e.g., "
+                "-86400 = 1 day ago)"
+             << endl;
+        cout << "  expiry_timestamp_offset: seconds from now for expiry (e.g., 2592000 = 30 days)"
+             << endl;
         cout << "Examples:" << endl;
         cout << "  alerts add_reminder \"-86400\" 2592000 # Created 1 day ago, expires in 30 "
                 "days"
@@ -9263,18 +9242,19 @@ void exec_alerts_add_reminder(autocomplete::ACState& s)
         cout << "  - Actual timestamp: " << client->useralerts.alerts.back()->ts() << endl;
     }
     cout << "  - Total alerts in memory: " << client->useralerts.alerts.size() << endl;
-    return;
 }
 
 void exec_alerts_add_payment(autocomplete::ACState& s)
 {
     // Parameterized command to add payment alert
-    // Usage: alerts add_payment <timestamp_offset> <success|failed>
+    // Usage: alerts add_payment <create_timestamp_offset> <success|failed>
 
-    if (s.words.size() < 3)
+    if (s.words.size() < 4)
     {
-        cout << "Usage: alerts add_payment <timestamp_offset> <success|failed>" << endl;
-        cout << "  timestamp_offset: seconds from now (e.g., 0 = now, -86400 = 1 day ago)" << endl;
+        cout << "Usage: alerts add_payment <create_timestamp_offset> <success|failed>" << endl;
+        cout << "  create_timestamp_offset: seconds from now for when alert is created (e.g., 0 = "
+                "now, -86400 = 1 day ago)"
+             << endl;
         cout << "  success|failed: payment result" << endl;
         cout << "Examples:" << endl;
         cout << "  alerts add_payment 0 success            # Payment succeeded now," << endl;
@@ -9304,7 +9284,6 @@ void exec_alerts_add_payment(autocomplete::ACState& s)
     cout << "  - Timestamp: " << now + timestampOffset << " (" << timestampOffset << "s from now)"
          << endl;
     cout << "  - Total alerts in memory: " << client->useralerts.alerts.size() << endl;
-    return;
 }
 
 void exec_lmkdir(autocomplete::ACState& s)
