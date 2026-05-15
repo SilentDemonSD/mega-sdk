@@ -11,6 +11,9 @@ endif()
 
 # Make sure dependent applications support 64bit inodes.
 target_compile_definitions(SDKlib PUBLIC _FILE_OFFSET_BITS=64)
+if(APPLE)
+    target_compile_definitions(SDKlib PRIVATE FUSE_DARWIN_ENABLE_EXTENSIONS=0)
+endif()
 
 # Make sure the SDKs linked against libfuse.
 target_link_libraries(SDKlib PRIVATE FUSE)
