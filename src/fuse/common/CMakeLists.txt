@@ -14,6 +14,7 @@ target_sources(SDKlib PRIVATE
                       logger.cpp
                       mount_event.cpp
                       mount_event_type.cpp
+                      mount_exception.cpp
                       mount_flags.cpp
                       mount_info.cpp
                       mount_inode_id.cpp
