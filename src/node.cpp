@@ -1027,14 +1027,16 @@ const char* Node::displayname(LogCondition log) const
     {
         if (type < ROOTNODE || type > RUBBISHNODE)
         {
-            LOG_debug << CRYPTO_ERROR << " " << type << " " << size << " " << nodehandle;
+            LOG_debug << CRYPTO_ERROR << " " << type << " " << size << " "
+                      << Base64Str<MegaClient::NODEHANDLE>(nodehandle);
         }
         return CRYPTO_ERROR.c_str();
     }
 
     if (!it->second.size())
     {
-        LOG_debug << BLANK << " " << type << " " << size << " " << nodehandle;
+        LOG_debug << BLANK << " " << type << " " << size << " "
+                  << Base64Str<MegaClient::NODEHANDLE>(nodehandle);
         return BLANK.c_str();
     }
 
