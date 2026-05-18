@@ -4162,14 +4162,22 @@ void Syncs::enableSyncByBackupId_inThread(handle backupId, bool setOriginalPath,
             {
                 LOG_debug << "Sync with id " << backupId << " switched to running";
                 us.mConfig.mRunState = SyncRunState::Run;
-                mClient.app->syncupdate_stateconfig(us.mConfig);
+                queueClient(
+                    [config{us.mConfig}](MegaClient& mc, TransferDbCommitter&)
+                    {
+                        mc.app->syncupdate_stateconfig(config);
+                    });
             }
             else
             {
                 LOG_err << "Sync with id " << backupId << " already exists and should be in SyncRunState::Run(" << static_cast<int>(SyncRunState::Run) << "), however, the actual state is " << static_cast<int>(us.mConfig.mRunState) << " (state will now be set to SyncRunState::Run)";
                 assert(false && "us.mConfig.mRunState should be SyncRunState::Run but it is not");
                 us.mConfig.mRunState = SyncRunState::Run;
-                mClient.app->syncupdate_stateconfig(us.mConfig);
+                queueClient(
+                    [config{us.mConfig}](MegaClient& mc, TransferDbCommitter&)
+                    {
+                        mc.app->syncupdate_stateconfig(config);
+                    });
             }
 
             if (completion) completion(API_OK, NO_SYNC_ERROR, backupId);
@@ -4661,7 +4669,11 @@ void Syncs::manageRemoteRootLocationChange(Sync& sync) const
     else
     {
         // Notify the change in the root path
-        mClient.app->syncupdate_remote_root_changed(config);
+        queueClient(
+            [c{config}](MegaClient& mc, TransferDbCommitter&)
+            {
+                mc.app->syncupdate_remote_root_changed(c);
+            });
     }
 }
 
@@ -4757,7 +4769,11 @@ void UnifiedSync::changedConfigState(bool save, bool notifyApp)
         if (notifyApp && !mConfig.mRemovingSyncBySds)
         {
             assert(syncs.onSyncThread());
-            syncs.mClient.app->syncupdate_stateconfig(mConfig);
+            syncs.queueClient(
+                [config{mConfig}](MegaClient& mc, TransferDbCommitter&)
+                {
+                    mc.app->syncupdate_stateconfig(config);
+                });
         }
     }
 }
@@ -4816,7 +4832,7 @@ void Syncs::queueSync(std::function<void()>&& f, const string& actionName)
 }
 
 void Syncs::queueClient(std::function<void(MegaClient&, TransferDbCommitter&)>&& f,
-                        [[maybe_unused]] bool fromAnyThread)
+                        [[maybe_unused]] bool fromAnyThread) const
 {
     assert(onSyncThread() || fromAnyThread);
     clientThreadActions.pushBack(std::move(f));
@@ -6481,14 +6497,22 @@ void Syncs::clear_inThread(bool reopenStoreAfter)
     {
         assert(onSyncThread());
         syncscanstate = false;
-        mClient.app->syncupdate_scanning(false);
+        queueClient(
+            [](MegaClient& mc, TransferDbCommitter&)
+            {
+                mc.app->syncupdate_scanning(false);
+            });
     }
 
     if (syncBusyState)
     {
         assert(onSyncThread());
         syncBusyState = false;
-        mClient.app->syncupdate_syncing(false);
+        queueClient(
+            [](MegaClient& mc, TransferDbCommitter&)
+            {
+                mc.app->syncupdate_syncing(false);
+            });
     }
 
     syncStallState = false;
@@ -6585,8 +6609,11 @@ void Syncs::appendNewSync_inThread(const SyncConfig& c, bool startSync, std::fun
     }
 
     ensureDriveOpenedAndMarkDirty(c.mExternalDrivePath);
-
-    mClient.app->sync_added(c);
+    queueClient(
+        [config{c}](MegaClient& mc, TransferDbCommitter&)
+        {
+            mc.app->sync_added(config);
+        });
 
     if (!startSync)
     {
@@ -6775,7 +6802,11 @@ void Syncs::disableSyncs(SyncError syncError, bool newEnabledFlag, bool keepSync
                     {
                         completion = [=](){
                             LOG_info << "Disabled syncs. error = " << syncError;
-                            mClient.app->syncs_disabled(syncError);
+                            queueClient(
+                                [syncError](MegaClient& mc, TransferDbCommitter&)
+                                {
+                                    mc.app->syncs_disabled(syncError);
+                                });
                         };
                     }
 
@@ -7123,8 +7154,12 @@ void Syncs::removeSyncAfterDeregistration_inThread(handle backupId, std::functio
     SyncConfig configCopy;
     if (unloadSyncByBackupID(backupId, false, configCopy))
     {
-        mClient.app->sync_removed(configCopy);
         mSyncConfigStore->markDriveDirty(configCopy.mExternalDrivePath);
+        queueClient(
+            [config = std::move(configCopy)](MegaClient& mc, TransferDbCommitter&)
+            {
+                mc.app->sync_removed(config);
+            });
 
         // lastly, send the command to remove the sds entry from the (former) sync root Node's attributes
         if (clientRemoveSdsEntryFunction)
@@ -7373,7 +7408,11 @@ void Syncs::loadSyncConfigsOnFetchnodesComplete_inThread(bool resetSyncConfigSto
     if (error e = syncConfigStoreLoad(configs))
     {
         LOG_warn << "syncConfigStoreLoad failed: " << e;
-        mClient.app->syncs_restored(SYNC_CONFIG_READ_FAILURE);
+        queueClient(
+            [](MegaClient& mc, TransferDbCommitter&)
+            {
+                mc.app->syncs_restored(SYNC_CONFIG_READ_FAILURE);
+            });
         return;
     }
 
@@ -7386,9 +7425,13 @@ void Syncs::loadSyncConfigsOnFetchnodesComplete_inThread(bool resetSyncConfigSto
         mSyncVec.push_back(std::make_shared<UnifiedSync>(*this, config));
     }
 
-    for (auto& us : mSyncVec)
+    for (auto& us: mSyncVec)
     {
-        mClient.app->sync_added(us->mConfig);
+        queueClient(
+            [config{us->mConfig}](MegaClient& mc, TransferDbCommitter&)
+            {
+                mc.app->sync_added(config);
+            });
     }
 }
 
@@ -7466,7 +7509,11 @@ void Syncs::resumeSyncsOnStateCurrent_inThread()
         }
     }
 
-    mClient.app->syncs_restored(NO_SYNC_ERROR);
+    queueClient(
+        [](MegaClient& mc, TransferDbCommitter&)
+        {
+            mc.app->syncs_restored(NO_SYNC_ERROR);
+        });
 }
 
 void Sync::recursiveCollectNameConflicts(list<NameConflict>* conflicts, size_t* count, size_t* limit)
@@ -13929,7 +13976,12 @@ void Syncs::syncLoop()
                 counts.numDownloads = static_cast<int32_t>(stc.mDownloads.mPending);
                 if (us->lastReportedDisplayStats != counts)
                 {
-                    mClient.app->syncupdate_stats(us->mConfig.mBackupId, counts);
+                    queueClient(
+                        [backupId = us->mConfig.mBackupId, c = counts](MegaClient& mc,
+                                                                       TransferDbCommitter&)
+                        {
+                            mc.app->syncupdate_stats(backupId, c);
+                        });
                     us->lastReportedDisplayStats = counts;
                 }
             }
@@ -13994,7 +14046,11 @@ void Syncs::syncLoop()
             {
                 assert(onSyncThread());
                 syncscanstate = anySyncScanning;
-                mClient.app->syncupdate_scanning(anySyncScanning);
+                queueClient(
+                    [anySyncScanning](MegaClient& mc, TransferDbCommitter&)
+                    {
+                        mc.app->syncupdate_scanning(anySyncScanning);
+                    });
             }
 
             // Process syncing updates
@@ -14003,7 +14059,11 @@ void Syncs::syncLoop()
             {
                 assert(onSyncThread());
                 syncBusyState = anySyncBusy;
-                mClient.app->syncupdate_syncing(anySyncBusy);
+                queueClient(
+                    [anySyncBusy](MegaClient& mc, TransferDbCommitter&)
+                    {
+                        mc.app->syncupdate_syncing(anySyncBusy);
+                    });
             }
 
             // Process stall issues
@@ -14174,7 +14234,11 @@ bool Syncs::conflictsDetected(SyncIDtoConflictInfoMap& conflicts)
         }
     }
     // Disable sync conflicts update flag
-    mClient.app->syncupdate_totalconflicts(false);
+    queueClient(
+        [](MegaClient& mc, TransferDbCommitter&)
+        {
+            mc.app->syncupdate_totalconflicts(false);
+        });
     // totalSyncConflicts is set by conflictsDetectedCount, whose count is limited by the previous
     // number of conflicts + 1, in order to avoid extra recursive operations as the full count is
     // not needed This updates the counter to the real number of conflicts, so we avoid incremental
@@ -14301,7 +14365,11 @@ bool Syncs::stallsDetected(SyncStallInfo& stallInfo)
     }
 
     // Disable sync stalls update flag
-    mClient.app->syncupdate_totalstalls(false);
+    queueClient(
+        [](MegaClient& mc, TransferDbCommitter&)
+        {
+            mc.app->syncupdate_totalstalls(false);
+        });
     return syncStallState;
 }
 
@@ -14370,8 +14438,13 @@ void Syncs::processSyncConflicts()
         {
             totalSyncConflicts.store(0);
         }
-        mClient.app->syncupdate_totalconflicts(false);
-        mClient.app->syncupdate_conflicts(conflictsNow);
+
+        queueClient(
+            [conflictsNow](MegaClient& mc, TransferDbCommitter&)
+            {
+                mc.app->syncupdate_totalconflicts(false);
+                mc.app->syncupdate_conflicts(conflictsNow);
+            });
         LOG_warn << mClient.clientname << "Name conflicts state app notified: " << conflictsNow;
     }
     else if (conflictsNow && !mClient.app->isSyncStalledChanged() &&
@@ -14386,7 +14459,11 @@ void Syncs::processSyncConflicts()
             if (totalSyncConflicts.load() != updatedTotalSyncsConflict)
             {
                 assert(onSyncThread());
-                mClient.app->syncupdate_totalconflicts(true);
+                queueClient(
+                    [](MegaClient& mc, TransferDbCommitter&)
+                    {
+                        mc.app->syncupdate_totalconflicts(true);
+                    });
                 LOG_info << mClient.clientname << "Sync conflicting paths state app update notified [previousSyncConflictsTotal = " << totalSyncConflicts.load() << ", updatedTotalSyncsConflict = " << updatedTotalSyncsConflict << "]";
                 totalSyncConflicts.store(updatedTotalSyncsConflict);
             }
@@ -14512,8 +14589,13 @@ void Syncs::processSyncStalls()
         {
             totalSyncStalls.store(0);
         }
-        mClient.app->syncupdate_totalstalls(false);
-        mClient.app->syncupdate_stalled(stalled);
+
+        queueClient(
+            [stalled](MegaClient& mc, TransferDbCommitter&)
+            {
+                mc.app->syncupdate_totalstalls(false);
+                mc.app->syncupdate_stalled(stalled);
+            });
         LOG_warn << mClient.clientname << "Stall state app notified: " << stalled;
     }
     else if (stalled && !mClient.app->isSyncStalledChanged() &&
@@ -14523,7 +14605,11 @@ void Syncs::processSyncStalls()
         if (totalSyncStalls.load() != updatedTotalSyncsStalls)
         {
             assert(onSyncThread());
-            mClient.app->syncupdate_totalstalls(true);
+            queueClient(
+                [](MegaClient& mc, TransferDbCommitter&)
+                {
+                    mc.app->syncupdate_totalstalls(true);
+                });
             LOG_warn << mClient.clientname << "Stall state app update notified [previousSyncStallsTotal = " << totalSyncStalls.load() << ", updatedTotalSyncsStalls = " << updatedTotalSyncsStalls << "]";
             totalSyncStalls.store(updatedTotalSyncsStalls);
         }

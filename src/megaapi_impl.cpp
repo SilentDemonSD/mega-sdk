@@ -10718,7 +10718,11 @@ int MegaApiImpl::syncPathState(string* platformEncoded)
                 SyncConfig sc;
                 if (mc->syncs.getSyncStateForLocalPath(p, ts, nt, sc))
                 {
-                    mc->app->syncupdate_treestate(sc, p, ts, nt);
+                    mc->syncs.queueClient(
+                        [sc = std::move(sc), p, ts, nt](MegaClient& mc, TransferDbCommitter&)
+                        {
+                            mc.app->syncupdate_treestate(sc, p, ts, nt);
+                        });
                 }
             }
             LOG_verbose << "Completed updates for OS path icon ovelays for . " << tmp->size() << " paths";
@@ -14913,6 +14917,7 @@ std::unique_ptr<MegaPushNotificationSettingsPrivate> MegaApiImpl::getMegaPushNot
 
 MegaSyncPrivate* MegaApiImpl::cachedMegaSyncPrivateByBackupId(const SyncConfig& config)
 {
+    ensureIsMegaApiImplThread();
     if (mCachedMegaSyncPrivate && config.mBackupId == mCachedMegaSyncPrivate->getBackupId())
     {
         return mCachedMegaSyncPrivate.get();
@@ -14924,6 +14929,7 @@ MegaSyncPrivate* MegaApiImpl::cachedMegaSyncPrivateByBackupId(const SyncConfig& 
 
 void MegaApiImpl::syncupdate_stateconfig(const SyncConfig& config)
 {
+    ensureIsMegaApiImplThread();
     mCachedMegaSyncPrivate.reset();
 
     mRecentlyNotifiedOverlayIconPaths.clear();
@@ -14937,30 +14943,35 @@ void MegaApiImpl::syncupdate_stateconfig(const SyncConfig& config)
 
 void MegaApiImpl::syncupdate_stats(handle backupId, const PerSyncStats& stats)
 {
+    ensureIsMegaApiImplThread();
     MegaSyncStatsPrivate msp(backupId, stats);
     fireOnSyncStatsUpdated(&msp);
 }
 
 void MegaApiImpl::syncupdate_scanning(bool scanning)
 {
+    ensureIsMegaApiImplThread();
     receivedScanningStateFlag.store(scanning);
     fireOnGlobalSyncStateChanged();
 }
 
 void MegaApiImpl::syncupdate_stalled(bool stalled)
 {
+    ensureIsMegaApiImplThread();
     receivedStallFlag.store(stalled);
     fireOnGlobalSyncStateChanged();
 }
 
 void MegaApiImpl::syncupdate_conflicts(bool conflicts)
 {
+    ensureIsMegaApiImplThread();
     receivedNameConflictsFlag.store(conflicts);
     fireOnGlobalSyncStateChanged();
 }
 
 void MegaApiImpl::syncupdate_totalstalls(bool totalstalls)
 {
+    ensureIsMegaApiImplThread();
     receivedTotalStallsFlag.store(totalstalls);
     if (totalstalls)
     {
@@ -14970,6 +14981,7 @@ void MegaApiImpl::syncupdate_totalstalls(bool totalstalls)
 
 void MegaApiImpl::syncupdate_totalconflicts(bool totalconflicts)
 {
+    ensureIsMegaApiImplThread();
     receivedTotalNameConflictsFlag.store(totalconflicts);
     if (totalconflicts)
     {
@@ -14979,12 +14991,14 @@ void MegaApiImpl::syncupdate_totalconflicts(bool totalconflicts)
 
 void MegaApiImpl::syncupdate_syncing(bool syncing)
 {
+    ensureIsMegaApiImplThread();
     receivedSyncingStateFlag.store(syncing);
     fireOnGlobalSyncStateChanged();
 }
 
 void MegaApiImpl::syncupdate_treestate(const SyncConfig &config, const LocalPath& lp, treestate_t ts, nodetype_t)
 {
+    ensureIsMegaApiImplThread();
     mRecentlyNotifiedOverlayIconPaths.addOrUpdate(lp, ts);
     mRecentlyRequestedOverlayIconPaths.overwriteExisting(lp, ts);
 
@@ -14999,6 +15013,7 @@ void MegaApiImpl::syncupdate_treestate(const SyncConfig &config, const LocalPath
 
 void MegaApiImpl::sync_removed(const SyncConfig& config)
 {
+    ensureIsMegaApiImplThread();
     mRecentlyNotifiedOverlayIconPaths.clear();
     mRecentlyRequestedOverlayIconPaths.clear();
 
@@ -15008,6 +15023,7 @@ void MegaApiImpl::sync_removed(const SyncConfig& config)
 
 void MegaApiImpl::sync_added(const SyncConfig& config)
 {
+    ensureIsMegaApiImplThread();
     mCachedMegaSyncPrivate.reset();
 
     auto megaSync = cachedMegaSyncPrivateByBackupId(config);
@@ -15017,6 +15033,7 @@ void MegaApiImpl::sync_added(const SyncConfig& config)
 
 void MegaApiImpl::syncupdate_remote_root_changed(const SyncConfig &config)
 {
+    ensureIsMegaApiImplThread();
     mCachedMegaSyncPrivate.reset();
 
     if (auto megaSync = cachedMegaSyncPrivateByBackupId(config))
@@ -15027,6 +15044,7 @@ void MegaApiImpl::syncupdate_remote_root_changed(const SyncConfig &config)
 
 void MegaApiImpl::syncs_restored(SyncError syncError)
 {
+    ensureIsMegaApiImplThread();
     mCachedMegaSyncPrivate.reset();
     MegaEventPrivate *event = new MegaEventPrivate(MegaEvent::EVENT_SYNCS_RESTORED);
     event->setNumber(syncError);
@@ -15035,6 +15053,7 @@ void MegaApiImpl::syncs_restored(SyncError syncError)
 
 void MegaApiImpl::syncs_disabled(SyncError syncError)
 {
+    ensureIsMegaApiImplThread();
     mCachedMegaSyncPrivate.reset();
     MegaEventPrivate *event = new MegaEventPrivate(MegaEvent::EVENT_SYNCS_DISABLED);
     event->setNumber(syncError);
@@ -15878,6 +15897,7 @@ void MegaApiImpl::copysession_result(string *session, error e)
 void MegaApiImpl::clearing()
 {
 #ifdef ENABLE_SYNC
+    ensureIsMegaApiImplThread();
     mCachedMegaSyncPrivate.reset();
 #endif
 }
@@ -16204,6 +16224,7 @@ void MegaApiImpl::login_result(error result)
 
 void MegaApiImpl::logout_result(error e, MegaRequestPrivate* request)
 {
+    ensureIsMegaApiImplThread();
     if(!e || e == API_ESID)
     {
         requestMap.erase(request->getTag());
@@ -18203,7 +18224,6 @@ void MegaApiImpl::fireOnEvent(MegaEventPrivate *event)
 void MegaApiImpl::fireOnSyncStateChanged(MegaSyncPrivate *sync)
 {
     assert(sync->getBackupId() != INVALID_HANDLE);
-    assert(client->syncs.onSyncThread());
     for(set<MegaListener *>::iterator it = listeners.begin(); it != listeners.end() ;)
     {
         (*it++)->onSyncStateChanged(api, sync);
@@ -18213,7 +18233,6 @@ void MegaApiImpl::fireOnSyncStateChanged(MegaSyncPrivate *sync)
 void MegaApiImpl::fireOnSyncStatsUpdated(MegaSyncStatsPrivate *stats)
 {
     assert(stats->getBackupId() != INVALID_HANDLE);
-    assert(client->syncs.onSyncThread());
     for(set<MegaListener *>::iterator it = listeners.begin(); it != listeners.end() ;)
     {
         (*it++)->onSyncStatsUpdated(api, stats);
@@ -18223,7 +18242,6 @@ void MegaApiImpl::fireOnSyncStatsUpdated(MegaSyncStatsPrivate *stats)
 void MegaApiImpl::fireOnSyncAdded(MegaSyncPrivate *sync)
 {
     assert(sync->getBackupId() != INVALID_HANDLE);
-    assert(client->syncs.onSyncThread());
     for(set<MegaListener *>::iterator it = listeners.begin(); it != listeners.end() ;)
     {
         (*it++)->onSyncAdded(api, sync);
@@ -18233,7 +18251,6 @@ void MegaApiImpl::fireOnSyncAdded(MegaSyncPrivate *sync)
 void MegaApiImpl::fireOnSyncRemoteRootChanged(MegaSyncPrivate* sync)
 {
     assert(sync->getBackupId() != INVALID_HANDLE);
-    assert(client->syncs.onSyncThread());
     for (set<MegaListener*>::iterator it = listeners.begin(); it != listeners.end();)
     {
         (*it++)->onSyncRemoteRootChanged(api, sync);
@@ -18243,7 +18260,6 @@ void MegaApiImpl::fireOnSyncRemoteRootChanged(MegaSyncPrivate* sync)
 void MegaApiImpl::fireOnSyncDeleted(MegaSyncPrivate *sync)
 {
     assert(sync->getBackupId() != INVALID_HANDLE);
-    assert(client->syncs.onSyncThread());
     for(set<MegaListener *>::iterator it = listeners.begin(); it != listeners.end() ;)
     {
         (*it++)->onSyncDeleted(api, sync);
@@ -18252,7 +18268,6 @@ void MegaApiImpl::fireOnSyncDeleted(MegaSyncPrivate *sync)
 
 void MegaApiImpl::fireOnGlobalSyncStateChanged()
 {
-    assert(client->syncs.onSyncThread());
     for(set<MegaListener *>::iterator it = listeners.begin(); it != listeners.end() ;)
     {
         (*it++)->onGlobalSyncStateChanged(api);
@@ -18267,7 +18282,6 @@ void MegaApiImpl::fireOnGlobalSyncStateChanged()
 void MegaApiImpl::fireOnFileSyncStateChanged(MegaSyncPrivate *sync, string *localPath, int newState)
 {
     assert(sync->getBackupId() != INVALID_HANDLE);
-    assert(client->syncs.onSyncThread());
     for(set<MegaListener *>::iterator it = listeners.begin(); it != listeners.end() ;)
     {
         (*it++)->onSyncFileStateChanged(api, sync, localPath, newState);
