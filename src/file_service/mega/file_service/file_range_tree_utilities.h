@@ -44,11 +44,8 @@ class FileRangeGapIterator
         KeyFunctionType key;
 
         // Range begins after mRange.
-        if (key(*mIterator).mBegin > mRange.mBegin)
+        if (auto range = key(*mIterator); range.mBegin > mRange.mBegin)
         {
-            // Convenience.
-            auto& range = key(*mIterator);
-
             // Populate gap.
             mGap.mBegin = mRange.mBegin;
             mGap.mEnd = std::min(mRange.mEnd, range.mBegin);

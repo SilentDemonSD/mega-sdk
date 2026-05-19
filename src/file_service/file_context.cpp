@@ -1334,8 +1334,8 @@ auto FileContext::grow(std::uint64_t newSize, std::uint64_t oldSize)
 }
 
 template<typename Request>
-auto FileContext::queue(std::unique_lock<std::mutex> lock, Request&& request)
-    -> std::enable_if_t<IsFileRequestV<Request>>
+auto FileContext::queue([[maybe_unused]] std::unique_lock<std::mutex> lock,
+                        Request&& request) -> std::enable_if_t<IsFileRequestV<Request>>
 {
     assert(lock.mutex() == &mRequestsLock);
     assert(lock.owns_lock());
