@@ -29504,7 +29504,12 @@ static file_service::ReclaimOptions
     reclaimOptions.mBatchSize = inputOptions->getBatchSize();
     reclaimOptions.mDelay = std::chrono::seconds(inputOptions->getDelay());
     reclaimOptions.mPeriod = std::chrono::seconds(inputOptions->getPeriod());
-    reclaimOptions.mReclaimThreshold = inputOptions->getReclaimThreshold();
+
+    if (const auto reclaimThreshold = inputOptions->getReclaimThreshold(); reclaimThreshold >= 0)
+        reclaimOptions.mReclaimThreshold = static_cast<uint64_t>(reclaimThreshold);
+    else
+        reclaimOptions.mReclaimThreshold = std::nullopt;
+
     reclaimOptions.mReclaimTarget = inputOptions->getReclaimTarget();
     return reclaimOptions;
 }
