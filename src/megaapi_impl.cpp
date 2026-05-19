@@ -37097,7 +37097,7 @@ std::unique_ptr<uv_work_t> MegaHTTPContext::processFileStreamResult()
     return continueWork;
 }
 
-void MegaHTTPContext::onTransferStart(MegaApi*, MegaTransfer* transfer)
+void MegaHTTPContext::onTransferStart(MegaApi*, [[maybe_unused]] MegaTransfer* transfer)
 {
     assert(transfer->getType() == MegaTransfer::TYPE_UPLOAD);
 }
