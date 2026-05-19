@@ -313,7 +313,7 @@ public:
     void append(const LocalPath& additionalPath);
     void appendWithSeparator(const LocalPath& additionalPath, const bool separatorAlways);
     void prependWithSeparator(const LocalPath& additionalPath);
-    LocalPath prependNewWithSeparator(const LocalPath& additionalPath) const;
+    [[nodiscard]] LocalPath prependNewWithSeparator(const LocalPath& additionalPath) const;
     void trimNonDriveTrailingSeparator();
     bool findPrevSeparator(size_t& separatorBytePos, const FileSystemAccess& fsaccess) const;
     bool beginsWithSeparator() const;
@@ -332,7 +332,7 @@ public:
     // Result is undefined if this path is a "root."
     LocalPath parentPath() const;
 
-    LocalPath insertFilenameSuffix(const std::string& suffix) const;
+    [[nodiscard]] LocalPath insertFilenameSuffix(const std::string& suffix) const;
 
     bool isContainingPathOf(const LocalPath& path, size_t* subpathIndex = nullptr) const;
     bool nextPathComponent(size_t& subpathIndex, LocalPath& component) const;

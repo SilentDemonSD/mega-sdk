@@ -456,12 +456,14 @@ void SqliteDbAccess::removeDBFiles(FileSystemAccess& fsAccess, mega::LocalPath& 
     fsAccess.unlinklocal(dbPath);
 
 #if !(TARGET_OS_IPHONE)
+    auto suffix = LocalPath::fromRelativePath("-shm");
     auto fileToRemove = dbPath;
-    fileToRemove.insertFilenameSuffix("-shm");
+    fileToRemove.append(suffix);
     fsAccess.unlinklocal(fileToRemove);
 
+    suffix = LocalPath::fromRelativePath("-wal");
     fileToRemove = dbPath;
-    fileToRemove.insertFilenameSuffix("-wal");
+    fileToRemove.append(suffix);
     fsAccess.unlinklocal(fileToRemove);
 #else
     // iOS doesn't use WAL mode, but Journal
