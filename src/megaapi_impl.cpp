@@ -30648,7 +30648,7 @@ int MegaPricingPrivate::getGBPerTransfer(int productIndex)
 
 MegaStringIntegerMap* MegaPricingPrivate::getFeatures(int productIndex) const
 {
-    if ((unsigned)productIndex > products.size())
+    if ((unsigned)productIndex >= products.size())
     {
         return nullptr;
     }
