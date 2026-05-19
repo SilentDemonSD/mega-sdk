@@ -12,6 +12,7 @@
 #include <mega/fuse/common/mount_db.h>
 #include <mega/fuse/common/mount_event.h>
 #include <mega/fuse/common/mount_event_type.h>
+#include <mega/fuse/common/mount_exception.h>
 #include <mega/fuse/common/mount_info.h>
 #include <mega/fuse/common/mount_result.h>
 #include <mega/fuse/common/ref.h>
@@ -757,7 +758,18 @@ try
     // Mount's enabled.
     return MOUNT_SUCCESS;
 }
+catch (const MountException& exception)
+{
+    auto result = exception.result();
 
+    FUSEErrorF("Unable to enable mount %s: %s: %s: %d",
+               name.c_str(),
+               toDescription(result),
+               exception.what(),
+               exception.errorCode());
+
+    return result;
+}
 catch (std::runtime_error& exception)
 {
     // Unexpected error while enabling mount.

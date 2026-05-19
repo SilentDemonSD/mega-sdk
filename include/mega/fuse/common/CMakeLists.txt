@@ -21,6 +21,7 @@ target_sources(SDKlib PRIVATE
                       mount_event_forward.h
                       mount_event_type.h
                       mount_event_type_forward.h
+                      mount_exception.h
                       mount_flags.h
                       mount_flags_forward.h
                       mount_info.h

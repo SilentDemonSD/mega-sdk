@@ -27866,6 +27866,8 @@ public:
         LOCAL_TAKEN,
         // Mount target doesn't exist.
         LOCAL_UNKNOWN,
+        // Mount target is stale or inaccessible.
+        LOCAL_STALE,
         // A mount already exists with a specified name.
         NAME_TAKEN,
         // The specified name is too long.

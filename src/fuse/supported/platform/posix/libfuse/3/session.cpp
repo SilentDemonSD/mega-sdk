@@ -1,7 +1,9 @@
 #include <mega/common/task_executor.h>
 #include <mega/common/utility.h>
 #include <mega/fuse/common/logging.h>
+#include <mega/fuse/common/mount_exception.h>
 #include <mega/fuse/common/mount_inode_id.h>
+#include <mega/fuse/common/mount_result.h>
 #include <mega/fuse/platform/constants.h>
 #include <mega/fuse/platform/mount.h>
 #include <mega/fuse/platform/mount_db.h>
@@ -13,6 +15,7 @@
 #include <mega/scoped_helpers.h>
 
 #include <cassert>
+#include <cerrno>
 #include <cstring>
 #include <vector>
 
@@ -88,18 +91,17 @@ Session::Session(Mount& mount):
 {
     auto arguments = Arguments(mount.name());
     auto path = mMount.path().toPath(false);
+    errno = 0;
 
     SessionPtr session(
         fuse_session_new(arguments.get(), &operations(), sizeof(fuse_lowlevel_ops), this));
     if (!session)
-        throw FUSEErrorF("Unable to construct session: %s", path.c_str());
+        throw FUSEMountErrorF(errno, "Unable to construct session: %s", path.c_str());
 
     auto result = fuse_session_mount(session.get(), path.c_str());
 
     if (result < 0)
-        throw FUSEErrorF("Unable to bind session to mount point: %s: %s",
-                         path.c_str(),
-                         std::strerror(-result));
+        throw FUSEMountErrorF(errno, "Unable to bind session to mount point %s", path.c_str());
 
     nonblocking(fuse_session_fd(session.get()), true);
 
