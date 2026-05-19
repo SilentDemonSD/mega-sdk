@@ -10842,6 +10842,8 @@ void DemoApp::enumeratequotaitems_result(const Product& product)
                  << "\n";
             cout << "\t\tId: " << product.mobileOffer->id << "\n";
             cout << "\t\tUat: " << product.mobileOffer->uat << "\n";
+            cout << "\t\tLabel: " << product.mobileOffer->label << "\n";
+            cout << "\t\tDiscount percentage: " << product.mobileOffer->discountPercentage << "\n";
         }
     }
     else // Business plan (type == 1)

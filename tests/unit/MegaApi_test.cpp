@@ -528,6 +528,8 @@ TEST(MegaApi, MegaApiImpl_mobileOffer)
 {
     std::string title{"Black-friday2025"};
     bool uat{true};
+    std::string label{"Easter Sale"};
+    int discountPercentage{30};
     Product testProduct = {
         1000,
         1000000,
@@ -548,7 +550,7 @@ TEST(MegaApi, MegaApiImpl_mobileOffer)
         1,
         std::make_unique<BusinessPlan>(BusinessPlan{20, 40, 3, 50, 60, 70, 80, 90, 100, 15, 10}),
         0,
-        MobileOffer{title, uat},
+        MobileOffer{title, uat, label, discountPercentage},
         std::nullopt};
     MegaPricingPrivate pricing;
     pricing.addProduct(testProduct);
@@ -556,6 +558,8 @@ TEST(MegaApi, MegaApiImpl_mobileOffer)
     ASSERT_TRUE(pricing.hasMobileOffers(index));
     ASSERT_EQ(title, pricing.getMobileOfferId(index));
     ASSERT_EQ(uat, pricing.hasMobileOfferUat(index));
+    ASSERT_EQ(label, pricing.getMobileOfferLabel(index));
+    ASSERT_EQ(discountPercentage, pricing.getMobileOfferDiscountPercentage(index));
 }
 
 TEST(MegaApi, UseCurrentPathIfNoBasePathIsGiven)

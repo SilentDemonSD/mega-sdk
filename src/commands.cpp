@@ -2970,6 +2970,12 @@ bool CommandEnumerateQuotaItems::procresult(Result r, JSON& json)
                             case makeNameid("uat"):
                                 temporalMobileOffer.uat = json.getbool();
                                 break;
+                            case makeNameid("l"):
+                                json.storeobject(&temporalMobileOffer.label);
+                                break;
+                            case makeNameid("p"):
+                                temporalMobileOffer.discountPercentage = json.getint32();
+                                break;
                             case EOO:
                                 readingMo = false;
                                 mobileOffer = std::move(temporalMobileOffer);

@@ -30630,6 +30630,28 @@ bool mega::MegaPricingPrivate::hasMobileOfferUat(int productIndex) const
     return {};
 }
 
+std::string mega::MegaPricingPrivate::getMobileOfferLabel(int productIndex) const
+{
+    if (auto index = static_cast<size_t>(productIndex);
+        index < products.size() && products[index].mobileOffer.has_value())
+    {
+        return products[index].mobileOffer->label;
+    }
+
+    return {};
+}
+
+int mega::MegaPricingPrivate::getMobileOfferDiscountPercentage(int productIndex) const
+{
+    if (auto index = static_cast<size_t>(productIndex);
+        index < products.size() && products[index].mobileOffer.has_value())
+    {
+        return products[index].mobileOffer->discountPercentage;
+    }
+
+    return 0;
+}
+
 const char *MegaPricingPrivate::getDescription(int productIndex)
 {
     if (productIndex >= 0 && static_cast<unsigned int>(productIndex) < products.size())
@@ -30838,7 +30860,7 @@ int MegaPricingPrivate::getGBPerTransfer(int productIndex)
 
 MegaStringIntegerMap* MegaPricingPrivate::getFeatures(int productIndex) const
 {
-    if ((unsigned)productIndex > products.size())
+    if ((unsigned)productIndex >= products.size())
     {
         return nullptr;
     }

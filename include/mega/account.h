@@ -226,6 +226,8 @@ struct MEGA_API MobileOffer
 {
     std::string id; // The ID for the offer
     bool uat{false}; // If true, the mobile offer title should be displayed
+    std::string label; // Localized campaign label to be displayed to the customer
+    int discountPercentage{0}; // Discount percentage to be displayed to the customer
 };
 
 struct MEGA_API InstantDiscounts
