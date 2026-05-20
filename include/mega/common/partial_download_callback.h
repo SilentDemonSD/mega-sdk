@@ -19,6 +19,9 @@ class PartialDownloadCallback
 protected:
     PartialDownloadCallback() = default;
 
+    // Check if result is a retryable error.
+    virtual bool retryable(const Error& result);
+
 public:
     // Indicates the download should be aborted.
     struct Abort
@@ -39,14 +42,26 @@ public:
         const deciseconds mWhen;
     }; // Retry
 
+    // Bundles speed statistics.
+    struct Speeds
+    {
+        // Mean speed computed over last N delivered chunks.
+        std::uint64_t mCircularMean;
+
+        // Mean speed computed over entire download.
+        std::uint64_t mOverallMean;
+    }; // Speeds
+
     virtual ~PartialDownloadCallback() = default;
 
     // Called when the download has completed.
     virtual void completed(Error result) = 0;
 
     // Called repeatedly as data is downloaded from the cloud.
-    virtual auto data(const void* buffer, std::uint64_t offset, std::uint64_t length)
-        -> std::variant<Abort, Continue> = 0;
+    virtual auto data(const void* buffer,
+                      std::uint64_t offset,
+                      std::uint64_t length,
+                      const Speeds& speeds) -> std::variant<Abort, Continue> = 0;
 
     // Called when the download has failed.
     virtual auto failed(Error result, int retries) -> std::variant<Abort, Retry> = 0;

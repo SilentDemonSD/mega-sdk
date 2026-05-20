@@ -320,6 +320,10 @@ public:
                                        const std::string& name,
                                        common::testing::CloudPath parent);
 
+    common::ErrorOr<NodeHandle> upload(std::uint64_t length,
+                                       const std::string& name,
+                                       common::testing::CloudPath parent);
+
     common::ErrorOr<NodeHandle> upload(common::testing::CloudPath parent,
                                        const common::testing::Path& path);
 

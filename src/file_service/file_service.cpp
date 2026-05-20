@@ -21,13 +21,18 @@ using namespace common;
 FileService::FileService():
     mInstanceLogger("FileService", *this, logger()),
     mContext(),
-    mContextLock()
+    mContextLock(),
+    mReclaimOptions(),
+    mReclaimOptionsLock(),
+    mServiceOptions(),
+    mServiceOptionsLock()
 {}
 
 FileService::~FileService() = default;
 
-auto FileService::add(NodeHandle handle, const NodeKeyData& keyData, std::size_t size)
-    -> FileServiceResultOr<FileID>
+auto FileService::add(NodeHandle handle,
+                      const NodeKeyData& keyData,
+                      std::uint64_t size) -> FileServiceResultOr<FileID>
 {
     SharedLock guard(mContextLock);
 
@@ -58,10 +63,29 @@ auto FileService::create(NodeHandle parent, const std::string& name) -> FileServ
     return mContext->create(parent, name);
 }
 
-void FileService::deinitialize()
+auto FileService::databasePath() const -> FileServiceResultOr<LocalPath>
+{
+    SharedLock guard(mContextLock);
+
+    if (mContext)
+        return mContext->databasePath();
+
+    return unexpected(FILE_SERVICE_UNINITIALIZED);
+}
+
+void FileService::deinitialize(bool cleanCache)
 {
     UniqueLock guard(mContextLock);
 
+    // No context needs to be destroyed.
+    if (!mContext)
+        return;
+
+    // Caller wants to clean the service's cache.
+    if (cleanCache)
+        mContext->cleanCacheOnDestruction();
+
+    // Destroy the service's context.
     mContext.reset();
 }
 
@@ -101,29 +125,25 @@ auto FileService::open(FileID id) -> FileServiceResultOr<File>
     return mContext->open(id);
 }
 
-auto FileService::options(const FileServiceOptions& options) -> FileServiceResult
+void FileService::serviceOptions(const ServiceOptions& serviceOptions)
 {
-    SharedLock guard(mContextLock);
+    // Acquire service options lock.
+    UniqueLock guard(mServiceOptionsLock);
 
-    if (!mContext)
-        return FILE_SERVICE_UNINITIALIZED;
-
-    mContext->options(options);
-
-    return FILE_SERVICE_SUCCESS;
+    // Update service options.
+    mServiceOptions = serviceOptions;
 }
 
-auto FileService::options() -> FileServiceResultOr<FileServiceOptions>
+auto FileService::serviceOptions() -> ServiceOptions
 {
-    SharedLock guard(mContextLock);
+    // Acquire service options lock.
+    SharedLock guard(mServiceOptionsLock);
 
-    if (!mContext)
-        return unexpected(FILE_SERVICE_UNINITIALIZED);
-
-    return mContext->options();
+    // Return a snapshot of our current service options.
+    return mServiceOptions;
 }
 
-auto FileService::initialize(Client& client, const FileServiceOptions& options) -> FileServiceResult
+auto FileService::initialize(Client& client) -> FileServiceResult
 try
 {
     UniqueLock guard(mContextLock);
@@ -135,7 +155,7 @@ try
         return FILE_SERVICE_ALREADY_INITIALIZED;
     }
 
-    mContext = std::make_unique<FileServiceContext>(client, options);
+    mContext = std::make_unique<FileServiceContext>(client, *this);
 
     FSInfo1("File Service initialized");
 
@@ -148,11 +168,6 @@ catch (std::runtime_error& exception)
     return FILE_SERVICE_UNEXPECTED;
 }
 
-auto FileService::initialize(Client& client) -> FileServiceResult
-{
-    return initialize(client, FileServiceOptions());
-}
-
 auto FileService::purge() -> FileServiceResult
 {
     SharedLock guard(mContextLock);
@@ -163,14 +178,58 @@ auto FileService::purge() -> FileServiceResult
     return mContext->purge();
 }
 
-void FileService::reclaim(ReclaimCallback callback)
+auto FileService::reclaim(ReclaimCallback callback,
+                          std::optional<ReclaimOptions> reclaimOptions) -> FileServiceResult
 {
     SharedLock guard(mContextLock);
 
     if (!mContext)
-        return callback(FILE_SERVICE_UNINITIALIZED);
+        return FILE_SERVICE_UNINITIALIZED;
 
-    return mContext->reclaim(std::move(callback));
+    // Convenience.
+    auto& executor = mContext->executor();
+
+    executor.execute(
+        [this, callback = std::move(callback), reclaimOptions = std::move(reclaimOptions)](
+            const common::Task&)
+        {
+            mContext->reclaim(std::move(callback),
+                              reclaimOptions.value_or(mContext->reclaimOptions()));
+        },
+        true);
+
+    return FILE_SERVICE_SUCCESS;
+}
+
+void FileService::reclaimOptions(const ReclaimOptions& newOptions)
+{
+    // Acquire reclaim options lock.
+    UniqueLock lockw(mReclaimOptionsLock);
+
+    // Grab a snapshot of our current reclamation options.
+    auto oldOptions = mReclaimOptions;
+
+    // Update reclamation options.
+    mReclaimOptions = newOptions;
+
+    // Translate write lock into a read lock.
+    auto lockr = lockw.to_shared_lock();
+
+    // Acquire context lock.
+    SharedLock lockContext(mContextLock);
+
+    // Let the context know it's reclamation options have changed.
+    if (mContext)
+        mContext->reclaimOptionsChanged(newOptions, oldOptions);
+}
+
+auto FileService::reclaimOptions() -> ReclaimOptions
+{
+    // Acquire reclaim options lock.
+    SharedLock guard(mReclaimOptionsLock);
+
+    // Return a snapshot of our current reclamation options.
+    return mReclaimOptions;
 }
 
 auto FileService::removeObserver(FileEventObserverID id) -> FileServiceResult
@@ -185,6 +244,16 @@ auto FileService::removeObserver(FileEventObserverID id) -> FileServiceResult
     return FILE_SERVICE_SUCCESS;
 }
 
+auto FileService::storageInfo(const ReclaimOptions* options) -> FileServiceResultOr<StorageInfo>
+{
+    SharedLock guard(mContextLock);
+
+    if (!mContext)
+        return unexpected(FILE_SERVICE_UNINITIALIZED);
+
+    return mContext->storageInfo(options);
+}
+
 auto FileService::storageUsed() -> FileServiceResultOr<std::uint64_t>
 {
     SharedLock guard(mContextLock);
@@ -193,6 +262,16 @@ auto FileService::storageUsed() -> FileServiceResultOr<std::uint64_t>
         return unexpected(FILE_SERVICE_UNINITIALIZED);
 
     return mContext->storageUsed();
+}
+
+auto FileService::userFilePath(FileID id) const -> FileServiceResultOr<LocalPath>
+{
+    SharedLock guard(mContextLock);
+
+    if (mContext)
+        return mContext->userFilePath(id);
+
+    return unexpected(FILE_SERVICE_UNINITIALIZED);
 }
 
 } // file_service

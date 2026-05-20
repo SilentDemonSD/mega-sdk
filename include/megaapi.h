@@ -130,6 +130,8 @@ class MegaNodeTree;
 class MegaCompleteUploadData;
 class MegaNotificationList;
 class MegaCancelSubscriptionReasonList;
+class MegaFileServiceReclaimOptions;
+class MegaFileServiceStorageInfo;
 
 #if defined(SWIG)
     #define MEGA_DEPRECATED
@@ -5453,7 +5455,8 @@ class MegaRequest
             TYPE_GET_SUBSCRIPTION_CANCELLATION_DETAILS = 209,
             TYPE_GET_DISCOUNT_CODE_INFORMATION = 210,
             TYPE_GET_RECENT_ACTION_BY_ID = 211,
-            TOTAL_OF_REQUEST_TYPES = 212,
+            TYPE_FILE_SERVICE_RECLAIM = 212,
+            TOTAL_OF_REQUEST_TYPES = 213,
         };
 
         virtual ~MegaRequest();
@@ -6465,6 +6468,17 @@ class MegaRequest
          * otherwise.
          */
         virtual const MegaDiscountCodeInfo* getMegaDiscountCodeInfo() const;
+
+        /**
+         * @brief Get information about reclaim options
+         *
+         * The SDK retains the ownership of the returned value. It will be valid until
+         * the MegaRequest object is deleted.
+         *
+         * @return non-null pointer if a valid MegaApi functionality has been called, null
+         * otherwise.
+         */
+        virtual const MegaFileServiceReclaimOptions* getMegaFileServiceReclaimOptions() const;
 };
 
 /**
@@ -21897,12 +21911,14 @@ class MegaApi
          *
          * @param listener Listener to receive information about the HTTP proxy server
          */
+        MEGA_DEPRECATED
         void httpServerAddListener(MegaTransferListener *listener);
 
         /**
          * @brief Stop the reception of callbacks related to the HTTP proxy server on this listener
          * @param listener Listener that won't continue receiving information
          */
+        MEGA_DEPRECATED
         void httpServerRemoveListener(MegaTransferListener *listener);
 
         /**
@@ -22048,6 +22064,29 @@ class MegaApi
          * @return Maximum size of the packets sent to clients (in bytes)
          */
         int httpServerGetMaxOutputSize();
+
+        /**
+         * @brief Set the throttle bitrate for cached data delivery (in bits per second).
+         *
+         * When the HTTP server serves data from local cache, it can deliver data
+         * at memory speed which may overwhelm AVPlayer's internal buffering.
+         * Setting a throttle bitrate limits the delivery rate to prevent audio loss.
+         *
+         * Note: this setting is HTTP server wide. All videos being streamed at the time are
+         * affected.
+         *
+         * A value of 0 disables throttling. Recommended: 2x the video bitrate and iOS only
+         *
+         * @param bitrateBps Throttle bitrate in bits per second, or 0 to disable
+         */
+        void httpServerSetThrottleBitrate(unsigned long long bitrateBps);
+
+        /**
+         * @brief Get the current throttle bitrate setting
+         *
+         * @return Throttle bitrate in bits per second, or 0 if disabled
+         */
+        unsigned long long httpServerGetThrottleBitrate();
 
         /**
          * @brief Start an FTP server in specified port
@@ -25139,6 +25178,73 @@ class MegaApi
          */
         void getDiscountCodeInformation(const char* code, MegaRequestListener* listener = nullptr);
 
+        /**
+         * @brief Get the options for reclaiming storage used by MEGA's file services.
+         *
+         * The returned options are a snapshot of the current state of the file service reclaim
+         * options. Modifying the returned object won't have any effect on the actual options used
+         * by the file services.
+         *
+         * The caller takes ownership of the returned value and should use delete to release the
+         * memory when it's no longer needed.
+         *
+         * @note It's safe to call this method before the client has logged in.
+         */
+        MegaFileServiceReclaimOptions* fileServiceGetReclaimOptions();
+
+        /**
+         * @brief Set the options for reclaiming storage used by MEGA's file services.
+         *
+         * The provided options will be applied to the file services, and they will affect how the
+         * file services reclaim storage.
+         *
+         * @param options Options to set for reclaiming storage used by MEGA's file services.
+         *
+         * @note It's safe to call this method before the client has logged in.
+         */
+        void fileServiceSetReclaimOptions(const MegaFileServiceReclaimOptions* options);
+
+        /**
+         * @brief Trigger the file services to reclaim storage according to the current options or
+         * input options.
+         *
+         * The associated request type with this request is MegaRequest::TYPE_FILE_SERVICE_RECLAIM.
+         *
+         * Valid data in the MegaRequest object received in onRequestFinish when the error code
+         * is MegaError::API_OK:
+         * - MegaRequest::getTotalBytes - Returns the number of bytes that were reclaimed.
+         *
+         * If the request fails, the MegaError code in onRequestFinish can be:
+         * - MegaError::API_EINTERNAL - If the reclaim process failed to run.
+         *
+         * @param options Options to consider when reclaiming storage used by MEGA's file services.
+         * If nullptr, the current file service reclaim options will be used, with an additional
+         * call to setReclaimThreshold(0). See MegaApi::fileServiceGetReclaimOptions() and
+         * MegaApi::fileServiceSetReclaimOptions().
+         *
+         * In rare cases, if an automatic reclaim is already running at the time of this call,
+         * its reclaim options will be used instead, even if custom options are provided.
+         *
+         * @param listener MegaRequestListener to track this request
+         */
+        void fileServiceReclaim(const MegaFileServiceReclaimOptions* options,
+                                MegaRequestListener* listener);
+
+        /**
+         * @brief Get the file service storage size information.
+         * The returned information is a snapshot of the current state of the file service storage
+         * size.
+         *
+         * The caller takes ownership of the returned value and should use delete to release the
+         * memory when it's no longer needed.
+         *
+         * @param options Reclaim options to consider when calculating the storage info. If nullptr,
+         * the current file service's reclaim options will be used. See
+         * MegaApi::fileServiceGetReclaimOptions and MegaApi::fileServiceSetReclaimOptions.
+         */
+        MegaFileServiceStorageInfo*
+            fileServiceGetStorageInfo(const MegaFileServiceReclaimOptions* options);
+
     protected:
         MegaApiImpl *pImpl = nullptr;
         friend class MegaApiImpl;
@@ -28229,6 +28335,187 @@ public:
     virtual MegaCancelSubscriptionReasonList* copy() const = 0;
     virtual ~MegaCancelSubscriptionReasonList() = default;
 };
+
+class MegaFileServiceReclaimOptions
+{
+protected:
+    MegaFileServiceReclaimOptions();
+
+public:
+    virtual ~MegaFileServiceReclaimOptions();
+
+    /**
+     * @brief
+     * Create a copy of this instance.
+     *
+     * @return
+     * A copy of this instance.
+     */
+    virtual MegaFileServiceReclaimOptions* copy() const = 0;
+
+    /**
+     * @brief
+     * Create a new instance.
+     *
+     * @return
+     * A new instance.
+     */
+    static MegaFileServiceReclaimOptions* create();
+
+    /**
+     * @brief
+     * Get the reclaim age threshold.
+     *
+     * @return
+     * The reclaim age threshold in minutes. How old should the files be before they are considered
+     * for reclamation?
+     */
+    virtual int getAgeThreshold() const = 0;
+
+    /**
+     * @brief
+     * Set the reclaim age threshold.
+     *
+     * @param ageThreshold
+     * The reclaim age threshold in minutes. How old should the files be before they are considered
+     * for reclamation?
+     */
+    virtual void setAgeThreshold(int ageThreshold) = 0;
+
+    /**
+     * @brief
+     * Get the reclaim batch size.
+     *
+     * @return
+     * The reclaim batch size. How many files should be processed in each batch of reclaim process?
+     */
+    virtual std::size_t getBatchSize() const = 0;
+
+    /**
+     * @brief
+     * Set the reclaim batch size.
+     *
+     * @param batchSize
+     * The reclaim batch size. How many files should be processed in each batch of reclaim process?
+     * This size is rarely needed to be changed.
+     */
+    virtual void setBatchSize(std::size_t batchSize) = 0;
+
+    /**
+     * @brief
+     * Get the reclaim delay.
+     *
+     * @return
+     * The reclaim delay in seconds. How long after startup should we wait until we reclaim space?
+     */
+    virtual uint64_t getDelay() const = 0;
+
+    /**
+     * @brief
+     * Set the reclaim delay.
+     *
+     * @param seconds
+     * How long after startup should we wait until we reclaim space?
+     *
+     * @note This option must be set before the client's logged in in order
+     * to have any effect.
+     */
+    virtual void setDelay(uint64_t seconds) = 0;
+
+    /**
+     * @brief
+     * Get the reclaim period.
+     *
+     * @return
+     * The reclaim period in seconds. How long should we wait between consecutive reclaims?
+     */
+    virtual uint64_t getPeriod() const = 0;
+
+    /**
+     * @brief
+     * Set the reclaim period.
+     *
+     * @param seconds
+     * How long should we wait between consecutive reclaims?
+     */
+    virtual void setPeriod(uint64_t seconds) = 0;
+
+    /**
+     * @brief
+     * Returns the configured reclaim trigger threshold in bytes.
+     *
+     * @return
+     * The threshold in bytes that, when the used space exceeds it (and other
+     * required conditions are satisfied), may trigger a reclaim operation.
+     * Reclaiming stops once usage falls below this threshold.
+     *
+     * - 0  : No minimum threshold (reclaim may run immediately).
+     * - -1 : Automatic reclamation is disabled.
+     */
+    virtual int64_t getReclaimThreshold() const = 0;
+
+    /**
+     * @brief
+     * Sets the reclaim trigger threshold in bytes.
+     *
+     * @param bytes
+     * The threshold in bytes that, when exceeded by the used space (and other
+     * required conditions are satisfied), may trigger a reclaim operation.
+     * Reclaiming stops once usage falls below this threshold.
+     *
+     * - 0  : No minimum threshold (reclaim may run immediately).
+     * - -1 : Automatic reclamation is disabled.
+     */
+    virtual void setReclaimThreshold(int64_t bytes) = 0;
+
+    /**
+     * @brief
+     * Get the reclaim target size in bytes.
+     *
+     * @return
+     * The target size in bytes that the used space should be reduced to when a reclaim operation is
+     * triggered.
+     */
+    virtual uint64_t getReclaimTarget() const = 0;
+
+    /**
+     * @brief
+     * Set the reclaim target size in bytes.
+     *
+     * @param bytes
+     * The target size in bytes that the used space should be reduced to when a reclaim operation is
+     * triggered.
+     */
+    virtual void setReclaimTarget(uint64_t bytes) = 0;
+
+}; // MegaFileServiceReclaimOptions
+
+class MegaFileServiceStorageInfo
+{
+protected:
+    MegaFileServiceStorageInfo();
+
+public:
+    virtual ~MegaFileServiceStorageInfo();
+    /**
+     * @brief
+     * Get the size that is currently allocated by the file service.
+     *
+     * @return
+     * The size in bytes that is currently allocated by the file service.
+     */
+    virtual uint64_t getAllocatedSize() const = 0;
+
+    /**
+     * @brief
+     * Get the size that can be reclaimed by the file service. The reclaimable space is up to
+     * reclaim option settings
+     *
+     * @return
+     * The size in bytes that can be reclaimed by the file service.
+     */
+    virtual uint64_t getReclaimableSize() const = 0;
+}; // MegaFileServiceStorageInfo
 }
 
 #endif //MEGAAPI_H

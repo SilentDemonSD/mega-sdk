@@ -10,11 +10,13 @@ using namespace common;
 
 FileServiceQueries::FileServiceQueries(Database& database):
     mAddFile(database.query()),
+    mAddFileDuration(database.query()),
     mAddFileID(database.query()),
     mAddFileKeyData(database.query()),
     mAddFileRange(database.query()),
     mGetFile(database.query()),
     mGetFileByNameAndParentHandle(database.query()),
+    mGetFileDuration(database.query()),
     mGetFileIDs(database.query()),
     mGetFileIDsByParentHandle(database.query()),
     mGetFileKeyData(database.query()),
@@ -22,6 +24,7 @@ FileServiceQueries::FileServiceQueries(Database& database):
     mGetFreeFileID(database.query()),
     mGetNextFileID(database.query()),
     mGetReclaimableFiles(database.query()),
+    mGetStorageInfo(database.query()),
     mGetStorageUsed(database.query()),
     mRemoveFile(database.query()),
     mRemoveFileID(database.query()),
@@ -50,6 +53,11 @@ FileServiceQueries::FileServiceQueries(Database& database):
                "  :size "
                ")";
 
+    mAddFileDuration = "insert into file_durations values ( "
+                       "  :duration, "
+                       "  :id "
+                       ")";
+
     mAddFileID = "insert into file_ids values (:id)";
 
     mAddFileKeyData = "insert into file_key_data values ( "
@@ -77,9 +85,14 @@ FileServiceQueries::FileServiceQueries(Database& database):
                                     "  from files "
                                     " where name = :name and parent_handle = :parent_handle";
 
+    mGetFileDuration = "select duration "
+                       "  from file_durations "
+                       " where id = :id";
+
     mGetFileIDs = "select id "
                   "  from files "
-                  " where (:removed is null or removed = :removed)";
+                  " where (:dirty is null or dirty = :dirty) "
+                  "   and (:removed is null or removed = :removed)";
 
     mGetFileIDsByParentHandle = "select id "
                                 "  from files "
@@ -106,7 +119,39 @@ FileServiceQueries::FileServiceQueries(Database& database):
                            " where allocated_size <> 0 "
                            "   and accessed <= :accessed "
                            "   and removed = 0 "
-                           " order by accessed desc";
+                           " order by accessed asc";
+
+    // ifnull(...) is necessary as there may be no files to sum.
+    mGetStorageInfo = "with TargetStats as ( "
+                      "    select sum(allocated_size) as total_allocated_now "
+                      "         , sum(reported_size) as total_reported_now "
+                      "         , sum(size) as total_size_now "
+                      "      from files "
+                      "), "
+                      "ReclaimableRows as ( "
+                      "    select f.allocated_size "
+                      "         , sum(f.allocated_size) over (order by f.accessed asc, f.id asc) "
+                      "as running_reclaimed "
+                      "         , ts.total_allocated_now "
+                      "      from files f "
+                      "      cross join TargetStats ts "
+                      "     where f.removed = 0 "
+                      "       and f.allocated_size <> 0 "
+                      "       and f.accessed <= :accessed "
+                      ") "
+                      "select "
+                      "    ifnull(( "
+                      "        select sum(allocated_size) "
+                      "        from ReclaimableRows "
+                      // Include this file if, before subtracting it, was still above the target.
+                      // Reclaim enough space to no more than the target size
+                      "        where (total_allocated_now - running_reclaimed + allocated_size) > "
+                      ":target_remaining_size "
+                      "    ), 0) as size_to_reclaim, "
+                      "    ifnull(total_allocated_now, 0) as total_allocated_size, "
+                      "    ifnull(total_reported_now, 0) as total_reported_size, "
+                      "    ifnull(total_size_now, 0) as total_size "
+                      "from TargetStats ";
 
     // ifnull(...) is necessary as there may be no files to sum.
     mGetStorageUsed = "select ifnull(sum(allocated_size), 0) as total_allocated_size "
@@ -128,7 +173,8 @@ FileServiceQueries::FileServiceQueries(Database& database):
                         "   and id = :id";
 
     mRemoveFiles = "delete from files "
-                   " where (:removed is null or removed = :removed)";
+                   " where (:dirty is null or dirty = :dirty) "
+                   "   and (:removed is null or removed = :removed)";
 
     mSetFileAccessTime = "update files "
                          "   set accessed = :accessed "

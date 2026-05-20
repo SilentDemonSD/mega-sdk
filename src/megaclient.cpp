@@ -5066,7 +5066,7 @@ void MegaClient::locallogout(bool removecaches, [[maybe_unused]] bool keepSyncsC
     freeq(PUT);
 
     // Deinitialize the File Service.
-    mFileService.deinitialize();
+    mFileService.deinitialize(removecaches);
 
     // Deinitialize the FUSE Service.
     mFuseService.deinitialize();
@@ -17524,6 +17524,10 @@ void MegaClient::queueread(handle handle,
                                                                    appData,
                                                                    failure.timeLeft);
                               },
+                              [&](DirectRead::Match& match)
+                              {
+                                  match.mMatched = appData == match.mAppData;
+                              },
                               [&](DirectRead::Revoke& revoke)
                               {
                                   if (appData == revoke.appdata)
@@ -17637,40 +17641,21 @@ void MegaClient::preadabort(handle handle, m_off_t offset, m_off_t count)
 
 void MegaClient::abortreads(handle handle, bool isPublicHandle, m_off_t offset, m_off_t count)
 {
-    encodeHandleType(&handle, isPublicHandle);
-
-    // Try and find the direct read node associated with our handle.
-    auto i = hdrns.find(handle);
-
-    // No node assocated with this handle.
-    if (i == hdrns.end())
-        return;
-
     auto predicate = [=](const DirectRead& read)
     {
         return (count < 0 || count == read.count) && (offset < 0 || offset == read.offset);
     }; // predicate
 
-    // Abort all reads matching our predicate.
-    i->second->abort(std::move(predicate));
+    abortreads(std::move(predicate), handle, isPublicHandle);
 }
 
 void MegaClient::abortreads()
 {
-    auto always = [](const DirectRead&)
-    {
-        return true;
-    };
-
-    // Iterate over any active direct read nodes.
-    for (auto i = hdrns.begin(); i != hdrns.end();)
-    {
-        // Abort pending reads queued on that node.
-        i->second->abort(always);
-
-        // Destroy the node.
-        delete i++->second;
-    }
+    abortreads(
+        [](auto&)
+        {
+            return true;
+        });
 }
 
 // execute pending directreads

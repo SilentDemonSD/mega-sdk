@@ -67,8 +67,10 @@ class PartialDownloadCallback: public common::PartialDownloadCallback
     }
 
     // Called when we've received some content.
-    auto data(const void* buffer, std::uint64_t, std::uint64_t length)
-        -> std::variant<Abort, Continue> override
+    auto data(const void* buffer,
+              std::uint64_t,
+              std::uint64_t length,
+              const Speeds&) -> std::variant<Abort, Continue> override
     {
         // Convenience.
         auto* buffer_ = static_cast<const char*>(buffer);
@@ -97,21 +99,6 @@ class PartialDownloadCallback: public common::PartialDownloadCallback
 
         // Retry the download.
         return Retry(deciseconds(20));
-    }
-
-    // Check if result is a retryable error.
-    bool retryable(const Error& result) const
-    {
-        // Client's being torn down or the download has been cancelled.
-        if (result == API_EINCOMPLETE)
-            return false;
-
-        // File's been taken down because it breached our terms and conditions.
-        if (result == API_ETOOMANY && result.hasExtraInfo())
-            return false;
-
-        // Retry all other failures.
-        return true;
     }
 
 public:
@@ -161,8 +148,10 @@ TEST_F(PartialDownloadTests, DISABLED_measure_average_fetch_times)
         }
 
         // Called when we've received some content.
-        auto data(const void*, std::uint64_t, std::uint64_t)
-            -> std::variant<Abort, Continue> override
+        auto data(const void*,
+                  std::uint64_t,
+                  std::uint64_t,
+                  const Speeds&) -> std::variant<Abort, Continue> override
         {
             return Continue();
         }

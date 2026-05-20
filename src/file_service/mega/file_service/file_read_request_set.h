@@ -16,6 +16,8 @@ struct FileReadRequestLess
 
     bool operator()(const FileReadRequest& lhs, const FileReadRequest& rhs) const;
 
+    bool operator()(const FileReadRequest& lhs, std::uint64_t rhs) const;
+
     bool operator()(std::uint64_t lhs, const FileReadRequest& rhs) const;
 }; // FileReadRequestLess
 

@@ -2,6 +2,8 @@
 
 #include <mega/file_service/file_range_forward.h>
 
+#include <vector>
+
 namespace mega
 {
 namespace file_service

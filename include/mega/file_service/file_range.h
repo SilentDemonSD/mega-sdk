@@ -25,11 +25,28 @@ struct FileRange
         return !(*this == rhs);
     }
 
-    std::uint64_t mBegin;
-    std::uint64_t mEnd;
+    bool contains(std::uint64_t position) const
+    {
+        return position >= mBegin && position < mEnd;
+    }
+
+    bool empty() const
+    {
+        return mBegin == mEnd;
+    }
+
+    std::uint64_t length() const
+    {
+        return mEnd - mBegin;
+    }
+
+    std::uint64_t mBegin{};
+    std::uint64_t mEnd{};
 }; // FileRange
 
 std::ostream& operator<<(std::ostream& ostream, const FileRange& range);
+
+FileRange clamp(const FileRange& range, std::uint64_t begin, std::uint64_t end);
 
 FileRange combine(const FileRange& lhs, const FileRange& rhs);
 

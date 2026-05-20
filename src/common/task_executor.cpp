@@ -205,12 +205,19 @@ void TaskExecutor::Worker::loop()
         if (workers.size() > flags.mMaxWorkers)
             break;
 
-        // Sleep until there's something to do.
-        auto hasWork = cv.wait_until(lock, nextWakeup(), shouldWake);
+        // Convenience.
+        constexpr auto timeout = std::cv_status::timeout;
 
-        // We haven't had any work in awhile.
-        if (!hasWork)
+        // Sleep until there's something to do.
+        auto taskQueued = cv.wait_until(lock, nextWakeup()) != timeout;
+
+        // Executor isn't terminating and no task is ready for execution.
+        if (!shouldWake())
         {
+            // Our wake time may have changed.
+            if (taskQueued)
+                continue;
+
             // Keep at least this many workers alive.
             if (flags.mMinWorkers >= workers.size())
                 continue;

@@ -25,15 +25,10 @@
 #include "easy_curl.h"
 #include "mega/common/testing/utility.h"
 #include "mega/utils.h"
-#include "mock_listeners.h"
 #include "sdk_server_test_utils.h"
-#include "sdk_test_utils.h"
 
 #include <curl/curl.h>
 
-#include <algorithm>
-#include <cctype>
-#include <chrono>
 #include <cstring>
 #include <future>
 #include <map>
@@ -45,30 +40,9 @@
 using namespace ::mega;
 using namespace ::std;
 using ::mega::common::testing::randomBytes;
-using sdk_test::EasyCurl;
-using sdk_test::EasyCurlSlist;
-using sdk_test::LocalTempFile;
 
 namespace
 {
-
-std::optional<ScopedDestructor> scopedHttpServer(MegaApi* api)
-{
-    if (!api)
-        return std::nullopt;
-
-    if (!api->httpServerStart(true, 0))
-        return std::nullopt;
-
-    if (!api->httpServerIsRunning())
-        return std::nullopt;
-
-    return makeScopedDestructor(
-        [api]()
-        {
-            api->httpServerStop();
-        });
-}
 
 std::string baseURL(int port)
 {
@@ -95,194 +69,6 @@ std::string extractEndpointFromUrl(const std::string& url)
 
 class SdkHttpServerTest: public SdkServerTest
 {};
-
-/**
- * Helper class for HTTP client requests
- */
-class HttpClient
-{
-public:
-    static inline const std::string EmptyRange = {};
-
-    enum class BodyMode
-    {
-        WithBody,
-        WithoutBody
-    };
-
-    struct Response
-    {
-        int statusCode;
-        map<string, string> headers;
-        std::string body;
-        curl_off_t contentLength;
-    };
-
-    static Response get(const std::string& url,
-                        const std::string& range = EmptyRange,
-                        const map<string, string>& headers = {})
-    {
-        return performRequest(url, "GET", range, headers, "", BodyMode::WithBody);
-    }
-
-    static Response post(const std::string& url,
-                         const map<string, string>& headers = {},
-                         const string& body = "")
-    {
-        return performRequest(url, "POST", EmptyRange, headers, body, BodyMode::WithBody);
-    }
-
-    static Response put(const std::string& url,
-                        const map<string, string>& headers = {},
-                        const string& body = "")
-    {
-        return performRequest(url, "PUT", EmptyRange, headers, body, BodyMode::WithBody);
-    }
-
-    static Response del(const std::string& url, const map<string, string>& headers = {})
-    {
-        return performRequest(url, "DELETE", EmptyRange, headers, "", BodyMode::WithBody);
-    }
-
-    static Response head(const std::string& url, const map<string, string>& headers = {})
-    {
-        return performRequest(url, "HEAD", EmptyRange, headers, "", BodyMode::WithoutBody);
-    }
-
-private:
-    static bool appendHttpHeaders(EasyCurlSlist& easyCurlSlist,
-                                  const std::map<std::string, std::string>& headers)
-    {
-        for (const auto& header: headers)
-        {
-            std::string headerStr = header.first + ": " + header.second;
-            if (!easyCurlSlist.append(headerStr))
-            {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    static Response performRequest(const std::string& url,
-                                   const std::string& method,
-                                   const std::string& rangeHeader = EmptyRange,
-                                   const map<string, string>& headers = {},
-                                   const string& body = "",
-                                   BodyMode bodyMode = BodyMode::WithBody)
-    {
-        Response response;
-        auto easyCurl = EasyCurl();
-        auto easyCurlSlist = EasyCurlSlist();
-        auto curl = easyCurl.curl();
-
-        curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-        curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 0L);
-        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 60L);
-        curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
-
-        if (method != "GET" && method != "HEAD")
-        {
-            curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, method.c_str());
-        }
-
-        if (bodyMode == BodyMode::WithoutBody)
-        {
-            curl_easy_setopt(curl, CURLOPT_NOBODY, 1L);
-        }
-        else
-        {
-            curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeCallback);
-            curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
-        }
-
-        if (!body.empty())
-        {
-            curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.c_str());
-            curl_easy_setopt(curl,
-                             CURLOPT_POSTFIELDSIZE_LARGE,
-                             static_cast<curl_off_t>(body.size()));
-        }
-        else
-        {
-            curl_easy_setopt(curl,
-                             CURLOPT_POSTFIELDSIZE_LARGE,
-                             static_cast<curl_off_t>(body.size()));
-        }
-
-        if (!appendHttpHeaders(easyCurlSlist, headers))
-        {
-            LOG_err << "Failed to append HTTP headers";
-            response.statusCode = 0;
-            response.contentLength = -1;
-            return response;
-        }
-        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, easyCurlSlist.slist());
-
-        curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, headerCallback);
-        curl_easy_setopt(curl, CURLOPT_HEADERDATA, &response);
-        curl_easy_setopt(curl, CURLOPT_NOPROXY, "*");
-
-        if (!rangeHeader.empty())
-        {
-            curl_easy_setopt(curl, CURLOPT_RANGE, rangeHeader.c_str());
-        }
-
-        CURLcode res = curl_easy_perform(curl);
-
-        if (res == CURLE_OK)
-        {
-            curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response.statusCode);
-            curl_easy_getinfo(curl, CURLINFO_CONTENT_LENGTH_DOWNLOAD_T, &response.contentLength);
-        }
-        else
-        {
-            LOG_err << "CURL error for " << method << " " << url << ": " << curl_easy_strerror(res)
-                    << " (code: " << res << ")";
-            response.statusCode = 0;
-            response.contentLength = -1;
-            response.body.clear();
-            response.headers.clear();
-        }
-
-        return response;
-    }
-
-    static size_t writeCallback(void* contents, size_t size, size_t nmemb, Response* response)
-    {
-        size_t totalSize = size * nmemb;
-        response->body.append(static_cast<char*>(contents), totalSize);
-        return totalSize;
-    }
-
-    static size_t headerCallback(void* contents, size_t size, size_t nmemb, Response* response)
-    {
-        size_t totalSize = size * nmemb;
-        std::string headerLine(static_cast<char*>(contents), totalSize);
-        if (headerLine == "\r\n")
-        {
-            // end of header block
-            return totalSize;
-        }
-
-        if (headerLine.rfind("HTTP/", 0) == 0)
-        {
-            // status line
-            return totalSize;
-        }
-        size_t colonPos = headerLine.find(':');
-        if (colonPos != std::string::npos)
-        {
-            std::string headerName = headerLine.substr(0, colonPos);
-            headerName = Utils::toLowerUtf8(headerName);
-            std::string headerValue = headerLine.substr(colonPos + 1);
-            // Trim whitespace
-            headerValue = Utils::trim(headerValue);
-            response->headers[headerName] = headerValue;
-        }
-        return totalSize;
-    }
-};
 
 TEST_F(SdkHttpServerTest, HttpServerStartStop)
 {
@@ -579,55 +365,6 @@ TEST_F(SdkHttpServerTest, GetSetRestrictedMode)
     CASE_info << "finished";
 }
 
-// test httpServerAddListener, httpServerRemoveListener and check MegaTransferListener callbacks
-TEST_F(SdkHttpServerTest, HttpServerListenerCallbacks)
-{
-    ASSERT_NO_FATAL_FAILURE(SdkTest::getAccountsForTest(1));
-    CASE_info << "started";
-    testing::NiceMock<MockMegaTransferListener> mockListener{megaApi[0].get()};
-    std::promise<handle> fileNodeHandlePromise;
-
-    EXPECT_CALL(mockListener, onTransferFinish)
-        .WillOnce(
-            [&fileNodeHandlePromise](MegaApi*, MegaTransfer* transfer, MegaError*)
-            {
-                LOG_debug << "onTransferFinish called for node handle: "
-                          << transfer->getNodeHandle();
-                if (transfer)
-                    fileNodeHandlePromise.set_value(transfer->getNodeHandle());
-                else
-                    fileNodeHandlePromise.set_value(UNDEF);
-            });
-
-    auto server = scopedHttpServer(megaApi[0].get());
-    ASSERT_TRUE(server);
-
-    megaApi[0]->httpServerAddListener(&mockListener);
-    // Upload test file to trigger transfer events
-    const std::string testFileName = "http_server_listener_test.txt";
-    const std::string testFileContents = "HTTP server listener test file content";
-
-    auto fileNode = uploadFile(0, testFileName, testFileContents);
-    ASSERT_TRUE(fileNode);
-
-    // get local link to trigger the transfer
-    unique_ptr<char[]> fileLocalLink(megaApi[0]->httpServerGetLocalLink(fileNode.get()));
-    ASSERT_TRUE(fileLocalLink);
-    string fileLinkStr(fileLocalLink.get());
-    CASE_info << "Local file link: " << fileLinkStr;
-    auto response = HttpClient::get(fileLinkStr);
-    EXPECT_EQ(200, response.statusCode);
-
-    // Wait for OnTransferFinish callback
-    auto fileNodeHandle = fileNodeHandlePromise.get_future();
-    ASSERT_EQ(fileNodeHandle.wait_for(std::chrono::seconds(5U)), std::future_status::ready)
-        << "Timeout waiting for onTransferFinish callback";
-    EXPECT_EQ(fileNode->getHandle(), fileNodeHandle.get());
-
-    megaApi[0]->httpServerRemoveListener(&mockListener);
-    CASE_info << "finished";
-}
-
 /**
  * Test basic HTTP server functionality with GET request.
  */
@@ -651,6 +388,37 @@ TEST_F(SdkHttpServerTest, BasicGet)
     auto response = HttpClient::get(url);
     EXPECT_EQ(200, response.statusCode);
     EXPECT_EQ(testFileContent, response.body);
+}
+
+/**
+ * Test basic HTTP server rate limit with GET request.
+ */
+TEST_F(SdkHttpServerTest, BasicGetWithRateLimit)
+{
+    ASSERT_NO_FATAL_FAILURE(getAccountsForTest(1));
+
+    MegaApi* api = megaApi[0].get();
+
+    // 1MBytes(8Mbits) data
+    std::string testFileContent = randomBytes(1024 * 1024);
+    std::unique_ptr<MegaNode> uploadedNode =
+        uploadFile(0, "test_http_basic_with_ratelimit.bin", testFileContent);
+    ASSERT_NE(uploadedNode, nullptr);
+
+    auto server = scopedHttpServer(api);
+    ASSERT_TRUE(server);
+
+    // 256Kbytes per second (2Mbits per second)
+    api->httpServerSetThrottleBitrate(2 * 1024 * 1024);
+
+    std::unique_ptr<char[]> link(api->httpServerGetLocalLink(uploadedNode.get()));
+    ASSERT_NE(link, nullptr);
+    std::string url = link.get();
+
+    auto response = HttpClient::get(url);
+    ASSERT_EQ(200, response.statusCode);
+    ASSERT_EQ(testFileContent.size(), response.body.size());
+    ASSERT_EQ(testFileContent.compare(response.body), 0);
 }
 
 /**
@@ -756,7 +524,7 @@ TEST_F(SdkHttpServerTest, ValidRangeRequests)
 
     // Full file range (0 to last byte)
     auto fullRange = HttpClient::get(url, "0-" + std::to_string(fileSize - 1));
-    EXPECT_EQ(200, fullRange.statusCode); // BUG: HTTP protocol expects 206 Partial Content
+    EXPECT_EQ(206, fullRange.statusCode);
     EXPECT_EQ(testFileContent, fullRange.body);
 
     // Range starting at 1
@@ -796,7 +564,7 @@ TEST_F(SdkHttpServerTest, VeryLargeRangeRequests)
     // Full file range
     auto fileSize = testFileContent.size();
     auto largeRange = HttpClient::get(url, "0-" + std::to_string(fileSize - 1));
-    EXPECT_EQ(200, largeRange.statusCode); // BUG: HTTP protocol expects 206 Partial Content
+    EXPECT_EQ(206, largeRange.statusCode);
     EXPECT_TRUE(testFileContent == largeRange.body);
 
     // Middle range: from 25% to 50%, end is inclusive
@@ -919,11 +687,11 @@ TEST_F(SdkHttpServerTest, EmptyFile)
 
     // Range requests for empty file
     auto rangeResponse1 = HttpClient::get(url, "0-0");
-    EXPECT_EQ(200,
+    EXPECT_EQ(206,
               rangeResponse1.statusCode); // BUG: HTTP protocol expects 416 Range Not Satisfiable
 
     auto rangeResponse2 = HttpClient::get(url, "0-10");
-    EXPECT_EQ(200,
+    EXPECT_EQ(206,
               rangeResponse2.statusCode); // BUG: HTTP protocol expects 416 Range Not Satisfiable
 
     auto suffixRange = HttpClient::get(url, "-10");
@@ -1317,7 +1085,7 @@ TEST_F(SdkHttpServerTest, DifferentFileSizes)
 
     // Range request for single byte
     auto rangeResponse = HttpClient::get(url1, "0-0");
-    EXPECT_EQ(200, rangeResponse.statusCode); // BUG: HTTP protocol expects 206 Partial Content
+    EXPECT_EQ(206, rangeResponse.statusCode);
     EXPECT_EQ("A", rangeResponse.body);
 
     // Range request beyond file
@@ -1341,7 +1109,7 @@ TEST_F(SdkHttpServerTest, DifferentFileSizes)
 
     // Range: both bytes
     auto range3 = HttpClient::get(url2, "0-1");
-    EXPECT_EQ(200, range3.statusCode); // BUG: HTTP protocol expects 206 Partial Content
+    EXPECT_EQ(206, range3.statusCode);
     EXPECT_EQ("AB", range3.body);
 }
 

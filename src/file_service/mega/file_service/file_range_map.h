@@ -9,7 +9,7 @@ namespace file_service
 {
 
 template<typename ValueType>
-using FileRangeMap = FileRangeTree<SelectFirst, std::pair<const FileRange, ValueType>>;
+using FileRangeMap = FileRangeTree<Select<0>, std::pair<const FileRange, ValueType>>;
 
 } // file_service
 } // mega

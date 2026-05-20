@@ -26,7 +26,7 @@ FileAccessPtr FileStorage::openFile(const LocalPath& path, bool mustCreate)
         throw FSError1("Couldn't create file access instance");
 
     // Vulnerable to TOCTOU race.
-    if (file->isfile(path) != !mustCreate || !file->fopen(path, OPEN_RDWR, FSLogging::noLogging))
+    if (file->isfile(path) != !mustCreate || !file->fopen(path, OPEN_RDWR, FSLogging::logOnError))
         throw FSErrorF("Couldn't %s file: %s",
                        mustCreate ? "create" : "open",
                        path.toPath(false).c_str());
@@ -67,6 +67,21 @@ LocalPath FileStorage::databasePath() const
 FileAccessPtr FileStorage::getFile(FileID id)
 {
     return openFile(userFilePath(id), false);
+}
+
+bool FileStorage::removeFile(FileID id, std::nothrow_t)
+{
+    // Compute the file's path.
+    auto path = userFilePath(id);
+
+    // File was removed from storage.
+    if (mFilesystem->unlinklocal(path))
+        return true;
+
+    // Couldn't remove the file from storage.
+    FSWarningF("Couldn't remove file: %s", path.toPath(false).c_str());
+
+    return false;
 }
 
 void FileStorage::removeFile(FileID id)

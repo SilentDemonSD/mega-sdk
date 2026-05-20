@@ -40,7 +40,7 @@ class ClientAdapter
     TaskQueue mTaskQueue;
 
     // So we can check when we're running on the client thread.
-    std::thread::id mThreadID;
+    static thread_local bool mOnClientThread;
 
 public:
     explicit ClientAdapter(MegaClient& client);
@@ -86,6 +86,9 @@ public:
 
     // Query whether a node exists in the cloud.
     ErrorOr<bool> exists(NodeHandle handle) const override;
+
+    // Retrieve a file's attributes.
+    ErrorOr<std::string> fileAttributes(NodeHandle handle) const override;
 
     // Request access the local filesystem.
     FileSystemAccess& fsAccess() const override;

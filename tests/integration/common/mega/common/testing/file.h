@@ -2,6 +2,7 @@
 
 #include <mega/common/testing/path.h>
 
+#include <cstdint>
 #include <stdfs.h>
 
 namespace mega
@@ -19,6 +20,10 @@ public:
     File(const std::string& content, const std::string& name, const Path& parentPath);
 
     File(const std::string& content, const std::string& name);
+
+    File(std::uint64_t length, const std::string& name, const Path& parentPath);
+
+    File(std::uint64_t length, const std::string& name);
 
     ~File();
 

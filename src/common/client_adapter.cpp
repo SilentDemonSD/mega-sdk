@@ -319,15 +319,16 @@ static void describe(NodeInfo& destination,
 
 static NodeInfo describe(Node& node);
 
-ClientAdapter::ClientAdapter(MegaClient& client)
-  : Client(common::logger())
-  , mActivities()
-  , mClient(client)
-  , mDeinitialized{false}
-  , mLock()
-  , mPendingCallbacks()
-  , mTaskQueue()
-  , mThreadID(std::this_thread::get_id())
+thread_local bool ClientAdapter::mOnClientThread = false;
+
+ClientAdapter::ClientAdapter(MegaClient& client):
+    Client(common::logger()),
+    mActivities(),
+    mClient(client),
+    mDeinitialized{false},
+    mLock(),
+    mPendingCallbacks(),
+    mTaskQueue()
 {
 }
 
@@ -465,6 +466,9 @@ void ClientAdapter::deinitialize()
 
 void ClientAdapter::dispatch()
 {
+    // Let tasks know they're executing on the client thread.
+    auto restorer = makeScopedValue(mOnClientThread, true);
+
     // Acquire lock.
     std::unique_lock<std::mutex> lock(mLock);
 
@@ -637,6 +641,33 @@ ErrorOr<bool> ClientAdapter::exists(NodeHandle handle) const
 
     // Check if the node exists.
     return !!mClient.nodeByHandle(handle);
+}
+
+ErrorOr<std::string> ClientAdapter::fileAttributes(NodeHandle handle) const
+{
+    // Make sure deinitialize(...) waits for this call to complete.
+    auto activity = mActivities.begin();
+
+    // Client's being torn down.
+    if (mDeinitialized)
+        return unexpected(LOCAL_LOGGED_OUT);
+
+    // Acquire RNT lock.
+    std::lock_guard guard(mClient.nodeTreeMutex);
+
+    // Try and locate the speciifed node.
+    auto node = mClient.nodeByHandle(handle);
+
+    // Couldn't locate the node.
+    if (!node)
+        return unexpected(API_ENOENT);
+
+    // Node isn't a file.
+    if (node->type != FILENODE)
+        return unexpected(API_FUSE_EISDIR);
+
+    // Return file attributes to caller.
+    return node->fileattrstring;
 }
 
 FileSystemAccess& ClientAdapter::fsAccess() const
@@ -931,7 +962,7 @@ void ClientAdapter::move(MoveCallback callback,
 
 bool ClientAdapter::isClientThread() const
 {
-    return std::this_thread::get_id() == mThreadID;
+    return mOnClientThread;
 }
 
 ErrorOr<NodeHandle> ClientAdapter::parentHandle(NodeHandle handle) const
@@ -1589,12 +1620,14 @@ void ClientPartialDownload::data(Data& data)
     auto buffer = reinterpret_cast<const void*>(data.buffer);
     auto offset = static_cast<std::uint64_t>(data.offset);
     auto length = static_cast<std::uint64_t>(data.len);
+    auto meanSpeed = static_cast<std::uint64_t>(data.meanSpeed);
+    auto overallSpeed = static_cast<std::uint64_t>(data.speed);
 
     // Clamp length.
     length = std::min(length, mRemaining);
 
     // Pass data to the user callback.
-    auto result = mCallback.data(buffer, offset, length);
+    auto result = mCallback.data(buffer, offset, length, {meanSpeed, overallSpeed});
 
     // Figure out how many bytes we still have to download.
     mRemaining -= length;
@@ -1666,6 +1699,7 @@ bool ClientPartialDownload::inProgress()
 void ClientPartialDownload::notify(PartialDownloadWeakPtr cookie, Event& event)
 {
     // Convenience.
+    using Match = DirectRead::Match;
     using Revoke = DirectRead::Revoke;
     using Valid = DirectRead::IsValid;
 
@@ -1683,6 +1717,10 @@ void ClientPartialDownload::notify(PartialDownloadWeakPtr cookie, Event& event)
                                      [&](Failure& failure)
                                      {
                                          failure.ret = NEVER;
+                                     },
+                                     [&](Match& match)
+                                     {
+                                         match.mMatched = false;
                                      },
                                      [&](Revoke& revoke)
                                      {
@@ -1709,6 +1747,11 @@ void ClientPartialDownload::notify(PartialDownloadWeakPtr cookie, Event& event)
                           {
                               // Delegate.
                               download->failure(failure);
+                          },
+                          [&](Match& match)
+                          {
+                              // Does match.mAppData reference this download?
+                              match.mMatched = match.mAppData == download.get();
                           },
                           [&](Revoke& revoke)
                           {
@@ -1743,8 +1786,8 @@ ClientPartialDownload::ClientPartialDownload(PartialDownloadCallback& callback,
 
 ClientPartialDownload::~ClientPartialDownload()
 {
-    // Let the user know the download's been completed.
-    completed(API_EINCOMPLETE);
+    // Let the user know the download's been cancelled.
+    cancel();
 }
 
 void ClientPartialDownload::begin()
@@ -1813,6 +1856,49 @@ void ClientPartialDownload::begin()
 
 bool ClientPartialDownload::cancel()
 {
+    // Bundles state necessary to cancel this download via the client.
+    class Canceller
+    {
+        // The client responsible for this download.
+        MegaClient& mClient;
+
+        // Reference to the download we're cancelling.
+        ClientPartialDownload& mDownload;
+
+        // Handle of the download we're cancelling.
+        NodeHandle mHandle;
+
+        // Whether we were downloading a public node.
+        bool mIsPublicHandle;
+
+    public:
+        Canceller(ClientPartialDownload& download):
+            mClient(download.mClient.client()),
+            mDownload(download),
+            mHandle(download.mHandle),
+            mIsPublicHandle(download.mKeyData.mIsPublicHandle)
+        {}
+
+        // Called directly by cancel().
+        void operator()()
+        {
+            // Ask the client to cancel our download.
+            mClient.abortreads(
+                [this](auto& read)
+                {
+                    return read.match(&mDownload);
+                },
+                mHandle.as8byte(),
+                mIsPublicHandle);
+        }
+
+        // Called by the client's thread pool.
+        void operator()(const Task&)
+        {
+            operator()();
+        }
+    }; // CancelFunctor
+
     // Check and update the download's status.
     {
         std::lock_guard guard(mLock);
@@ -1825,8 +1911,18 @@ bool ClientPartialDownload::cancel()
         mStatus = (mStatus ^ SF_CANCELLABLE) | SF_CANCELLED | SF_COMPLETED;
     }
 
+    // Responsible for cancelling this download via the client.
+    Canceller canceller(*this);
+
     // Let the user know their download has been cancelled.
     mCallback.completed(API_EINCOMPLETE);
+
+    // We're executing on the client's thread.
+    if (mClient.isClientThread())
+        return canceller(), true;
+
+    // We're not executing on the client's thread.
+    mClient.execute(std::move(canceller));
 
     // Let the caller know the download has been cancelled.
     return true;

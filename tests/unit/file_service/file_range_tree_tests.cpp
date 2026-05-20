@@ -1,6 +1,10 @@
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include <mega/file_service/file_range.h>
 #include <mega/file_service/file_range_map.h>
 #include <mega/file_service/file_range_set.h>
+#include <mega/file_service/file_range_tree_utilities.h>
+#include <mega/file_service/file_range_vector.h>
 #include <mega/file_service/testing/unit/avl_utilities.h>
 
 #include <cstdlib>
@@ -40,7 +44,7 @@ static_assert(std::is_copy_constructible_v<FileRangeMap<int>>);
 static_assert(!std::is_copy_assignable_v<FileRangeMap<NoCopyMove>>);
 static_assert(!std::is_copy_constructible_v<FileRangeMap<NoCopyMove>>);
 
-TEST(FileRangeMap, add)
+TEST(FileRangeMapTests, add)
 {
     FileRangeMap<NoCopyMove> map;
 
@@ -62,7 +66,27 @@ TEST(FileRangeMap, add)
     EXPECT_EQ(iterator->second.mValue, 1);
 }
 
-TEST(FileRangeSet, add)
+TEST(FileRangeMapTests, add_with_iterators)
+{
+    static const std::pair<FileRange, int> elements[] = {{FileRange(0, 1), 2},
+                                                         {FileRange(3, 4), 5},
+                                                         {FileRange(6, 7), 8}}; // elements
+
+    FileRangeMap<int> map(std::begin(elements), std::end(elements));
+
+    for (auto& element: elements)
+    {
+        auto i = map.beginsAt(element.first.mBegin);
+        auto j = map.endsAt(element.first.mEnd);
+
+        ASSERT_NE(i, map.end());
+        ASSERT_EQ(i, j);
+        ASSERT_EQ(i->first, element.first);
+        ASSERT_EQ(i->second, element.second);
+    }
+}
+
+TEST(FileRangeSetTests, add)
 {
     auto add = [](FileRangeSet& set, const FileRange& range)
     {
@@ -72,7 +96,24 @@ TEST(FileRangeSet, add)
     EXPECT_NO_FATAL_FAILURE(testAdd(std::move(add)));
 }
 
-TEST(FileRangeSet, constructor)
+TEST(FileRangeSetTests, add_with_iterators)
+{
+    static const FileRange ranges[] = {{1, 2}, {3, 4}, {5, 6}}; // ranges
+
+    FileRangeSet set(std::begin(ranges), std::end(ranges));
+
+    for (auto& range: ranges)
+    {
+        auto i = set.beginsAt(range.mBegin);
+        auto j = set.endsAt(range.mEnd);
+
+        ASSERT_NE(i, set.end());
+        ASSERT_EQ(i, j);
+        ASSERT_EQ(*i, range);
+    }
+}
+
+TEST(FileRangeSetTests, constructor)
 {
     FileRangeSet set;
 
@@ -82,7 +123,7 @@ TEST(FileRangeSet, constructor)
     EXPECT_EQ(set.size(), 0u);
 }
 
-TEST(FileRangeSet, copy_assignment)
+TEST(FileRangeSetTests, copy_assignment)
 {
     FileRangeSet set0;
 
@@ -113,7 +154,7 @@ TEST(FileRangeSet, copy_assignment)
     EXPECT_TRUE(set1.empty());
 }
 
-TEST(FileRangeSet, copy_constructor)
+TEST(FileRangeSetTests, copy_constructor)
 {
     FileRangeSet set0;
 
@@ -134,7 +175,7 @@ TEST(FileRangeSet, copy_constructor)
     EXPECT_EQ(set0, set1);
 }
 
-TEST(FileRangeSet, find)
+TEST(FileRangeSetTests, find)
 {
     FileRangeSet set;
 
@@ -193,7 +234,7 @@ TEST(FileRangeSet, find)
     EXPECT_EQ(++m, n);
 }
 
-TEST(FileRangeSet, iteration)
+TEST(FileRangeSetTests, iteration)
 {
     // The ranges that we'll be adding to our set.
     std::vector<FileRange> ranges = {{0, 1}, {1, 2}, {2, 3}};
@@ -221,7 +262,7 @@ TEST(FileRangeSet, iteration)
     EXPECT_EQ(m, n);
 }
 
-TEST(FileRangeSet, move_assignment)
+TEST(FileRangeSetTests, move_assignment)
 {
     FileRangeSet set0;
     FileRangeSet set1;
@@ -259,7 +300,7 @@ TEST(FileRangeSet, move_assignment)
     EXPECT_EQ(set0, set2);
 }
 
-TEST(FileRangeSet, move_constructor)
+TEST(FileRangeSetTests, move_constructor)
 {
     FileRangeSet set0;
     FileRangeSet set1;
@@ -289,7 +330,7 @@ TEST(FileRangeSet, move_constructor)
     EXPECT_EQ(set1, set2);
 }
 
-TEST(FileRangeSet, remove_contained)
+TEST(FileRangeSetTests, remove_contained)
 {
     FileRangeSet set;
 
@@ -315,7 +356,7 @@ TEST(FileRangeSet, remove_contained)
     EXPECT_EQ(set.size(), 0u);
 }
 
-TEST(FileRangeSet, remove_multiple)
+TEST(FileRangeSetTests, remove_multiple)
 {
     FileRangeSet set;
 
@@ -335,7 +376,7 @@ TEST(FileRangeSet, remove_multiple)
     EXPECT_EQ(set.size(), 1u);
 }
 
-TEST(FileRangeSet, remove_single)
+TEST(FileRangeSetTests, remove_single)
 {
     FileRangeSet set;
 
@@ -361,7 +402,7 @@ TEST(FileRangeSet, remove_single)
     EXPECT_EQ(set.size(), 0u);
 }
 
-TEST(FileRangeSet, tryAdd)
+TEST(FileRangeSetTests, tryAdd)
 {
     auto tryAdd = [](FileRangeSet& set, const FileRange& range)
     {
@@ -437,6 +478,67 @@ void testAdd(AddFunction&& add)
     EXPECT_EQ(iterator->mBegin, 4);
     EXPECT_EQ(iterator->mEnd, 6);
     EXPECT_EQ(set.size(), 4u);
+}
+
+struct FileRangeGapIteratorTests: ::testing::Test
+{
+    FileRangeSet mRanges;
+
+    FileRangeGapIteratorTests():
+        mRanges()
+    {
+        // Populate ranges.
+        mRanges.add(16u, 24u);
+        mRanges.add(32u, 40u);
+        mRanges.add(48u, 56u);
+    }
+
+    // Return all gaps in ranges between begin and end.
+    FileRangeVector gaps(std::uint64_t begin, std::uint64_t end)
+    {
+        auto i = file_service::gaps(mRanges, begin, end);
+        return FileRangeVector(i, i.end());
+    };
+}; // FileRangeGapIteratorTests
+
+// Convenience.
+using ::testing::ElementsAre;
+
+TEST_F(FileRangeGapIteratorTests, all_gaps_between_middle_of_two_gaps)
+{
+    EXPECT_THAT(gaps(30, 44), ElementsAre(FileRange(30, 32), FileRange(40, 44)));
+}
+
+TEST_F(FileRangeGapIteratorTests, all_gaps_from_middle_of_first_range)
+{
+    EXPECT_THAT(gaps(20, 64), ElementsAre(FileRange(24, 32), FileRange(40, 48), FileRange(56, 64)));
+}
+
+TEST_F(FileRangeGapIteratorTests, all_gaps_up_to_middle_of_last_range)
+{
+    EXPECT_THAT(gaps(0, 50), ElementsAre(FileRange(0, 16), FileRange(24, 32), FileRange(40, 48)));
+}
+
+TEST_F(FileRangeGapIteratorTests, all_gaps_within_larger_bounding_range)
+{
+    EXPECT_THAT(
+        gaps(0, 64),
+        ElementsAre(FileRange(0, 16), FileRange(24, 32), FileRange(40, 48), FileRange(56, 64)));
+}
+
+TEST_F(FileRangeGapIteratorTests, all_gaps_within_minimum_bounding_range)
+{
+    EXPECT_THAT(gaps(16, 56), ElementsAre(FileRange(24, 32), FileRange(40, 48)));
+}
+
+TEST_F(FileRangeGapIteratorTests, no_gaps)
+{
+    EXPECT_THAT(gaps(16, 24), ElementsAre());
+}
+
+TEST_F(FileRangeGapIteratorTests, no_ranges)
+{
+    EXPECT_THAT(gaps(64, 128), ElementsAre(FileRange(64, 128)));
 }
 
 } // file_service

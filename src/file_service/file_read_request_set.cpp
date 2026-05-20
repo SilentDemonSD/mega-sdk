@@ -21,6 +21,11 @@ bool FileReadRequestLess::operator()(const FileReadRequest& lhs, const FileReadR
     return j < n;
 }
 
+bool FileReadRequestLess::operator()(const FileReadRequest& lhs, std::uint64_t rhs) const
+{
+    return lhs.mRange.mBegin < rhs;
+}
+
 bool FileReadRequestLess::operator()(std::uint64_t lhs, const FileReadRequest& rhs) const
 {
     return lhs < rhs.mRange.mBegin;

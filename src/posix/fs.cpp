@@ -544,38 +544,61 @@ void PosixFileAccess::updatelocalname(const LocalPath& name, bool force)
     }
 }
 
-bool PosixFileAccess::sysread(void* buffer, unsigned long length, m_off_t offset, bool* cretry)
+m_off_t sysread(OsFileDescriptor fd,
+                void* buffer,
+                unsigned long length,
+                m_off_t offset,
+                bool* cretry,
+                int* cerrorcode)
 {
     // Sanity.
+    assert(fd != INVALID_OS_FD);
     assert(buffer || !length);
     assert(offset >= 0);
 
+    int errorcode;
+
     // Keeps logic simple.
-    if (!cretry)
-        cretry = &retry;
+    if (!cerrorcode)
+        cerrorcode = &errorcode;
 
     // Reads are never retriable on POSIX systems.
-    *cretry = false;
+    if (cretry)
+        *cretry = false;
 
-    // Perform the read.
+    // Try and perform the read.
     auto result = pread(fd, buffer, length, offset);
 
     // Read failed.
     if (result < 0)
-    {
-        errorcode = errno;
-        return false;
-    }
+        return *cerrorcode = errno, result;
 
-    // Short read - file was likely truncated
+    // Assume the read wasn't truncated.
+    *cerrorcode = 0;
+
+    // Short read - file was likely truncated.
     if (static_cast<unsigned long>(result) != length)
-    {
-        errorcode = EIO;
-        return false;
-    }
+        *cerrorcode = EIO;
 
-    // Read was successful.
-    return true;
+    // Return result to our caller.
+    return result;
+}
+
+bool PosixFileAccess::sysread(void* buffer, unsigned long length, m_off_t offset, bool* cretry)
+{
+    // Keeps logic simple.
+    if (!cretry)
+        cretry = &retry;
+
+    // Perform the read.
+    auto result = ::mega::sysread(fd, buffer, length, offset, cretry, &errorcode);
+
+    // Read failed.
+    if (result < 0)
+        return false;
+
+    // Read was successful if all bytes were read.
+    return static_cast<unsigned long>(result) == length;
 }
 
 void PosixFileAccess::fclose()
@@ -896,6 +919,11 @@ bool PosixFileAccess::fopen(const LocalPath& f,
     }
 
     return false;
+}
+
+AutoFileHandle PosixFileAccess::dupFileDescriptor()
+{
+    return dup(fd);
 }
 
 std::string FileSystemAccess::getErrorMessage(int error)
@@ -2827,6 +2855,5 @@ m_off_t PosixFileSystemAccess::availableDiskSpace(const LocalPath& drivePath)
 
     return (m_off_t)availableBytes;
 }
-
 } // namespace
 

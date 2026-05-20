@@ -14,7 +14,6 @@ target_sources(SDKlib PRIVATE
                       include/mega/file_service/file_context_forward.h
                       include/mega/file_service/file_context_pointer.h
                       include/mega/file_service/file_event.h
-                      include/mega/file_service/file_event_emitter_forward.h
                       include/mega/file_service/file_event_forward.h
                       include/mega/file_service/file_event_observer.h
                       include/mega/file_service/file_event_observer_id.h
@@ -56,6 +55,8 @@ target_sources(SDKlib PRIVATE
                       include/mega/file_service/file_service_result_forward.h
                       include/mega/file_service/file_service_result_or.h
                       include/mega/file_service/file_service_result_or_forward.h
+                      include/mega/file_service/file_stream_result.h
+                      include/mega/file_service/file_stream_result_forward.h
                       include/mega/file_service/file_touch_event.h
                       include/mega/file_service/file_touch_event_forward.h
                       include/mega/file_service/file_truncate_event.h
@@ -67,6 +68,8 @@ target_sources(SDKlib PRIVATE
                       include/mega/file_service/sink_forward.h
                       include/mega/file_service/source.h
                       include/mega/file_service/source_forward.h
+                      include/mega/file_service/storage_info.h
+                      include/mega/file_service/utility.h
 )
 
 target_sources(SDKlib PRIVATE
@@ -100,18 +103,14 @@ target_sources(SDKlib PRIVATE
                       src/file_service/mega/file_service/file_info_context.h
                       src/file_service/mega/file_service/file_info_context_badge.h
                       src/file_service/mega/file_service/file_info_context_badge_forward.h
-                      src/file_service/mega/file_service/file_range_context.h
-                      src/file_service/mega/file_service/file_range_context_forward.h
-                      src/file_service/mega/file_service/file_range_context_manager.h
-                      src/file_service/mega/file_service/file_range_context_manager_forward.h
-                      src/file_service/mega/file_service/file_range_context_pointer.h
-                      src/file_service/mega/file_service/file_range_context_pointer_map.h
                       src/file_service/mega/file_service/file_range_map.h
                       src/file_service/mega/file_service/file_range_set.h
                       src/file_service/mega/file_service/file_range_traits.h
                       src/file_service/mega/file_service/file_range_tree.h
+                      src/file_service/mega/file_service/file_range_tree_forward.h
                       src/file_service/mega/file_service/file_range_tree_node.h
                       src/file_service/mega/file_service/file_range_tree_traits.h
+                      src/file_service/mega/file_service/file_range_tree_utilities.h
                       src/file_service/mega/file_service/file_read_request.h
                       src/file_service/mega/file_service/file_read_request_forward.h
                       src/file_service/mega/file_service/file_read_request_set.h
@@ -155,7 +154,6 @@ target_sources(SDKlib PRIVATE
                       src/file_service/file_info.cpp
                       src/file_service/file_info_context.cpp
                       src/file_service/file_range.cpp
-                      src/file_service/file_range_context.cpp
                       src/file_service/file_read_request_set.cpp
                       src/file_service/file_read_write_state.cpp
                       src/file_service/file_result.cpp
@@ -167,4 +165,5 @@ target_sources(SDKlib PRIVATE
                       src/file_service/logger.cpp
                       src/file_service/memory_buffer.cpp
                       src/file_service/sparse_file_buffer.cpp
+                      src/file_service/utility.cpp
 )

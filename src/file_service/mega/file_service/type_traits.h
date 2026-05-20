@@ -145,15 +145,16 @@ using RemoveCVRef = std::remove_cv<std::remove_reference_t<Type>>;
 template<typename Type>
 using RemoveCVRefT = typename RemoveCVRef<Type>::type;
 
-// Return first value from a pair.
-struct SelectFirst
+// Return the specified value from a pair or tuple.
+template<std::size_t Index>
+struct Select
 {
     template<typename T>
     auto&& operator()(T&& value) const
     {
-        return std::get<0>(std::forward<T>(value));
+        return std::get<Index>(std::forward<T>(value));
     }
-}; // SelectFirst
+}; // Select<Index>
 
 } // file_service
 } // mega

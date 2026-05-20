@@ -50,9 +50,19 @@ std::uint64_t FileInfo::allocatedSize() const
     return mContext->allocatedSize();
 }
 
+std::optional<std::uint64_t> FileInfo::bitrate() const
+{
+    return mContext->bitrate();
+}
+
 bool FileInfo::dirty() const
 {
     return mContext->dirty();
+}
+
+std::optional<std::uint32_t> FileInfo::duration() const
+{
+    return mContext->duration();
 }
 
 NodeHandle FileInfo::handle() const

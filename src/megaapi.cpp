@@ -1278,6 +1278,11 @@ const MegaDiscountCodeInfo* MegaRequest::getMegaDiscountCodeInfo() const
     return nullptr;
 }
 
+const MegaFileServiceReclaimOptions* MegaRequest::getMegaFileServiceReclaimOptions() const
+{
+    return nullptr;
+}
+
 MegaTransfer::~MegaTransfer() { }
 
 MegaTransfer *MegaTransfer::copy()
@@ -5056,15 +5061,9 @@ bool MegaApi::httpServerIsSubtitlesSupportEnabled()
     return pImpl->httpServerIsSubtitlesSupportEnabled();
 }
 
-void MegaApi::httpServerAddListener(MegaTransferListener *listener)
-{
-    pImpl->httpServerAddListener(listener);
-}
+void MegaApi::httpServerAddListener(MegaTransferListener*) {}
 
-void MegaApi::httpServerRemoveListener(MegaTransferListener *listener)
-{
-    pImpl->httpServerRemoveListener(listener);
-}
+void MegaApi::httpServerRemoveListener(MegaTransferListener*) {}
 
 char *MegaApi::httpServerGetLocalLink(MegaNode *node)
 {
@@ -5114,6 +5113,16 @@ void MegaApi::httpServerSetMaxOutputSize(int outputSize)
 int MegaApi::httpServerGetMaxOutputSize()
 {
     return pImpl->httpServerGetMaxOutputSize();
+}
+
+void MegaApi::httpServerSetThrottleBitrate(unsigned long long bitrateBps)
+{
+    pImpl->httpServerSetThrottleBitrate(bitrateBps);
+}
+
+unsigned long long MegaApi::httpServerGetThrottleBitrate()
+{
+    return pImpl->httpServerGetThrottleBitrate();
 }
 
 //FTP Server:
@@ -6429,6 +6438,28 @@ void MegaApi::getSubscriptionCancellationDetails(unsigned int gatewayId,
 void MegaApi::getDiscountCodeInformation(const char* discountCode, MegaRequestListener* listener)
 {
     pImpl->getDiscountCodeInformation(discountCode, listener);
+}
+
+MegaFileServiceReclaimOptions* MegaApi::fileServiceGetReclaimOptions()
+{
+    return pImpl->fileServiceGetReclaimOptions();
+}
+
+void MegaApi::fileServiceSetReclaimOptions(const MegaFileServiceReclaimOptions* options)
+{
+    pImpl->fileServiceSetReclaimOptions(options);
+}
+
+void MegaApi::fileServiceReclaim(const MegaFileServiceReclaimOptions* options,
+                                 MegaRequestListener* listener)
+{
+    pImpl->fileServiceReclaim(options, listener);
+}
+
+MegaFileServiceStorageInfo*
+    MegaApi::fileServiceGetStorageInfo(const MegaFileServiceReclaimOptions* options)
+{
+    return pImpl->fileServiceGetStorageInfo(options);
 }
 
 /* END MEGAAPI */
@@ -8911,4 +8942,17 @@ double MegaDiscountCodeInfo::getLocalDiscountedMonthlyPriceNet() const
 {
     return 0;
 }
+
+MegaFileServiceReclaimOptions::MegaFileServiceReclaimOptions() = default;
+
+MegaFileServiceReclaimOptions::~MegaFileServiceReclaimOptions() = default;
+
+MegaFileServiceReclaimOptions* MegaFileServiceReclaimOptions::create()
+{
+    return new MegaFileServiceReclaimOptionsPrivate();
+}
+
+MegaFileServiceStorageInfo::MegaFileServiceStorageInfo() = default;
+
+MegaFileServiceStorageInfo::~MegaFileServiceStorageInfo() = default;
 }

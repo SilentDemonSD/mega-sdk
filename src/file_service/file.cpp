@@ -11,10 +11,12 @@
 #include <mega/file_service/file_result.h>
 #include <mega/file_service/file_result_or.h>
 #include <mega/file_service/file_service_context_badge.h>
+#include <mega/file_service/file_service_options.h>
 #include <mega/file_service/file_touch_request.h>
 #include <mega/file_service/file_truncate_request.h>
 #include <mega/file_service/file_write_request.h>
 #include <mega/file_service/logger.h>
+#include <mega/file_service/source.h>
 
 #include <utility>
 
@@ -28,8 +30,6 @@ File::File(FileServiceContextBadge, FileContextPtr context):
     mContext(std::move(context))
 {}
 
-File::~File() = default;
-
 File::File(const File& other):
     mInstanceLogger("File", *this, logger()),
     mContext(other.mContext)
@@ -39,6 +39,19 @@ File::File(File&& other):
     mInstanceLogger("File", *this, logger()),
     mContext(std::exchange(other.mContext, nullptr))
 {}
+
+File::~File()
+{
+    // File has no context to pin in memory.
+    if (!mContext)
+        return;
+
+    // Convenience.
+    auto options = mContext->serviceOptions();
+
+    // Pin the context in memory for a time.
+    mContext->pinFor(options.mFileContextReleaseDelay);
+}
 
 File& File::operator=(const File& rhs)
 {
@@ -72,6 +85,20 @@ void File::append(const void* buffer, FileAppendCallback callback, std::uint64_t
     assert(mContext);
 
     return mContext->append(FileAppendRequest{buffer, std::move(callback), length});
+}
+
+FileRangeVector File::downloading() const
+{
+    assert(mContext);
+
+    return mContext->downloading();
+}
+
+AutoFileHandle File::dupFileDescriptor()
+{
+    assert(mContext);
+
+    return mContext->dupFileDescriptor();
 }
 
 void File::fetch(FileFetchCallback callback)
@@ -120,20 +147,23 @@ FileRangeVector File::ranges() const
     return mContext->ranges();
 }
 
-void File::read(FileReadCallback callback, std::uint64_t offset, std::uint64_t length)
+void File::read(FileReadCallback callback,
+                std::uint64_t offset,
+                std::uint64_t length,
+                bool isJumpCandidate)
 {
     assert(callback);
     assert(mContext);
 
-    read(std::move(callback), FileRange(offset, offset + length));
+    read(std::move(callback), FileRange(offset, offset + length), isJumpCandidate);
 }
 
-void File::read(FileReadCallback callback, const FileRange& range)
+void File::read(FileReadCallback callback, const FileRange& range, bool isJumpCandidate)
 {
     assert(callback);
     assert(mContext);
 
-    mContext->read(FileReadRequest{std::move(callback), range});
+    mContext->read(FileReadRequest{std::move(callback), range, isJumpCandidate});
 }
 
 void File::reclaim(FileReclaimCallback callback)
