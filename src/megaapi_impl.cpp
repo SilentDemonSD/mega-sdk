@@ -40242,13 +40242,12 @@ MegaEventPrivate::MegaEventPrivate(MegaEventPrivate *event)
     this->setText(event->getText());
     this->setNumber(event->getNumber());
     this->setHandle(event->getHandle());
-    mIntegerList = event->mIntegerList ? event->mIntegerList->copy() : nullptr;
+    mIntegerList.reset(event->mIntegerList ? event->mIntegerList->copy() : nullptr);
 }
 
 MegaEventPrivate::~MegaEventPrivate()
 {
-    delete [] text;
-    delete mIntegerList;
+    delete[] text;
 }
 
 MegaEvent *MegaEventPrivate::copy()
@@ -40306,13 +40305,12 @@ MegaHandle MegaEventPrivate::getHandle() const
 
 MegaIntegerList* MegaEventPrivate::getIntegerList() const
 {
-    return mIntegerList;
+    return mIntegerList.get();
 }
 
 void MegaEventPrivate::setIntegerList(MegaIntegerList* integerList)
 {
-    delete mIntegerList;
-    mIntegerList = integerList;
+    mIntegerList.reset(integerList);
 }
 
 const char *MegaEventPrivate::getEventString() const

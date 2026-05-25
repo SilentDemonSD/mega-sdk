@@ -2367,7 +2367,7 @@ protected:
     int64_t number = -1;
     std::map<std::string, int64_t> numberMap;
     MegaHandle mHandle = INVALID_HANDLE;
-    MegaIntegerList* mIntegerList = nullptr;
+    std::unique_ptr<MegaIntegerList> mIntegerList;
 };
 
 class MegaAccountBalancePrivate : public MegaAccountBalance
