@@ -611,7 +611,7 @@ TEST_F(SdkTestTransfersResumedEvent, event_fired_with_resumed_upload_ids)
     MegaUploadOptions opts;
     opts.mtime = MegaApi::INVALID_CUSTOM_MOD_TIME;
     for (int i = 0; i < NUM_FILES; ++i)
-        megaApi[0]->startUpload(localFiles[i].getPath().string().c_str(),
+        megaApi[0]->startUpload(localFiles[static_cast<size_t>(i)].getPath().string().c_str(),
                                 rootNode.get(),
                                 nullptr,
                                 &opts,
@@ -697,8 +697,8 @@ TEST_F(SdkTestTransfersResumedEvent, event_covers_uploads_and_downloads)
                               FILE_SIZE);
         ASSERT_EQ(API_OK,
                   doStartUpload(0,
-                                &nodeHandles[i],
-                                srcFiles[i].getPath().string().c_str(),
+                                &nodeHandles[static_cast<size_t>(i)],
+                                srcFiles[static_cast<size_t>(i)].getPath().string().c_str(),
                                 rootNode.get(),
                                 nullptr,
                                 MegaApi::INVALID_CUSTOM_MOD_TIME,
@@ -707,8 +707,8 @@ TEST_F(SdkTestTransfersResumedEvent, event_covers_uploads_and_downloads)
                                 false,
                                 nullptr))
             << "Failed to upload source file " << i;
-        ASSERT_NE(UNDEF, nodeHandles[i]);
-        mNodesToDelete.push_back(nodeHandles[i]);
+        ASSERT_NE(UNDEF, nodeHandles[static_cast<size_t>(i)]);
+        mNodesToDelete.push_back(nodeHandles[static_cast<size_t>(i)]);
     }
 
     // Pause both directions before queuing so all transfers are saved to DB.
@@ -725,7 +725,7 @@ TEST_F(SdkTestTransfersResumedEvent, event_covers_uploads_and_downloads)
         uploadFiles.emplace_back(fs::current_path() /
                                      (getFilePrefix() + "up_" + std::to_string(i) + ".bin"),
                                  FILE_SIZE);
-        megaApi[0]->startUpload(uploadFiles[i].getPath().string().c_str(),
+        megaApi[0]->startUpload(uploadFiles[static_cast<size_t>(i)].getPath().string().c_str(),
                                 rootNode.get(),
                                 nullptr,
                                 &opts,
@@ -736,7 +736,8 @@ TEST_F(SdkTestTransfersResumedEvent, event_covers_uploads_and_downloads)
     sdk_test::LocalTempDir downloadDir(fs::current_path() / (getFilePrefix() + "dl"));
     for (int i = 0; i < NUM_EACH; ++i)
     {
-        auto node = std::unique_ptr<MegaNode>{megaApi[0]->getNodeByHandle(nodeHandles[i])};
+        auto node = std::unique_ptr<MegaNode>{
+            megaApi[0]->getNodeByHandle(nodeHandles[static_cast<size_t>(i)])};
         ASSERT_TRUE(node);
         megaApi[0]->startDownload(
             node.get(),
