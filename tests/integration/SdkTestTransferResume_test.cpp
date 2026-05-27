@@ -611,13 +611,16 @@ TEST_F(SdkTestTransfersResumedEvent, event_fired_with_resumed_upload_ids)
     MegaUploadOptions opts;
     opts.mtime = MegaApi::INVALID_CUSTOM_MOD_TIME;
     for (int i = 0; i < NUM_FILES; ++i)
-        megaApi[0]->startUpload(localFiles[static_cast<size_t>(i)].getPath().string().c_str(),
+        megaApi[0]->startUpload(localFiles[i].getPath().string().c_str(),
                                 rootNode.get(),
                                 nullptr,
                                 &opts,
                                 nullptr);
 
-    ASSERT_TRUE(waitForTransferCount(megaApi[0].get(), MegaTransfer::TYPE_UPLOAD, NUM_FILES))
+    ASSERT_TRUE(waitForTransferCount(megaApi[0].get(),
+                                     MegaTransfer::TYPE_UPLOAD,
+                                     NUM_FILES,
+                                     defaultTimeoutMs))
         << "Uploads did not appear in the queue within timeout";
 
     // Simulate app restart.
@@ -637,13 +640,16 @@ TEST_F(SdkTestTransfersResumedEvent, event_fired_with_resumed_upload_ids)
         {
             return mListener.firedCount() >= 1;
         },
-        30000))
+        defaultTimeoutMs))
         << "EVENT_TRANSFERS_RESUMED was not fired after session restart";
 
     EXPECT_EQ(mListener.firedCount(), 1) << "EVENT_TRANSFERS_RESUMED must fire exactly once";
 
     // Wait for the resumed transfers to appear in the queue.
-    ASSERT_TRUE(waitForTransferCount(megaApi[0].get(), MegaTransfer::TYPE_UPLOAD, NUM_FILES))
+    ASSERT_TRUE(waitForTransferCount(megaApi[0].get(),
+                                     MegaTransfer::TYPE_UPLOAD,
+                                     NUM_FILES,
+                                     defaultTimeoutMs))
         << "Resumed uploads did not appear within timeout";
 
     const auto eventIds = mListener.ids();
@@ -697,8 +703,8 @@ TEST_F(SdkTestTransfersResumedEvent, event_covers_uploads_and_downloads)
                               FILE_SIZE);
         ASSERT_EQ(API_OK,
                   doStartUpload(0,
-                                &nodeHandles[static_cast<size_t>(i)],
-                                srcFiles[static_cast<size_t>(i)].getPath().string().c_str(),
+                                &nodeHandles[i],
+                                srcFiles[i].getPath().string().c_str(),
                                 rootNode.get(),
                                 nullptr,
                                 MegaApi::INVALID_CUSTOM_MOD_TIME,
@@ -707,8 +713,8 @@ TEST_F(SdkTestTransfersResumedEvent, event_covers_uploads_and_downloads)
                                 false,
                                 nullptr))
             << "Failed to upload source file " << i;
-        ASSERT_NE(UNDEF, nodeHandles[static_cast<size_t>(i)]);
-        mNodesToDelete.push_back(nodeHandles[static_cast<size_t>(i)]);
+        ASSERT_NE(UNDEF, nodeHandles[i]);
+        mNodesToDelete.push_back(nodeHandles[i]);
     }
 
     // Pause both directions before queuing so all transfers are saved to DB.
@@ -725,7 +731,7 @@ TEST_F(SdkTestTransfersResumedEvent, event_covers_uploads_and_downloads)
         uploadFiles.emplace_back(fs::current_path() /
                                      (getFilePrefix() + "up_" + std::to_string(i) + ".bin"),
                                  FILE_SIZE);
-        megaApi[0]->startUpload(uploadFiles[static_cast<size_t>(i)].getPath().string().c_str(),
+        megaApi[0]->startUpload(uploadFiles[i].getPath().string().c_str(),
                                 rootNode.get(),
                                 nullptr,
                                 &opts,
@@ -736,8 +742,7 @@ TEST_F(SdkTestTransfersResumedEvent, event_covers_uploads_and_downloads)
     sdk_test::LocalTempDir downloadDir(fs::current_path() / (getFilePrefix() + "dl"));
     for (int i = 0; i < NUM_EACH; ++i)
     {
-        auto node = std::unique_ptr<MegaNode>{
-            megaApi[0]->getNodeByHandle(nodeHandles[static_cast<size_t>(i)])};
+        auto node = std::unique_ptr<MegaNode>{megaApi[0]->getNodeByHandle(nodeHandles[i])};
         ASSERT_TRUE(node);
         megaApi[0]->startDownload(
             node.get(),
@@ -761,7 +766,7 @@ TEST_F(SdkTestTransfersResumedEvent, event_covers_uploads_and_downloads)
                 megaApi[0]->getTransfers(MegaTransfer::TYPE_DOWNLOAD)};
             return ul && dl && ul->size() == NUM_EACH && dl->size() == NUM_EACH;
         },
-        30000))
+        defaultTimeoutMs))
         << "Transfers did not appear in the queue within timeout";
 
     // Simulate restart.
@@ -780,7 +785,7 @@ TEST_F(SdkTestTransfersResumedEvent, event_covers_uploads_and_downloads)
         {
             return mListener.firedCount() >= 1;
         },
-        30000))
+        defaultTimeoutMs))
         << "EVENT_TRANSFERS_RESUMED was not fired after session restart";
 
     EXPECT_EQ(mListener.firedCount(), 1) << "EVENT_TRANSFERS_RESUMED must fire exactly once";
@@ -799,7 +804,7 @@ TEST_F(SdkTestTransfersResumedEvent, event_covers_uploads_and_downloads)
                 megaApi[0]->getTransfers(MegaTransfer::TYPE_DOWNLOAD)};
             return ul && dl && ul->size() == NUM_EACH && dl->size() == NUM_EACH;
         },
-        30000))
+        defaultTimeoutMs))
         << "Resumed transfers did not appear within timeout";
 
     auto allQueueIds = collectUniqueIds(megaApi[0].get(), MegaTransfer::TYPE_UPLOAD);
