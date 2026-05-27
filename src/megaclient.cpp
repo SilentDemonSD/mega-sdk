@@ -1999,7 +1999,8 @@ MegaClient::MegaClient(MegaApp* a,
     mClientType(clientType),
     mJourneyId(),
     mClientAdapter(*this),
-    mFileService(),
+    mPublicClientAdapter(*this),
+    mFileService(mPublicClientAdapter),
     mFuseService(mClientAdapter)
 {
 #ifdef __ANDROID__
@@ -3524,6 +3525,7 @@ void MegaClient::exec()
 
         // Dispatch client-side requests.
         mClientAdapter.dispatch();
+        mPublicClientAdapter.dispatch();
 
         notifypurge();
 

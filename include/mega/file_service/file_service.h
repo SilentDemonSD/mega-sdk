@@ -49,8 +49,17 @@ class FileService
     // Serializes access to mServiceOptions.
     common::SharedMutex mServiceOptionsLock;
 
+    // A client that used when SDK is not logged in, when there is no session id
+    common::Client& mPublicClient;
+
+    // Whether the initialize() has been called
+    bool mInitialized{false};
+
+    // Construct the file service using mPublicClient
+    auto construct() -> FileServiceResult;
+
 public:
-    FileService();
+    FileService(common::Client& publicClient);
 
     ~FileService();
 

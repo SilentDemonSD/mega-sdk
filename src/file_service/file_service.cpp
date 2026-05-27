@@ -1,3 +1,4 @@
+#include <mega/common/client_adapter.h>
 #include <mega/common/lock.h>
 #include <mega/file_service/file.h>
 #include <mega/file_service/file_id.h>
@@ -18,17 +19,26 @@ namespace file_service
 
 using namespace common;
 
-FileService::FileService():
+FileService::FileService(common::Client& publicClient):
     mInstanceLogger("FileService", *this, logger()),
     mContext(),
     mContextLock(),
     mReclaimOptions(),
     mReclaimOptionsLock(),
     mServiceOptions(),
-    mServiceOptionsLock()
-{}
+    mServiceOptionsLock(),
+    mPublicClient(publicClient),
+    mInitialized(false)
+{
+    construct();
+}
 
-FileService::~FileService() = default;
+FileService::~FileService()
+{
+    mPublicClient.deinitialize();
+
+    mContext.reset();
+}
 
 auto FileService::add(NodeHandle handle,
                       const NodeKeyData& keyData,
@@ -51,6 +61,32 @@ auto FileService::addObserver(FileEventObserver observer)
         return mContext->addObserver(std::move(observer));
 
     return unexpected(FILE_SERVICE_UNINITIALIZED);
+}
+
+auto FileService::construct() -> FileServiceResult
+try
+{
+    if (mContext)
+    {
+        FSError1("File Service has already been constructed");
+
+        return FILE_SERVICE_ALREADY_INITIALIZED;
+    }
+
+    mContext = std::make_unique<FileServiceContext>(mPublicClient, *this);
+
+    // Always clean cache on destruction
+    mContext->cleanCacheOnDestruction();
+
+    FSInfo1("File Service constructed");
+
+    return FILE_SERVICE_SUCCESS;
+}
+catch (std::runtime_error& exception)
+{
+    FSErrorF("Unable to construct File Service: %s", exception.what());
+
+    return FILE_SERVICE_UNEXPECTED;
 }
 
 auto FileService::create(NodeHandle parent, const std::string& name) -> FileServiceResultOr<File>
@@ -81,12 +117,22 @@ void FileService::deinitialize(bool cleanCache)
     if (!mContext)
         return;
 
+    // Not initialized
+    if (!mInitialized)
+        return;
+
     // Caller wants to clean the service's cache.
     if (cleanCache)
         mContext->cleanCacheOnDestruction();
 
     // Destroy the service's context.
     mContext.reset();
+
+    // Reconstruct a context using public client
+    construct();
+
+    // Not initialized anymore
+    mInitialized = false;
 }
 
 auto FileService::info(FileID id) -> FileServiceResultOr<FileInfo>
@@ -148,12 +194,14 @@ try
 {
     UniqueLock guard(mContextLock);
 
-    if (mContext)
+    if (mInitialized)
     {
         FSError1("File Service has already been initialized");
 
         return FILE_SERVICE_ALREADY_INITIALIZED;
     }
+
+    mInitialized = true;
 
     mContext = std::make_unique<FileServiceContext>(client, *this);
 
@@ -163,6 +211,8 @@ try
 }
 catch (std::runtime_error& exception)
 {
+    mInitialized = false;
+
     FSErrorF("Unable to initialize File Service: %s", exception.what());
 
     return FILE_SERVICE_UNEXPECTED;

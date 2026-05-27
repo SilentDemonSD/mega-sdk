@@ -41,6 +41,8 @@ using namespace ::mega;
 using namespace ::std;
 using ::mega::common::testing::randomBytes;
 
+extern std::string megaApiCacheFolder(int index);
+
 namespace
 {
 
@@ -69,6 +71,133 @@ std::string extractEndpointFromUrl(const std::string& url)
 
 class SdkHttpServerTest: public SdkServerTest
 {};
+
+class SdkHttpServerLinkTest: public SdkServerTest
+{
+protected:
+    void SetUp() override;
+
+    std::unique_ptr<MegaApiTest> makeNonLoginApi()
+    {
+        auto api = std::make_unique<MegaApiTest>(APP_KEY.c_str(),
+                                                 megaApiCacheFolder(1).c_str(),
+                                                 USER_AGENT.c_str(),
+                                                 unsigned(THREADS_PER_MEGACLIENT));
+        api->addListener(this);
+        return api;
+    }
+
+    void runPublicFileLinkTest(MegaApi* api, const std::string& publicLink)
+    {
+        RequestTracker rt(api);
+        api->getPublicNode(publicLink.c_str(), &rt);
+        EXPECT_EQ(API_OK, rt.waitForResult());
+
+        auto server = scopedHttpServer(api);
+        ASSERT_TRUE(server);
+
+        std::unique_ptr<char[]> link(api->httpServerGetLocalLink(rt.getPublicMegaNode().get()));
+        ASSERT_NE(link, nullptr);
+
+        auto response = HttpClient::get(link.get(), "1-5");
+        EXPECT_EQ(206, response.statusCode);
+        EXPECT_EQ(5, response.body.size());
+    }
+
+    void runPublicFolderLinkTest(MegaApi* api, const std::string& publicLink)
+    {
+        auto rt = asyncRequestLoginToFolder(api, publicLink.c_str());
+        ASSERT_EQ(API_OK, rt->waitForResult());
+
+        rt = asyncRequestFetchnodes(api);
+        ASSERT_EQ(API_OK, rt->waitForResult());
+
+        auto server = scopedHttpServer(api);
+        ASSERT_TRUE(server);
+
+        std::unique_ptr<MegaNode> root{api->getRootNode()};
+        ASSERT_TRUE(root);
+
+        std::unique_ptr<MegaNodeList> children{api->getChildren(root.get())};
+        ASSERT_GE(children->size(), 1);
+
+        std::unique_ptr<char[]> link(api->httpServerGetLocalLink(children->get(0)));
+        ASSERT_NE(link, nullptr);
+
+        auto response = HttpClient::get(link.get(), "1-5");
+        EXPECT_EQ(206, response.statusCode);
+        EXPECT_EQ(5, response.body.size());
+    }
+
+    void runPublicSetTest(MegaApi* api, const std::string& setLink)
+    {
+        RequestTracker fetchRt(api);
+        api->fetchPublicSet(setLink.c_str(), &fetchRt);
+        ASSERT_EQ(API_OK, fetchRt.waitForResult());
+
+        std::unique_ptr<MegaSetElementList> sel{fetchRt.request->getMegaSetElementList()->copy()};
+        ASSERT_TRUE(sel);
+        ASSERT_EQ(sel->size(), 1);
+
+        RequestTracker previewRt(api);
+        api->getPreviewElementNode(sel->get(0)->id(), &previewRt);
+        ASSERT_EQ(API_OK, previewRt.waitForResult()) << "getPreviewElementNode fails";
+        std::unique_ptr<MegaNode> elementNode{previewRt.request->getPublicMegaNode()};
+        ASSERT_TRUE(elementNode);
+
+        auto server = scopedHttpServer(api);
+        ASSERT_TRUE(server);
+
+        std::unique_ptr<char[]> link(api->httpServerGetLocalLink(elementNode.get()));
+        ASSERT_NE(link, nullptr);
+
+        auto response = HttpClient::get(link.get(), "1-5");
+        EXPECT_EQ(206, response.statusCode);
+        EXPECT_EQ(5, response.body.size());
+    }
+
+    std::string createSetLink()
+    {
+        MegaSet* newSet = nullptr;
+        if (doCreateSet(0, &newSet, "test", MegaSet::SET_TYPE_ALBUM) != API_OK)
+        {
+            return "";
+        }
+        const unique_ptr<MegaSet> s1p(newSet);
+        const MegaHandle sh = s1p->id();
+
+        MegaSetElementList* newElls = nullptr;
+        if (doCreateSetElement(0, &newElls, sh, mFileNode->getHandle(), /*name=*/nullptr) != API_OK)
+        {
+            return "";
+        }
+
+        MegaSet* exportedSet = nullptr;
+        string exportedSetURL;
+        if (doExportSet(0, &exportedSet, exportedSetURL, sh) != API_OK)
+        {
+            return "";
+        }
+        unique_ptr<MegaSet> s1pEnabledExport(exportedSet);
+        return exportedSetURL;
+    }
+
+    unique_ptr<MegaNode> mFolderNode;
+
+    unique_ptr<MegaNode> mFileNode;
+};
+
+void SdkHttpServerLinkTest::SetUp()
+{
+    SdkServerTest::SetUp();
+    ASSERT_NO_FATAL_FAILURE(SdkTest::getAccountsForTest(2));
+
+    mFolderNode = createFolder(0, "folder");
+    ASSERT_TRUE(mFolderNode);
+
+    mFileNode = uploadFile(0, "file.txt", "0123456789", mFolderNode.get());
+    ASSERT_TRUE(mFileNode);
+}
 
 TEST_F(SdkHttpServerTest, HttpServerStartStop)
 {
@@ -389,7 +518,6 @@ TEST_F(SdkHttpServerTest, BasicGet)
     EXPECT_EQ(200, response.statusCode);
     EXPECT_EQ(testFileContent, response.body);
 }
-
 /**
  * Test basic HTTP server rate limit with GET request.
  */
@@ -1296,5 +1424,91 @@ TEST_F(SdkHttpServerTest, FolderWithFiles)
     // HEAD request
     auto headResponse = HttpClient::head(url);
     EXPECT_EQ(200, headResponse.statusCode);
+}
+
+TEST_F(SdkHttpServerLinkTest, LoginClientPublicFileLink)
+{
+    CASE_info << "started";
+
+    const std::string fileLink = createPublicLink(0, mFileNode.get(), 0, maxTimeout, true);
+    ASSERT_FALSE(fileLink.empty());
+
+    auto& api = megaApi[1];
+
+    auto rt = std::make_unique<RequestTracker>(api.get());
+    api->getPublicNode(fileLink.c_str(), rt.get());
+    EXPECT_EQ(API_OK, rt->waitForResult()) << "Public link retrieval failed";
+    auto server = scopedHttpServer(api.get());
+    ASSERT_TRUE(server);
+    std::unique_ptr<char[]> link(api->httpServerGetLocalLink(rt->getPublicMegaNode().get()));
+    ASSERT_NE(link, nullptr);
+    std::string url = link.get();
+
+    auto response = HttpClient::get(url, "1-5");
+    EXPECT_EQ(206, response.statusCode);
+    EXPECT_EQ(5, response.body.size());
+
+    CASE_info << "finished";
+}
+
+TEST_F(SdkHttpServerLinkTest, NonLoginClientPublicFileLink)
+{
+    CASE_info << "started";
+
+    const std::string fileLink = createPublicLink(0, mFileNode.get(), 0, maxTimeout, true);
+    ASSERT_FALSE(fileLink.empty());
+
+    auto api = makeNonLoginApi();
+    ASSERT_NO_FATAL_FAILURE(runPublicFileLinkTest(api.get(), fileLink));
+
+    CASE_info << "finished";
+}
+
+TEST_F(SdkHttpServerLinkTest, LoginClientPublicFolderLink)
+{
+    CASE_info << "started";
+
+    const std::string folderLink = createPublicLink(0, mFolderNode.get(), 0, maxTimeout, true);
+    ASSERT_FALSE(folderLink.empty());
+    ASSERT_NO_FATAL_FAILURE(runPublicFolderLinkTest(megaApi[1].get(), folderLink));
+
+    CASE_info << "finished";
+}
+
+TEST_F(SdkHttpServerLinkTest, NonLoginClientPublicFolderLink)
+{
+    CASE_info << "started";
+
+    const std::string folderLink = createPublicLink(0, mFolderNode.get(), 0, maxTimeout, true);
+    ASSERT_FALSE(folderLink.empty());
+    auto api = makeNonLoginApi();
+    ASSERT_NO_FATAL_FAILURE(runPublicFolderLinkTest(api.get(), folderLink));
+
+    CASE_info << "finished";
+}
+
+TEST_F(SdkHttpServerLinkTest, LoginClientPublicSet)
+{
+    CASE_info << "started";
+
+    auto exportedSetURL = createSetLink();
+    ASSERT_FALSE(exportedSetURL.empty());
+
+    ASSERT_NO_FATAL_FAILURE(runPublicSetTest(megaApi[1].get(), exportedSetURL));
+
+    CASE_info << "finished";
+}
+
+TEST_F(SdkHttpServerLinkTest, NonLoginClientPublicSet)
+{
+    CASE_info << "started";
+
+    auto exportedSetURL = createSetLink();
+    ASSERT_FALSE(exportedSetURL.empty());
+
+    auto api = makeNonLoginApi();
+    ASSERT_NO_FATAL_FAILURE(runPublicSetTest(api.get(), exportedSetURL));
+
+    CASE_info << "finished";
 }
 }
