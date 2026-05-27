@@ -970,7 +970,11 @@ struct UnicodeCodepointIteratorTraits<wchar_t>
         }
 
         // Code point is encoded by a single code unit.
-        codepoint = *m;
+        //
+        // If wchar_t is 16-bit signed, L'\xFFFF' is stored as -1.
+        //   static_cast<int32_t>(*m) -> -1 (incorrect)
+        //   static_cast<int32_t>(static_cast<std::make_unsigned_t<wchar_t>>(*m)) -> 0xFFFF
+        codepoint = static_cast<int32_t>(static_cast<std::make_unsigned_t<wchar_t>>(*m));
 
         return 1;
     }
