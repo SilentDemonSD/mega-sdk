@@ -1004,11 +1004,13 @@ void FileServiceContext::updated(NodeEventQueue& events)
     EventProcessor (*this)(events);
 }
 
-FileServiceContext::FileServiceContext(Client& client, FileService& service):
+FileServiceContext::FileServiceContext(Client& client,
+                                       FileService& service,
+                                       const UserStoragePath& userStoragePath):
     NodeEventObserver(),
     mInstanceLogger("FileServiceContext", *this, logger()),
     mClient(client),
-    mStorage(mClient),
+    mStorage(userStoragePath),
     mDatabase(createDatabase(mStorage.databasePath())),
     mQueries(mDatabase),
     mCacheCleaner(),

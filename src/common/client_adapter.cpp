@@ -1166,9 +1166,8 @@ void ClientAdapter::rename(RenameCallback callback,
 
 std::string ClientAdapter::sessionID() const
 {
-    // Not logged in
-    if (mClient.sid.size() < MegaClient::SIDLEN)
-        return "";
+    // Sanity.
+    assert(mClient.sid.size() >= MegaClient::SIDLEN);
 
     // Extract session ID.
     auto id = mClient.sid.substr(sizeof(mClient.key.key));

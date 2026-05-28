@@ -188,7 +188,9 @@ class FileServiceContext: common::NodeEventObserver
     common::TaskExecutor mExecutor;
 
 public:
-    FileServiceContext(common::Client& client, FileService& service);
+    FileServiceContext(common::Client& client,
+                       FileService& service,
+                       const UserStoragePath& userStoragePath);
 
     ~FileServiceContext();
 

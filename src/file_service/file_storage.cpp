@@ -1,4 +1,3 @@
-#include <mega/common/client.h>
 #include <mega/common/node_info.h>
 #include <mega/file_service/file_id.h>
 #include <mega/file_service/file_storage.h>
@@ -12,42 +11,6 @@ namespace file_service
 {
 
 using namespace common;
-
-class StorageDirectoryNamer
-{
-public:
-    std::string name(const common::Client& client);
-
-private:
-    std::map<LocalPath, uint64_t> mIndexes;
-    std::mutex mMutex;
-};
-
-std::string StorageDirectoryNamer::name(const Client& client)
-{
-    // Logged in Client has sessionID, we use it as storage directory name
-    if (auto id = client.sessionID(); !id.empty())
-        return id;
-
-    // Allow different MegaApi instances to use the same db root. Some APP has this problem.
-    // Each db root path maintains own index. if db root path share one index,
-    // changing the MegaApi creation order may result in a different index to be used.
-    const LocalPath rootPath = client.dbRootPath();
-    uint64_t index = 0;
-    {
-        const std::lock_guard<std::mutex> lock(mMutex);
-        auto [iterator, inserted] = mIndexes.try_emplace(std::move(rootPath), 0);
-        index = iterator->second++;
-    }
-
-    return "public" + std::to_string(index);
-}
-
-static StorageDirectoryNamer& getNamer()
-{
-    static StorageDirectoryNamer namer;
-    return namer;
-}
 
 FileAccessPtr FileStorage::openFile(const LocalPath& path, bool mustCreate)
 {
@@ -74,10 +37,10 @@ FileAccessPtr FileStorage::openFile(const LocalPath& path, bool mustCreate)
     return file;
 }
 
-FileStorage::FileStorage(const Client& client):
+FileStorage::FileStorage(const UserStoragePath& userStoragePath):
     mFilesystem(std::make_unique<FSACCESS_CLASS>()),
-    mStorageDirectory(*mFilesystem, logger(), "file-service", client.dbRootPath()),
-    mUserStorageDirectory(*mFilesystem, logger(), getNamer().name(client), mStorageDirectory),
+    mStorageDirectory(*mFilesystem, logger(), "file-service", userStoragePath.dbRoot),
+    mUserStorageDirectory(*mFilesystem, logger(), userStoragePath.userName, mStorageDirectory),
     mUserCacheDirectory(*mFilesystem, logger(), "cache", mUserStorageDirectory),
     mFolderLocker(mUserCacheDirectory.path().asPlatformEncoded(true))
 {}

@@ -12,6 +12,43 @@
 
 #include <stdexcept>
 
+namespace
+{
+using mega::LocalPath;
+
+class PublicStorageNamer
+{
+public:
+    std::string name(const LocalPath& dbRoot);
+
+private:
+    std::map<LocalPath, uint64_t> mIndexes;
+    std::mutex mMutex;
+};
+
+std::string PublicStorageNamer::name(const LocalPath& dbRoot)
+{
+    // Allow different MegaApi instances to use the same db root. Some APP has this problem.
+    // Each db root path maintains own index. if db root path share one index,
+    // changing the MegaApi creation order may result in a different index to be used.
+    uint64_t index = 0;
+    {
+        const std::lock_guard<std::mutex> lock(mMutex);
+        auto [iterator, inserted] = mIndexes.try_emplace(std::move(dbRoot), 0);
+        index = iterator->second++;
+    }
+
+    return "public" + std::to_string(index);
+}
+
+PublicStorageNamer& getNamer()
+{
+    static PublicStorageNamer namer;
+    return namer;
+}
+
+}
+
 namespace mega
 {
 namespace file_service
@@ -28,7 +65,8 @@ FileService::FileService(common::Client& publicClient):
     mServiceOptions(),
     mServiceOptionsLock(),
     mPublicClient(publicClient),
-    mInitialized(false)
+    mInitialized(false),
+    mPublicStorageName(getNamer().name(publicClient.dbRootPath()))
 {
     construct();
 }
@@ -73,7 +111,10 @@ try
         return FILE_SERVICE_ALREADY_INITIALIZED;
     }
 
-    mContext = std::make_unique<FileServiceContext>(mPublicClient, *this);
+    mContext = std::make_unique<FileServiceContext>(
+        mPublicClient,
+        *this,
+        UserStoragePath{mPublicClient.dbRootPath(), mPublicStorageName});
 
     FSInfo1("File Service constructed");
 
@@ -203,7 +244,10 @@ try
     if (mContext)
         mContext->cleanCacheOnDestruction();
 
-    mContext = std::make_unique<FileServiceContext>(client, *this);
+    mContext = std::make_unique<FileServiceContext>(
+        client,
+        *this,
+        UserStoragePath{client.dbRootPath(), client.sessionID()});
 
     mInitialized = true;
 

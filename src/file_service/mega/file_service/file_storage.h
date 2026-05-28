@@ -1,17 +1,20 @@
 #pragma once
 
-#include <mega/common/client_forward.h>
 #include <mega/common/directory.h>
 #include <mega/common/node_info_forward.h>
 #include <mega/common/platform/folder_locker.h>
 #include <mega/types.h>
 
-#include <optional>
-
 namespace mega
 {
 namespace file_service
 {
+
+struct UserStoragePath
+{
+    LocalPath dbRoot;
+    std::string userName;
+};
 
 class FileStorage
 {
@@ -43,7 +46,7 @@ class FileStorage
     common::platform::FolderLocker mFolderLocker;
 
 public:
-    explicit FileStorage(const common::Client& client);
+    explicit FileStorage(const UserStoragePath& userStoragePath);
 
     ~FileStorage();
 
