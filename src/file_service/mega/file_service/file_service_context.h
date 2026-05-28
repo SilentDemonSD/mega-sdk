@@ -253,7 +253,7 @@ public:
     ReclaimOptions reclaimOptions();
 
     // Let the context know its reclamation options has changed.
-    void reclaimOptionsChanged(const ReclaimOptions& newOptions, const ReclaimOptions& oldOptions);
+    void reclaimOptionsChanged(const ReclaimOptions& newOptions);
 
     // Remove a file context from our index.
     void removeFromIndex(FileContextBadge badge, FileID id);

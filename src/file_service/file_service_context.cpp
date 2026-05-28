@@ -1576,8 +1576,7 @@ ReclaimOptions FileServiceContext::reclaimOptions()
     return mService.reclaimOptions();
 }
 
-void FileServiceContext::reclaimOptionsChanged(const ReclaimOptions& newOptions,
-                                               const ReclaimOptions& oldOptions)
+void FileServiceContext::reclaimOptionsChanged(const ReclaimOptions& newOptions)
 {
     // Acquire task lock.
     UniqueLock taskLock(mReclaimTaskLock);
@@ -1591,15 +1590,11 @@ void FileServiceContext::reclaimOptionsChanged(const ReclaimOptions& newOptions,
     }
 
     // Convenience.
-    auto newPeriod = newOptions.mPeriod;
+    auto delay = newOptions.mDelay;
 
     // Periodic reclamation is already scheduled.
     if (mReclaimTask && !mReclaimTask.completed())
     {
-        // And the caller isn't changing the reclamation period.
-        if (newPeriod == oldOptions.mPeriod)
-            return;
-
         // Leave a trail so we know what we've done.
         FSInfo1("Cancelling reclaim task");
 
@@ -1608,9 +1603,9 @@ void FileServiceContext::reclaimOptionsChanged(const ReclaimOptions& newOptions,
     }
 
     // When should we perform the reclamation?
-    auto when = steady_clock::now() + newPeriod;
+    auto when = steady_clock::now() + delay;
 
-    FSInfoF("Reclaim task is scheduled to execute in %d seconds", newPeriod.count());
+    FSInfoF("Reclaim task is scheduled to execute in %d seconds", delay.count());
 
     // Schedule a reclamation for some time in the future.
     mReclaimTask = mExecutor.execute(std::bind(&FileServiceContext::reclaimTaskCallback,

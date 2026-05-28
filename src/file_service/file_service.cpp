@@ -256,9 +256,6 @@ void FileService::reclaimOptions(const ReclaimOptions& newOptions)
     // Acquire reclaim options lock.
     UniqueLock lockw(mReclaimOptionsLock);
 
-    // Grab a snapshot of our current reclamation options.
-    auto oldOptions = mReclaimOptions;
-
     // Update reclamation options.
     mReclaimOptions = newOptions;
 
@@ -270,7 +267,7 @@ void FileService::reclaimOptions(const ReclaimOptions& newOptions)
 
     // Let the context know it's reclamation options have changed.
     if (mContext)
-        mContext->reclaimOptionsChanged(newOptions, oldOptions);
+        mContext->reclaimOptionsChanged(newOptions);
 }
 
 auto FileService::reclaimOptions() -> ReclaimOptions

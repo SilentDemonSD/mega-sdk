@@ -3360,7 +3360,7 @@ TEST_F(FileServiceTests, reclaim_foreign_file_succeeds)
     EXPECT_EQ(file->info().allocatedSize(), 0u);
 }
 
-TEST_F(FileServiceTests, reclaim_periodic_succeeds)
+TEST_F(FileServiceTests, reclaim_after_delay_succeeds)
 {
     // Convenience.
     using std::chrono::hours;
@@ -3410,7 +3410,7 @@ TEST_F(FileServiceTests, reclaim_periodic_succeeds)
 
     // Enable storage reclamation.
     reclaimOptions.mAgeThreshold = hours(0);
-    reclaimOptions.mPeriod = seconds(15);
+    reclaimOptions.mDelay = seconds(15);
     reclaimOptions.mReclaimThreshold = 512_KiB;
     reclaimOptions.mReclaimTarget = 512_KiB;
 

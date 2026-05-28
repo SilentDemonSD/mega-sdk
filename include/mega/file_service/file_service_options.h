@@ -20,7 +20,8 @@ struct ReclaimOptions
     // How many files should we reclaim at a time?
     std::size_t mBatchSize = 4u;
 
-    // How long after startup should we wait until we reclaim space?
+    // How long should we wait before reclaiming space after login
+    // or after the reclaim options are configured?
     std::chrono::seconds mDelay = std::chrono::minutes(30);
 
     // How often should we try to reclaim space?
