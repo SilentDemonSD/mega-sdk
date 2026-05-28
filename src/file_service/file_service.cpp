@@ -203,9 +203,9 @@ try
     if (mContext)
         mContext->cleanCacheOnDestruction();
 
-    mInitialized = true;
-
     mContext = std::make_unique<FileServiceContext>(client, *this);
+
+    mInitialized = true;
 
     FSInfo1("File Service initialized");
 
