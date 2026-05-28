@@ -75,9 +75,6 @@ try
 
     mContext = std::make_unique<FileServiceContext>(mPublicClient, *this);
 
-    // Always clean cache on destruction
-    mContext->cleanCacheOnDestruction();
-
     FSInfo1("File Service constructed");
 
     return FILE_SERVICE_SUCCESS;
@@ -200,6 +197,11 @@ try
 
         return FILE_SERVICE_ALREADY_INITIALIZED;
     }
+
+    // Switched to a logged-in client; clean the non logged-in client cache.
+    // Otherwise, the cache may remain unused for a long time without being reclaimed.
+    if (mContext)
+        mContext->cleanCacheOnDestruction();
 
     mInitialized = true;
 
