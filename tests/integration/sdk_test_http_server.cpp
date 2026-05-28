@@ -41,8 +41,6 @@ using namespace ::mega;
 using namespace ::std;
 using ::mega::common::testing::randomBytes;
 
-extern std::string megaApiCacheFolder(int index);
-
 namespace
 {
 
@@ -80,7 +78,7 @@ protected:
     std::unique_ptr<MegaApiTest> makeNonLoginApi()
     {
         auto api = std::make_unique<MegaApiTest>(APP_KEY.c_str(),
-                                                 megaApiCacheFolder(1).c_str(),
+                                                 megaApiCacheFolder(10).c_str(),
                                                  USER_AGENT.c_str(),
                                                  unsigned(THREADS_PER_MEGACLIENT));
         api->addListener(this);

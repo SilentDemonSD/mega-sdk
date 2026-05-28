@@ -2090,4 +2090,6 @@ Error setAccountLevel(MegaApi& client, requestArgs... args)
     return tracker.waitForResult();
 }
 
+std::string megaApiCacheFolder(int index);
+
 #endif // SDKTEST_TEST_H

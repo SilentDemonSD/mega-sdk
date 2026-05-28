@@ -26,11 +26,6 @@
 #include <sqlite3.h>
 #include <string>
 
-// megaApiCacheFolder is defined at file scope in SdkTest_test.cpp (external
-// linkage). Declared here so we don't duplicate the per-process cache-folder
-// layout logic.
-extern std::string megaApiCacheFolder(int index);
-
 namespace
 {
 constexpr uint32_t kPrefsCombinedConnectionsRowId = 2;
