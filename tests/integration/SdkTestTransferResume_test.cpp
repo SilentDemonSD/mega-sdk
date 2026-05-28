@@ -610,7 +610,7 @@ TEST_F(SdkTestTransfersResumedEvent, event_fired_with_resumed_upload_ids)
 
     MegaUploadOptions opts;
     opts.mtime = MegaApi::INVALID_CUSTOM_MOD_TIME;
-    for (int i = 0; i < NUM_FILES; ++i)
+    for (size_t i = 0; i < NUM_FILES; ++i)
         megaApi[0]->startUpload(localFiles[i].getPath().string().c_str(),
                                 rootNode.get(),
                                 nullptr,
@@ -696,7 +696,7 @@ TEST_F(SdkTestTransfersResumedEvent, event_covers_uploads_and_downloads)
     std::vector<sdk_test::LocalTempFile> srcFiles;
     srcFiles.reserve(NUM_EACH);
     std::vector<MegaHandle> nodeHandles(NUM_EACH, UNDEF);
-    for (int i = 0; i < NUM_EACH; ++i)
+    for (size_t i = 0; i < NUM_EACH; ++i)
     {
         srcFiles.emplace_back(fs::current_path() /
                                   (getFilePrefix() + "src_" + std::to_string(i) + ".bin"),
@@ -726,7 +726,7 @@ TEST_F(SdkTestTransfersResumedEvent, event_covers_uploads_and_downloads)
     uploadFiles.reserve(NUM_EACH);
     MegaUploadOptions opts;
     opts.mtime = MegaApi::INVALID_CUSTOM_MOD_TIME;
-    for (int i = 0; i < NUM_EACH; ++i)
+    for (size_t i = 0; i < NUM_EACH; ++i)
     {
         uploadFiles.emplace_back(fs::current_path() /
                                      (getFilePrefix() + "up_" + std::to_string(i) + ".bin"),
@@ -740,7 +740,7 @@ TEST_F(SdkTestTransfersResumedEvent, event_covers_uploads_and_downloads)
 
     // Queue downloads.
     sdk_test::LocalTempDir downloadDir(fs::current_path() / (getFilePrefix() + "dl"));
-    for (int i = 0; i < NUM_EACH; ++i)
+    for (size_t i = 0; i < NUM_EACH; ++i)
     {
         auto node = std::unique_ptr<MegaNode>{megaApi[0]->getNodeByHandle(nodeHandles[i])};
         ASSERT_TRUE(node);
