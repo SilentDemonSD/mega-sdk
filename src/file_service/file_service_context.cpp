@@ -1584,23 +1584,23 @@ void FileServiceContext::reclaimOptionsChanged(const ReclaimOptions& newOptions)
     // Caller wants to disable periodic reclamation.
     if (!reclamationEnabled(newOptions))
     {
-        FSInfo1("Aborting reclaim task");
+        FSInfo1("Aborting reclaim task as reclmation disabled");
 
         return mReclaimTask.abort(), void();
     }
-
-    // Convenience.
-    auto delay = newOptions.mDelay;
 
     // Periodic reclamation is already scheduled.
     if (mReclaimTask && !mReclaimTask.completed())
     {
         // Leave a trail so we know what we've done.
-        FSInfo1("Cancelling reclaim task");
+        FSInfo1("Aborting reclaim task");
 
-        // Send it a cancellation so it reschedules itself.
-        return mReclaimTask.cancel(), void();
+        // Abort it
+        mReclaimTask.abort();
     }
+
+    // Convenience.
+    auto delay = newOptions.mDelay;
 
     // When should we perform the reclamation?
     auto when = steady_clock::now() + delay;
