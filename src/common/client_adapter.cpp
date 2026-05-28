@@ -1166,10 +1166,9 @@ void ClientAdapter::rename(RenameCallback callback,
 
 std::string ClientAdapter::sessionID() const
 {
-    // Not logged in: return a stable pre-login identifier so FileService FileStorage can
-    // build its directory path without a real session
+    // Not logged in
     if (mClient.sid.size() < MegaClient::SIDLEN)
-        return "public";
+        return "";
 
     // Extract session ID.
     auto id = mClient.sid.substr(sizeof(mClient.key.key));
