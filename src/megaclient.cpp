@@ -2748,8 +2748,14 @@ void MegaClient::exec()
                                                                 CONSUMED_CHUNK_MAX_LOGGING);
                                     }
 
-                                    // The requests should be already terminated
-                                    assert(!reqs.chunkedProgress());
+                                    // The requests should be already terminated.
+                                    // Otherwise, it means CS response is fully received but JSON
+                                    // parsing is neither finished nor failed.
+                                    if (reqs.chunkedProgress())
+                                    {
+                                        assert(false);
+                                        LOG_err << "CS Response JSON is incomplete.";
+                                    }
                                 }
 
                                 WAIT_CLASS::bumpds();
