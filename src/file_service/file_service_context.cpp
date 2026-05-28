@@ -1586,7 +1586,7 @@ void FileServiceContext::reclaimOptionsChanged(const ReclaimOptions& newOptions)
     // Caller wants to disable periodic reclamation.
     if (!reclamationEnabled(newOptions))
     {
-        FSInfo1("Aborting reclaim task as reclmation disabled");
+        FSInfo1("Aborting reclaim task as reclamation disabled");
 
         return mReclaimTask.abort(), void();
     }

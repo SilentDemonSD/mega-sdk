@@ -77,8 +77,10 @@ protected:
 
     std::unique_ptr<MegaApiTest> makeNonLoginApi()
     {
+        // Use a large 10 to avoid conflicting with getAccountsForTest
+        constexpr int cacheIndex = 10;
         auto api = std::make_unique<MegaApiTest>(APP_KEY.c_str(),
-                                                 megaApiCacheFolder(10).c_str(),
+                                                 megaApiCacheFolder(cacheIndex).c_str(),
                                                  USER_AGENT.c_str(),
                                                  unsigned(THREADS_PER_MEGACLIENT));
         api->addListener(this);
@@ -161,14 +163,15 @@ protected:
         {
             return "";
         }
-        const unique_ptr<MegaSet> s1p(newSet);
-        const MegaHandle sh = s1p->id();
+        const unique_ptr<MegaSet> newSetP(newSet);
+        const MegaHandle sh = newSetP->id();
 
         MegaSetElementList* newElls = nullptr;
         if (doCreateSetElement(0, &newElls, sh, mFileNode->getHandle(), /*name=*/nullptr) != API_OK)
         {
             return "";
         }
+        unique_ptr<MegaSetElementList> newEllsP(newElls);
 
         MegaSet* exportedSet = nullptr;
         string exportedSetURL;
@@ -176,7 +179,7 @@ protected:
         {
             return "";
         }
-        unique_ptr<MegaSet> s1pEnabledExport(exportedSet);
+        unique_ptr<MegaSet> exportedSetP(exportedSet);
         return exportedSetURL;
     }
 

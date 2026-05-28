@@ -34,7 +34,7 @@ std::string PublicStorageNamer::name(const LocalPath& dbRoot)
     uint64_t index = 0;
     {
         const std::lock_guard<std::mutex> lock(mMutex);
-        auto [iterator, inserted] = mIndexes.try_emplace(std::move(dbRoot), 0);
+        auto [iterator, inserted] = mIndexes.try_emplace(dbRoot, 0);
         index = iterator->second++;
     }
 
@@ -104,12 +104,7 @@ auto FileService::addObserver(FileEventObserver observer)
 auto FileService::construct() -> FileServiceResult
 try
 {
-    if (mContext)
-    {
-        FSError1("File Service has already been constructed");
-
-        return FILE_SERVICE_ALREADY_INITIALIZED;
-    }
+    assert(!mContext);
 
     mContext = std::make_unique<FileServiceContext>(
         mPublicClient,

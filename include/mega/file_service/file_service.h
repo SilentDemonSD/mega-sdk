@@ -77,7 +77,7 @@ public:
     // Create a new file.
     auto create(NodeHandle parent, const std::string& name) -> FileServiceResultOr<File>;
 
-    // Where is the service storing it's database?
+    // Where is the service storing its database?
     auto databasePath() const -> FileServiceResultOr<LocalPath>;
 
     // Deinitialize the file service.
