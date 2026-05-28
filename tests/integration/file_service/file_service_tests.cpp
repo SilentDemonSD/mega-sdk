@@ -3360,7 +3360,7 @@ TEST_F(FileServiceTests, reclaim_foreign_file_succeeds)
     EXPECT_EQ(file->info().allocatedSize(), 0u);
 }
 
-TEST_F(FileServiceTests, reclaim_after_delay_succeeds)
+TEST_F(FileServiceTests, reclaim_after_delay_and_period_succeeds)
 {
     // Convenience.
     using std::chrono::hours;
@@ -3376,7 +3376,7 @@ TEST_F(FileServiceTests, reclaim_after_delay_succeeds)
     mClient->fileService().reclaimOptions(reclaimOptions);
 
     // Create a few files for us to test with.
-    for (auto i = 0; i < 4; ++i)
+    for (size_t i = 0; i < 4; ++i)
     {
         // Generate some data for our test file.
         auto data = randomBytes(1_MiB);
@@ -3408,15 +3408,16 @@ TEST_F(FileServiceTests, reclaim_after_delay_succeeds)
     ASSERT_EQ(usedBefore.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
     ASSERT_GE(*usedBefore, 512_KiB * files.size());
 
-    // Enable storage reclamation.
+    // Enable storage reclamation with a delay and a period.
     reclaimOptions.mAgeThreshold = hours(0);
-    reclaimOptions.mDelay = seconds(15);
+    reclaimOptions.mDelay = seconds(10);
+    reclaimOptions.mPeriod = seconds(10);
     reclaimOptions.mReclaimThreshold = 512_KiB;
     reclaimOptions.mReclaimTarget = 512_KiB;
 
     mClient->fileService().reclaimOptions(reclaimOptions);
 
-    // Wait for storage to be reclaimed.
+    // Wait for storage to be reclaimed (delay-based).
     EXPECT_TRUE(waitFor(
         [&]()
         {
@@ -3428,11 +3429,38 @@ TEST_F(FileServiceTests, reclaim_after_delay_succeeds)
         },
         minutes(5)));
 
-    // So we get useful logs.
-    auto usedAfter = mClient->fileService().storageUsed();
-    ASSERT_EQ(usedAfter.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
-    EXPECT_LT(*usedAfter, *usedBefore);
-    EXPECT_GE(reclaimOptions.mReclaimTarget, *usedAfter);
+    auto usedAfterDelay = mClient->fileService().storageUsed();
+    ASSERT_EQ(usedAfterDelay.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+    EXPECT_LT(*usedAfterDelay, *usedBefore);
+    EXPECT_GE(reclaimOptions.mReclaimTarget, *usedAfterDelay);
+
+    // Read again to use the storage
+    for (size_t i = 0; i < 4; ++i)
+    {
+        auto& file = files[i];
+
+        // Read some data from the file.
+        ASSERT_EQ(execute(read, file, 0, 512_KiB).errorOr(FILE_SUCCESS), FILE_SUCCESS);
+    }
+
+    // Don't get storage as the reclamation is running, the storage information is unstable
+    // Wait for storage to be reclaimed again (period-based).
+    EXPECT_TRUE(waitFor(
+        [&]()
+        {
+            // How much space have we used?
+            auto used = mClient->fileService().storageUsed();
+
+            // Have we fallen below the reclamation threshold?
+            return used && *used <= reclaimOptions.mReclaimTarget;
+        },
+        minutes(5)));
+
+    auto usedAfterPeriod = mClient->fileService().storageUsed();
+    ASSERT_EQ(usedAfterPeriod.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+    // Compared with usedBefore as we couldn't get a stable storage usage once reclamation starts
+    EXPECT_LT(*usedAfterPeriod, *usedBefore);
+    EXPECT_GE(reclaimOptions.mReclaimTarget, *usedAfterPeriod);
 }
 
 TEST_F(FileServiceTests, reclaim_single_succeeds)
