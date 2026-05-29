@@ -6521,6 +6521,7 @@ public:
         EVENT_CREDIT_CARD_EXPIRY = 21,
         EVENT_NETWORK_ACTIVITY = 22,
         EVENT_TRANSFERS_RESUMED = 23,
+        EVENT_LAST_PURGE = 24,
     };
 
     enum
@@ -6663,6 +6664,14 @@ public:
      *   getIntegerList() for the unique IDs (MegaTransfer::getUniqueId) of the
      *   resumed transfers; cached entries that failed to resume are not included.
      *
+     * - EVENT_LAST_PURGE (24):
+     *   Account data was purged by MEGA. Fired once per unique purge timestamp per session.
+     *   Use getNumber("ts") for the Unix timestamp and getNumber("reason") for the reason code.
+     *   See the PurgeReason enum for the reason values.
+     *   getNumber("warningTs") and getNumber("lastActiveTs") are present only for
+     *   PURGE_REASON_INACTIVE when warning history is available, otherwise empty.
+     *   To suppress across sessions and devices, call setLastPurgeAcknowledged(ts) on dismiss.
+     *
      * @return Event type, from the MegaEvent::EventType enum.
      */
     virtual int getType() const;
@@ -6793,6 +6802,15 @@ public:
      * MegaEvent::NetworkActivityType).
      *     - getNumber("error_code") returns the error code (See MegaError enum) or status (HTTP
      * status code) of the activity.
+     *
+     * - EVENT_LAST_PURGE:
+     *   This event uses multiple getNumber keys:
+     *     - getNumber("ts") returns the Unix timestamp of the purge.
+     *     - getNumber("reason") returns the purge reason code (see the PurgeReason enum).
+     *     - getNumber("warningTs") returns the Unix timestamp of the final inactivity warning,
+     *       present only for PURGE_REASON_INACTIVE when warning history is available.
+     *     - getNumber("lastActiveTs") returns the Unix timestamp of the user's last activity
+     *       prior to the warning, present only alongside warningTs.
      *
      * @param key The key identifying the numeric data.
      *
@@ -11435,6 +11453,8 @@ class MegaApi
             USER_ATTR_DEV_OPT = 51, // private - encrypted - byte array
             USER_ATTR_RECENT_CLEAR_TIMESTAMP =
                 52, // private - encrypted - byte array - non-versioned
+            USER_ATTR_LAST_PURGE_ACKNOWLEDGED =
+                53, // private - non-encrypted - char array - non-versioned
         };
 
         enum {
@@ -24639,6 +24659,42 @@ class MegaApi
          * @param listener MegaRequestListener to track this request
          */
         void getLastActionedBanner(MegaRequestListener* listener = nullptr);
+
+        /**
+         * @brief Acknowledge the last purge notification so it is not shown again on any device
+         *
+         * When the user dismisses the purge notification, call this with the timestamp from
+         * EVENT_LAST_PURGE (getNumber("ts")). The value is stored in the
+         * USER_ATTR_LAST_PURGE_ACKNOWLEDGED (^!lpack) user attribute, which is included in
+         * every ug response. On subsequent logins from any device, if the stored timestamp
+         * matches the current lastpurge timestamp, EVENT_LAST_PURGE will not be fired.
+         *
+         * The type associated with this request is MegaRequest::TYPE_SET_ATTR_USER
+         *
+         * Valid data in the MegaRequest object received on callbacks:
+         * - MegaRequest::getParamType - Returns MegaApi::USER_ATTR_LAST_PURGE_ACKNOWLEDGED
+         * - MegaRequest::getNumber - Returns the timestamp passed to this function
+         *
+         * @param ts Unix timestamp of the purge to acknowledge (from EVENT_LAST_PURGE)
+         * @param listener MegaRequestListener to track this request
+         */
+        void setLastPurgeAcknowledged(int64_t ts, MegaRequestListener* listener = nullptr);
+
+        /**
+         * @brief Get the timestamp stored in ^!lpack — the last purge the user acknowledged.
+         *
+         * The type associated with this request is MegaRequest::TYPE_GET_ATTR_USER
+         *
+         * Valid data in the MegaRequest object received on callbacks:
+         * - MegaRequest::getParamType - Returns MegaApi::USER_ATTR_LAST_PURGE_ACKNOWLEDGED
+         *
+         * When onRequestFinish receives MegaError::API_OK:
+         * - MegaRequest::getNumber - Returns the acknowledged purge timestamp (int64_t),
+         *   or 0 if the attribute has not been set.
+         *
+         * @param listener MegaRequestListener to track this request
+         */
+        void getLastPurgeAcknowledged(MegaRequestListener* listener = nullptr);
 
         /**
          * @brief

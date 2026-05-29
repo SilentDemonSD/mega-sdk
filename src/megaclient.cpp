@@ -5028,6 +5028,8 @@ void MegaClient::locallogout(bool removecaches, [[maybe_unused]] bool keepSyncsC
     loggingout = 0;
     mOnCSCompletion = nullptr;
     cachedug = false;
+    mLastPurge = LastPurgeInfo{};
+    mLastPurgeNotifiedTs = 0;
     minstreamingrate = -1;
     ephemeralSession = false;
     ephemeralSessionPlusPlus = false;

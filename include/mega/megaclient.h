@@ -1706,6 +1706,12 @@ public:
     // deadline timestamp related to storage overquota in paywall mode
     m_time_t mOverquotaDeadlineTs;
 
+    // last purge info from 'ug' response
+    LastPurgeInfo mLastPurge;
+
+    // last purge timestamp already notified this session, to avoid re-firing on ug refresh
+    m_time_t mLastPurgeNotifiedTs = 0;
+
     // minimum bytes per second for streaming (0 == no limit, -1 == use default)
     int minstreamingrate;
 

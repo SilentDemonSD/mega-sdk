@@ -4931,6 +4931,8 @@ public:
         void getLastReadNotification(MegaRequestListener* listener);
         void setLastActionedBanner(uint32_t notificationId, MegaRequestListener* listener);
         void getLastActionedBanner(MegaRequestListener* listener);
+        void setLastPurgeAcknowledged(int64_t ts, MegaRequestListener* listener);
+        void getLastPurgeAcknowledged(MegaRequestListener* listener);
         MegaFlagPrivate* getFlag(const char* flagName, bool commit, MegaRequestListener* listener = nullptr);
 
         void deleteUserAttribute(int type, MegaRequestListener* listener = NULL);
@@ -5583,6 +5585,13 @@ public:
         void performRequest_setLastReadNotification(MegaRequestPrivate* request);
         error getLastReadNotification_getua_result(byte* data, unsigned len, MegaRequestPrivate* request);
         void performRequest_setLastActionedBanner(MegaRequestPrivate* request);
+        void performRequest_setLastPurgeAcknowledged(MegaRequestPrivate* request);
+        error getLastPurgeAcknowledged_getua_result(byte* data,
+                                                    unsigned len,
+                                                    MegaRequestPrivate* request);
+        // Fire EVENT_LAST_PURGE if a pending purge (from the 'ug' response) should be notified.
+        // Called from userdata_result() and nodes_current().
+        void checkLastPurgeNotification();
         error getLastActionedBanner_getua_result(byte* data, unsigned len, MegaRequestPrivate* request);
         void performRequest_enableTestSurveys(MegaRequestPrivate* request);
         error performRequest_getSyncStalls(MegaRequestPrivate* request);

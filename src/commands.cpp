@@ -4510,11 +4510,13 @@ bool CommandGetUserData::procresult(Result r, JSON& json)
     string s4container, s4containerVersion;
     string devOpt, devOptVersion;
     string rcts, rctsVersion;
+    string lastPurgeAcknowledged, versionLastPurgeAcknowledged;
 
     bool uspw = false;
     string userStorageLevel, versionUserStorageLevel;
     vector<m_time_t> warningTs;
     m_time_t deadlineTs = -1;
+    LastPurgeInfo lastPurge;
 
     bool b = false;
     BizMode m = BIZ_MODE_UNKNOWN;
@@ -4962,6 +4964,12 @@ bool CommandGetUserData::procresult(Result r, JSON& json)
         case makeNameid("*!rcts"):
         {
             parseUserAttribute(json, rcts, rctsVersion);
+            break;
+        }
+
+        case makeNameid("^!lpack"):
+        {
+            parseUserAttribute(json, lastPurgeAcknowledged, versionLastPurgeAcknowledged);
             break;
         }
 
@@ -5454,7 +5462,8 @@ bool CommandGetUserData::procresult(Result r, JSON& json)
                     client->mS4Container.store(NodeHandle());
                 }
 
-                if (devOpt.size() && devOptVersion.size())
+                // Use || so an empty value (av:"") still caches the version for the next putua
+                if (devOpt.size() || devOptVersion.size())
                 {
                     changes |=
                         u->updateAttributeIfDifferentVersion(ATTR_DEV_OPT, devOpt, devOptVersion);
@@ -5469,12 +5478,25 @@ bool CommandGetUserData::procresult(Result r, JSON& json)
                                                                rctsVersion,
                                                                ATTR_RECENT_CLEAR_TIMESTAMP);
 
+                if (!lastPurgeAcknowledged.empty() || !versionLastPurgeAcknowledged.empty())
+                {
+                    changes |= u->updateAttributeIfDifferentVersion(ATTR_LAST_PURGE_ACKNOWLEDGED,
+                                                                    lastPurgeAcknowledged,
+                                                                    versionLastPurgeAcknowledged);
+                }
+                else
+                {
+                    u->removeAttribute(ATTR_LAST_PURGE_ACKNOWLEDGED);
+                }
+
                 if (changes)
                 {
                     u->setTag(tag ? tag : -1);
                     client->notifyuser(u);
                 }
             }
+
+            client->mLastPurge = lastPurge;
 
             if (b)  // business account
             {
@@ -5577,6 +5599,26 @@ bool CommandGetUserData::procresult(Result r, JSON& json)
             return true;
         }
         default:
+            // "lastpurge" is too long to fit in makeNameid
+            if (attributeName == "lastpurge")
+            {
+                if (json.enterarray())
+                {
+                    if (json.isnumeric())
+                        lastPurge.ts = json.getint();
+                    if (json.isnumeric())
+                        lastPurge.reason = static_cast<PurgeReason>(json.getint());
+                    // offsets 2 and 3 are optional (present only for PURGE_REASON_INACTIVE)
+                    if (json.isnumeric())
+                        lastPurge.warningTs = json.getint();
+                    if (json.isnumeric())
+                        lastPurge.lastActiveTs = json.getint();
+                    while (json.storeobject()) // drain any future trailing offsets (any type)
+                        ;
+                    json.leavearray();
+                }
+                break;
+            }
             switch (User::string2attr(attributeName.c_str()))
             {
                 case ATTR_FIRSTNAME:
