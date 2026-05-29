@@ -28434,10 +28434,9 @@ public:
      * Set the reclaim delay.
      *
      * @param seconds
-     * How long after startup should we wait until we reclaim space?
+     * The amount of time to wait before reclaiming space after the reclaim option is set or after
+     * the client logs in.
      *
-     * @note This option must be set before the client's logged in in order
-     * to have any effect.
      */
     virtual void setDelay(uint64_t seconds) = 0;
 

@@ -1,4 +1,3 @@
-#include <mega/common/client.h>
 #include <mega/common/node_info.h>
 #include <mega/file_service/file_id.h>
 #include <mega/file_service/file_storage.h>
@@ -38,10 +37,10 @@ FileAccessPtr FileStorage::openFile(const LocalPath& path, bool mustCreate)
     return file;
 }
 
-FileStorage::FileStorage(const Client& client):
+FileStorage::FileStorage(const UserStoragePath& userStoragePath):
     mFilesystem(std::make_unique<FSACCESS_CLASS>()),
-    mStorageDirectory(*mFilesystem, logger(), "file-service", client.dbRootPath()),
-    mUserStorageDirectory(*mFilesystem, logger(), client.sessionID(), mStorageDirectory),
+    mStorageDirectory(*mFilesystem, logger(), "file-service", userStoragePath.dbRoot),
+    mUserStorageDirectory(*mFilesystem, logger(), userStoragePath.userName, mStorageDirectory),
     mUserCacheDirectory(*mFilesystem, logger(), "cache", mUserStorageDirectory),
     mFolderLocker(mUserCacheDirectory.path().asPlatformEncoded(true))
 {}

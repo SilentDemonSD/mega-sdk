@@ -3669,6 +3669,8 @@ public:
 
     // Client adapter.
     common::ClientAdapter mClientAdapter;
+    // Non logged in client used by FileService for public links
+    common::ClientAdapter mPublicClientAdapter;
 
     // File Service.
     file_service::FileService mFileService;
