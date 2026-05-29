@@ -55,7 +55,7 @@ target_sources(test_integration
     SdkTestFolderController_test.cpp
     SdkTestGetChildrenLexicographic_test.cpp
     SdkTestListAllNodesByPage_test.cpp
-    SdkTestTransferPriorityRestore_test.cpp
+    SdkTestTransferResume_test.cpp
     sdk_test_share.cpp
     sdk_test_share_nested.cpp
     SdkTestMassiveActionPackets_test.cpp

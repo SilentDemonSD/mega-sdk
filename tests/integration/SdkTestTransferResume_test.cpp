@@ -1,25 +1,30 @@
 /**
- * @file SdkTestTransferPriorityRestore_test.cpp
- * @brief Integration tests verifying that transfer priorities survive an
- *        app-restart (session save → local logout → session resume).
+ * @file SdkTestTransferResume_test.cpp
+ * @brief Integration tests for transfer behaviour across session restarts
+ *        (session save → local logout → session resume).
  *
- * Bug description
- * ---------------
- * When transfers is saved to the transfer DB while it is still
- * queued (i.e., no transfer slot has been allocated yet), its Transfer::priority
- * is correctly persisted by Transfer::serialize.  However, when the session is
- * resumed in MegaClient::startxfer, the matching logic that looks up the cached
- * Transfer in multi_cachedtransfers requires:
+ * Covers:
+ *   - SdkTestTransferPriorityRestore: transfer priorities survive a restart.
+ *   - SdkTestTransfersResumedEvent:   EVENT_TRANSFERS_RESUMED fires exactly
+ *     once after restart, carrying the unique IDs of all resumed transfers.
+ *
+ * Priority-restore bug description
+ * ---------------------------------
+ * When a transfer is saved to the transfer DB while still queued (no transfer
+ * slot allocated yet), its Transfer::priority is correctly persisted by
+ * Transfer::serialize.  However, when the session is resumed in
+ * MegaClient::startxfer, the matching logic that looks up the cached Transfer
+ * in multi_cachedtransfers requires:
  *
  *     For GET: downloadFileHandle == f->h && !downloadFileHandle.isUndef()
  *     For PUT: it->second->localfilename == f->getLocalname()
  *
  * Because 'downloadFileHandle' is only populated after the slot receives the
- * actual download URLs, queued-but-not-started downloads always have it set to undef.
- * And 'localfilename' is only populated after slot assigned.
- * The match therefore fails, startxfer creates a brand-new Transfer with priority 0,
- * and addtransfer assigns a fresh sequential priority — the original priority is lost.
- *
+ * actual download URLs, queued-but-not-started downloads always have it set to
+ * undef.  And 'localfilename' is only populated after a slot is assigned.
+ * The match therefore fails, startxfer creates a brand-new Transfer with
+ * priority 0, and addtransfer assigns a fresh sequential priority — the
+ * original priority is lost.
  */
 
 #include "sdk_test_utils.h"
@@ -27,6 +32,8 @@
 
 #include <algorithm>
 #include <map>
+#include <mutex>
+#include <set>
 
 using namespace mega;
 
@@ -477,5 +484,339 @@ TEST_F(SdkTestTransferPriorityRestore, queued_download_priority_order_preserved_
     }
 
     megaApi[0]->pauseTransfers(false, MegaTransfer::TYPE_DOWNLOAD);
+    ASSERT_EQ(API_OK, synchronousCancelTransfers(0, MegaTransfer::TYPE_DOWNLOAD));
+}
+
+// ---------------------------------------------------------------------------
+// SdkTestTransfersResumedEvent
+// Tests for EVENT_TRANSFERS_RESUMED (SDK-5093)
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+/**
+ * Listener that captures EVENT_TRANSFERS_RESUMED payloads.
+ * Thread-safe; call reset() before the restart sequence.
+ */
+class TransfersResumedListener: public MegaListener
+{
+public:
+    void onEvent(MegaApi*, MegaEvent* event) override
+    {
+        if (!event || event->getType() != MegaEvent::EVENT_TRANSFERS_RESUMED)
+            return;
+
+        std::lock_guard<std::mutex> lock(mMutex);
+        ++mFiredCount;
+        if (const MegaIntegerList* list = event->getIntegerList())
+        {
+            for (int i = 0; i < list->size(); ++i)
+                mIds.insert(static_cast<uint32_t>(list->get(i)));
+        }
+    }
+
+    void reset()
+    {
+        std::lock_guard<std::mutex> lock(mMutex);
+        mFiredCount = 0;
+        mIds.clear();
+    }
+
+    int firedCount() const
+    {
+        std::lock_guard<std::mutex> lock(mMutex);
+        return mFiredCount;
+    }
+
+    std::set<uint32_t> ids() const
+    {
+        std::lock_guard<std::mutex> lock(mMutex);
+        return mIds;
+    }
+
+private:
+    mutable std::mutex mMutex;
+    int mFiredCount = 0;
+    std::set<uint32_t> mIds;
+};
+
+std::set<uint32_t> collectUniqueIds(MegaApi* api, int type)
+{
+    std::set<uint32_t> result;
+    auto list = std::unique_ptr<MegaTransferList>{api->getTransfers(type)};
+    if (!list)
+        return result;
+    for (int i = 0; i < list->size(); ++i)
+        result.insert(list->get(i)->getUniqueId());
+    return result;
+}
+
+} // anonymous namespace
+
+class SdkTestTransfersResumedEvent: public SdkTest
+{
+public:
+    void SetUp() override
+    {
+        SdkTest::SetUp();
+        ASSERT_NO_FATAL_FAILURE(getAccountsForTest(1));
+        megaApi[0]->addListener(&mListener);
+    }
+
+    void TearDown() override
+    {
+        megaApi[0]->removeListener(&mListener);
+        if (megaApi[0] && megaApi[0]->isLoggedIn())
+        {
+            megaApi[0]->pauseTransfers(false, MegaTransfer::TYPE_UPLOAD);
+            megaApi[0]->pauseTransfers(false, MegaTransfer::TYPE_DOWNLOAD);
+            synchronousCancelTransfers(0, MegaTransfer::TYPE_UPLOAD);
+            synchronousCancelTransfers(0, MegaTransfer::TYPE_DOWNLOAD);
+            for (MegaHandle h: mNodesToDelete)
+            {
+                auto node = std::unique_ptr<MegaNode>{megaApi[0]->getNodeByHandle(h)};
+                if (node)
+                    doDeleteNode(0, node.get());
+            }
+        }
+        SdkTest::TearDown();
+    }
+
+protected:
+    TransfersResumedListener mListener;
+    std::vector<MegaHandle> mNodesToDelete;
+};
+
+// EVENT_TRANSFERS_RESUMED fires exactly once after restart, and the IDs
+// in the event match the unique IDs of the resumed upload transfers.
+TEST_F(SdkTestTransfersResumedEvent, event_fired_with_resumed_upload_ids)
+{
+    constexpr int NUM_FILES = 3;
+    constexpr size_t FILE_SIZE = 64;
+
+    auto rootNode = std::unique_ptr<MegaNode>{megaApi[0]->getRootNode()};
+    ASSERT_TRUE(rootNode);
+
+    std::vector<sdk_test::LocalTempFile> localFiles;
+    localFiles.reserve(NUM_FILES);
+    for (int i = 0; i < NUM_FILES; ++i)
+        localFiles.emplace_back(fs::current_path() / (getFilePrefix() + std::to_string(i) + ".bin"),
+                                FILE_SIZE);
+
+    // Pause so the uploads queue up without being dispatched (ensuring they
+    // are written to the transfer DB before the restart).
+    megaApi[0]->pauseTransfers(true, MegaTransfer::TYPE_UPLOAD);
+
+    MegaUploadOptions opts;
+    opts.mtime = MegaApi::INVALID_CUSTOM_MOD_TIME;
+    for (size_t i = 0; i < NUM_FILES; ++i)
+        megaApi[0]->startUpload(localFiles[i].getPath().string().c_str(),
+                                rootNode.get(),
+                                nullptr,
+                                &opts,
+                                nullptr);
+
+    ASSERT_TRUE(waitForTransferCount(megaApi[0].get(),
+                                     MegaTransfer::TYPE_UPLOAD,
+                                     NUM_FILES,
+                                     defaultTimeoutMs))
+        << "Uploads did not appear in the queue within timeout";
+
+    // Simulate app restart.
+    std::unique_ptr<char[]> session(dumpSession());
+    ASSERT_TRUE(session);
+    ASSERT_NO_FATAL_FAILURE(locallogout());
+
+    mListener.reset();
+    ASSERT_NO_FATAL_FAILURE(resumeSession(session.get()));
+    // Pause before fetchnodes to prevent resumed transfers from completing
+    // in the window between fetchnodes returning and our checks running.
+    megaApi[0]->pauseTransfers(true, MegaTransfer::TYPE_UPLOAD);
+    ASSERT_NO_FATAL_FAILURE(fetchnodes(0));
+
+    ASSERT_TRUE(WaitFor(
+        [this]
+        {
+            return mListener.firedCount() >= 1;
+        },
+        defaultTimeoutMs))
+        << "EVENT_TRANSFERS_RESUMED was not fired after session restart";
+
+    EXPECT_EQ(mListener.firedCount(), 1) << "EVENT_TRANSFERS_RESUMED must fire exactly once";
+
+    // Wait for the resumed transfers to appear in the queue.
+    ASSERT_TRUE(waitForTransferCount(megaApi[0].get(),
+                                     MegaTransfer::TYPE_UPLOAD,
+                                     NUM_FILES,
+                                     defaultTimeoutMs))
+        << "Resumed uploads did not appear within timeout";
+
+    const auto eventIds = mListener.ids();
+    EXPECT_EQ(static_cast<int>(eventIds.size()), NUM_FILES)
+        << "Event must contain exactly " << NUM_FILES << " unique IDs";
+
+    const auto queueIds = collectUniqueIds(megaApi[0].get(), MegaTransfer::TYPE_UPLOAD);
+    for (uint32_t id: eventIds)
+        EXPECT_TRUE(queueIds.count(id))
+            << "Event ID " << id << " does not correspond to any queued upload transfer";
+
+    megaApi[0]->pauseTransfers(false, MegaTransfer::TYPE_UPLOAD);
+    ASSERT_EQ(API_OK, synchronousCancelTransfers(0, MegaTransfer::TYPE_UPLOAD));
+}
+
+// EVENT_TRANSFERS_RESUMED must NOT fire when there are no cached transfers.
+TEST_F(SdkTestTransfersResumedEvent, no_event_when_no_transfers_to_resume)
+{
+    std::unique_ptr<char[]> session(dumpSession());
+    ASSERT_TRUE(session);
+    ASSERT_NO_FATAL_FAILURE(locallogout());
+
+    mListener.reset();
+    ASSERT_NO_FATAL_FAILURE(resumeSession(session.get()));
+    ASSERT_NO_FATAL_FAILURE(fetchnodes(0));
+
+    // Allow time for any spurious event to arrive before asserting silence.
+    WaitMillisec(3000);
+    EXPECT_EQ(mListener.firedCount(), 0)
+        << "EVENT_TRANSFERS_RESUMED must not fire when there are no cached transfers";
+}
+
+// A single EVENT_TRANSFERS_RESUMED covers both upload and download transfers,
+// and every ID in the event corresponds to a resumed transfer.
+TEST_F(SdkTestTransfersResumedEvent, event_covers_uploads_and_downloads)
+{
+    constexpr int NUM_EACH = 2;
+    constexpr size_t FILE_SIZE = 64;
+
+    auto rootNode = std::unique_ptr<MegaNode>{megaApi[0]->getRootNode()};
+    ASSERT_TRUE(rootNode);
+
+    // Upload source files for the download side (these run to completion).
+    std::vector<sdk_test::LocalTempFile> srcFiles;
+    srcFiles.reserve(NUM_EACH);
+    std::vector<MegaHandle> nodeHandles(NUM_EACH, UNDEF);
+    for (size_t i = 0; i < NUM_EACH; ++i)
+    {
+        srcFiles.emplace_back(fs::current_path() /
+                                  (getFilePrefix() + "src_" + std::to_string(i) + ".bin"),
+                              FILE_SIZE);
+        ASSERT_EQ(API_OK,
+                  doStartUpload(0,
+                                &nodeHandles[i],
+                                srcFiles[i].getPath().string().c_str(),
+                                rootNode.get(),
+                                nullptr,
+                                MegaApi::INVALID_CUSTOM_MOD_TIME,
+                                nullptr,
+                                false,
+                                false,
+                                nullptr))
+            << "Failed to upload source file " << i;
+        ASSERT_NE(UNDEF, nodeHandles[i]);
+        mNodesToDelete.push_back(nodeHandles[i]);
+    }
+
+    // Pause both directions before queuing so all transfers are saved to DB.
+    megaApi[0]->pauseTransfers(true, MegaTransfer::TYPE_UPLOAD);
+    megaApi[0]->pauseTransfers(true, MegaTransfer::TYPE_DOWNLOAD);
+
+    // Queue uploads.
+    std::vector<sdk_test::LocalTempFile> uploadFiles;
+    uploadFiles.reserve(NUM_EACH);
+    MegaUploadOptions opts;
+    opts.mtime = MegaApi::INVALID_CUSTOM_MOD_TIME;
+    for (size_t i = 0; i < NUM_EACH; ++i)
+    {
+        uploadFiles.emplace_back(fs::current_path() /
+                                     (getFilePrefix() + "up_" + std::to_string(i) + ".bin"),
+                                 FILE_SIZE);
+        megaApi[0]->startUpload(uploadFiles[i].getPath().string().c_str(),
+                                rootNode.get(),
+                                nullptr,
+                                &opts,
+                                nullptr);
+    }
+
+    // Queue downloads.
+    sdk_test::LocalTempDir downloadDir(fs::current_path() / (getFilePrefix() + "dl"));
+    for (size_t i = 0; i < NUM_EACH; ++i)
+    {
+        auto node = std::unique_ptr<MegaNode>{megaApi[0]->getNodeByHandle(nodeHandles[i])};
+        ASSERT_TRUE(node);
+        megaApi[0]->startDownload(
+            node.get(),
+            (downloadDir.getPath().string() + LocalPath::localPathSeparator_utf8).c_str(),
+            nullptr,
+            nullptr,
+            false,
+            nullptr,
+            MegaTransfer::COLLISION_CHECK_FINGERPRINT,
+            MegaTransfer::COLLISION_RESOLUTION_NEW_WITH_N,
+            false,
+            nullptr);
+    }
+
+    ASSERT_TRUE(WaitFor(
+        [this]
+        {
+            auto ul = std::unique_ptr<MegaTransferList>{
+                megaApi[0]->getTransfers(MegaTransfer::TYPE_UPLOAD)};
+            auto dl = std::unique_ptr<MegaTransferList>{
+                megaApi[0]->getTransfers(MegaTransfer::TYPE_DOWNLOAD)};
+            return ul && dl && ul->size() == NUM_EACH && dl->size() == NUM_EACH;
+        },
+        defaultTimeoutMs))
+        << "Transfers did not appear in the queue within timeout";
+
+    // Simulate restart.
+    std::unique_ptr<char[]> session(dumpSession());
+    ASSERT_TRUE(session);
+    ASSERT_NO_FATAL_FAILURE(locallogout());
+
+    mListener.reset();
+    ASSERT_NO_FATAL_FAILURE(resumeSession(session.get()));
+    megaApi[0]->pauseTransfers(true, MegaTransfer::TYPE_UPLOAD);
+    megaApi[0]->pauseTransfers(true, MegaTransfer::TYPE_DOWNLOAD);
+    ASSERT_NO_FATAL_FAILURE(fetchnodes(0));
+
+    ASSERT_TRUE(WaitFor(
+        [this]
+        {
+            return mListener.firedCount() >= 1;
+        },
+        defaultTimeoutMs))
+        << "EVENT_TRANSFERS_RESUMED was not fired after session restart";
+
+    EXPECT_EQ(mListener.firedCount(), 1) << "EVENT_TRANSFERS_RESUMED must fire exactly once";
+
+    const auto eventIds = mListener.ids();
+    EXPECT_EQ(static_cast<int>(eventIds.size()), NUM_EACH * 2)
+        << "Event must contain IDs for both the uploads and the downloads";
+
+    // Wait for resumed transfers and verify every event ID maps to a real transfer.
+    ASSERT_TRUE(WaitFor(
+        [this]
+        {
+            auto ul = std::unique_ptr<MegaTransferList>{
+                megaApi[0]->getTransfers(MegaTransfer::TYPE_UPLOAD)};
+            auto dl = std::unique_ptr<MegaTransferList>{
+                megaApi[0]->getTransfers(MegaTransfer::TYPE_DOWNLOAD)};
+            return ul && dl && ul->size() == NUM_EACH && dl->size() == NUM_EACH;
+        },
+        defaultTimeoutMs))
+        << "Resumed transfers did not appear within timeout";
+
+    auto allQueueIds = collectUniqueIds(megaApi[0].get(), MegaTransfer::TYPE_UPLOAD);
+    const auto dlIds = collectUniqueIds(megaApi[0].get(), MegaTransfer::TYPE_DOWNLOAD);
+    allQueueIds.insert(dlIds.begin(), dlIds.end());
+
+    for (uint32_t id: eventIds)
+        EXPECT_TRUE(allQueueIds.count(id))
+            << "Event ID " << id << " does not correspond to any resumed transfer";
+
+    megaApi[0]->pauseTransfers(false, MegaTransfer::TYPE_UPLOAD);
+    megaApi[0]->pauseTransfers(false, MegaTransfer::TYPE_DOWNLOAD);
+    ASSERT_EQ(API_OK, synchronousCancelTransfers(0, MegaTransfer::TYPE_UPLOAD));
     ASSERT_EQ(API_OK, synchronousCancelTransfers(0, MegaTransfer::TYPE_DOWNLOAD));
 }

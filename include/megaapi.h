@@ -6517,6 +6517,7 @@ public:
         EVENT_CONFIRM_USER_EMAIL = 20,
         EVENT_CREDIT_CARD_EXPIRY = 21,
         EVENT_NETWORK_ACTIVITY = 22,
+        EVENT_TRANSFERS_RESUMED = 23,
     };
 
     enum
@@ -6654,6 +6655,10 @@ public:
      *   Use `getNumber("channel")`, `getNumber("activity_type")`, and `getNumber("error_code")`
      *   to get more detail about the event.
      *
+     * - EVENT_TRANSFERS_RESUMED (23):
+     *   Cached transfers from a previous session have been resumed. Use
+     *   getIntegerList() for the unique IDs (MegaTransfer::getUniqueId) of the
+     *   resumed transfers; cached entries that failed to resume are not included.
      *
      * @return Event type, from the MegaEvent::EventType enum.
      */
@@ -6792,6 +6797,20 @@ public:
      *         or an empty optional if not available.
      */
     virtual std::optional<int64_t> getNumber(const std::string& key) const;
+
+    /**
+     * @brief Returns a MegaIntegerList associated with this event
+     *
+     * The SDK retains the ownership of the returned value. It will be valid until
+     * the MegaEvent object is deleted.
+     *
+     * - EVENT_TRANSFERS_RESUMED:
+     *   Returns the list of unique IDs (MegaTransfer::getUniqueId) of the transfers
+     *   that were resumed from the local cache.
+     *
+     * @return MegaIntegerList with event-specific integers, or NULL if not applicable
+     */
+    virtual MegaIntegerList* getIntegerList() const;
 };
 
 /**

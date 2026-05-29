@@ -2366,6 +2366,7 @@ public:
     MegaHandle getHandle() const override;
     const char* getEventString() const override;
     std::optional<int64_t> getNumber(const std::string& key) const override;
+    MegaIntegerList* getIntegerList() const override;
 
     std::string getValidDataToString() const;
     static const char* getEventString(int type);
@@ -2374,6 +2375,7 @@ public:
     void setNumber(int64_t newNumber);
     void setHandle(const MegaHandle& handle);
     void setNumber(const std::string& key, int64_t value);
+    void setIntegerList(MegaIntegerList* integerList);
 
 protected:
     int type;
@@ -2381,6 +2383,7 @@ protected:
     int64_t number = -1;
     std::map<std::string, int64_t> numberMap;
     MegaHandle mHandle = INVALID_HANDLE;
+    std::unique_ptr<MegaIntegerList> mIntegerList;
 };
 
 class MegaAccountBalancePrivate : public MegaAccountBalance
@@ -5390,6 +5393,8 @@ public:
 
         // notify credit card Expiry
         void notify_creditCardExpiry() override;
+
+        void notify_transfers_resumed(const std::vector<uint32_t>& uniqueIds) override;
 
         void sendPendingScRequest();
         void sendPendingRequests();
