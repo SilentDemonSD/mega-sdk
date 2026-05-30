@@ -4642,6 +4642,13 @@ MegaNodeList* MegaApi::listAllNodesByPage(const MegaListAllNodesFilter* filter,
                                      cursor);
 }
 
+MegaDateSectionList* MegaApi::groupAllNodesByDate(const MegaGroupNodesByDateFilter* filter,
+                                                  int order,
+                                                  MegaCancelToken* cancelToken)
+{
+    return pImpl->groupAllNodesByDate(filter, order, convertToCancelToken(cancelToken));
+}
+
 long long MegaApi::getSize(MegaNode *n)
 {
     return pImpl->getSize(n);
@@ -7546,6 +7553,50 @@ bool MegaSearchFilter::useAndForTextQuery() const
     return false;
 }
 
+MegaNodeScopeFilter::MegaNodeScopeFilter() {}
+
+MegaNodeScopeFilter* MegaNodeScopeFilter::copy() const
+{
+    return nullptr;
+}
+
+MegaNodeScopeFilter::~MegaNodeScopeFilter() {}
+
+void MegaNodeScopeFilter::byCategory(int /*mimeType*/) {}
+
+int MegaNodeScopeFilter::byCategory() const
+{
+    return MegaApi::FILE_TYPE_DEFAULT;
+}
+
+void MegaNodeScopeFilter::byLocationHandles(const MegaHandleList* /*ancestorHandles*/) {}
+
+MegaHandleList* MegaNodeScopeFilter::byLocationHandles() const
+{
+    return nullptr;
+}
+
+void MegaNodeScopeFilter::byExcludeLocationHandles(const MegaHandleList* /*excludeHandles*/) {}
+
+MegaHandleList* MegaNodeScopeFilter::byExcludeLocationHandles() const
+{
+    return nullptr;
+}
+
+void MegaNodeScopeFilter::byLocation(int /*scope*/) {}
+
+int MegaNodeScopeFilter::byLocation() const
+{
+    return MegaNodeScopeFilter::LOCATION_CLOUD_DRIVE_AND_VAULT;
+}
+
+void MegaNodeScopeFilter::bySensitivity(int /*filterOption*/) {}
+
+int MegaNodeScopeFilter::bySensitivity() const
+{
+    return MegaNodeScopeFilter::SENSITIVITY_SHOW_ALL;
+}
+
 MegaListAllNodesFilter::MegaListAllNodesFilter() {}
 
 MegaListAllNodesFilter* MegaListAllNodesFilter::createInstance()
@@ -7560,39 +7611,93 @@ MegaListAllNodesFilter* MegaListAllNodesFilter::copy() const
 
 MegaListAllNodesFilter::~MegaListAllNodesFilter() {}
 
-void MegaListAllNodesFilter::byCategory(int /*mimeType*/) {}
+void MegaListAllNodesFilter::byTimestampAnchor(int64_t /*startDate*/,
+                                               int64_t /*endDate*/,
+                                               int /*sectionOrder*/)
+{}
 
-int MegaListAllNodesFilter::byCategory() const
+int64_t MegaListAllNodesFilter::byTimestampAnchorStartDate() const
 {
-    return MegaApi::FILE_TYPE_DEFAULT;
+    return 0;
 }
 
-void MegaListAllNodesFilter::byLocationHandles(const MegaHandleList* /*ancestorHandles*/) {}
+int64_t MegaListAllNodesFilter::byTimestampAnchorEndDate() const
+{
+    return 0;
+}
 
-MegaHandleList* MegaListAllNodesFilter::byLocationHandles() const
+int MegaListAllNodesFilter::byTimestampAnchorOrder() const
+{
+    return -1;
+}
+
+MegaGroupNodesByDateFilter::MegaGroupNodesByDateFilter() {}
+
+MegaGroupNodesByDateFilter* MegaGroupNodesByDateFilter::createInstance()
+{
+    return new MegaGroupNodesByDateFilterPrivate();
+}
+
+MegaGroupNodesByDateFilter* MegaGroupNodesByDateFilter::copy() const
 {
     return nullptr;
 }
 
-void MegaListAllNodesFilter::byExcludeLocationHandles(const MegaHandleList* /*excludeHandles*/) {}
+MegaGroupNodesByDateFilter::~MegaGroupNodesByDateFilter() {}
 
-MegaHandleList* MegaListAllNodesFilter::byExcludeLocationHandles() const
+void MegaGroupNodesByDateFilter::byGranularity(int /*granularity*/) {}
+
+int MegaGroupNodesByDateFilter::byGranularity() const
+{
+    return MegaGroupNodesByDateFilter::SECTION_GRANULARITY_MONTH;
+}
+
+MegaDateSection::MegaDateSection() {}
+
+MegaDateSection::~MegaDateSection() {}
+
+MegaDateSection* MegaDateSection::copy() const
 {
     return nullptr;
 }
 
-void MegaListAllNodesFilter::byLocation(int /*scope*/) {}
-
-int MegaListAllNodesFilter::byLocation() const
+const char* MegaDateSection::getGroupId() const
 {
-    return MegaListAllNodesFilter::LOCATION_CLOUD_DRIVE_AND_VAULT;
+    return nullptr;
 }
 
-void MegaListAllNodesFilter::bySensitivity(int /*filterOption*/) {}
-
-int MegaListAllNodesFilter::bySensitivity() const
+int64_t MegaDateSection::getStartDate() const
 {
-    return MegaListAllNodesFilter::SENSITIVITY_SHOW_ALL;
+    return 0;
+}
+
+int64_t MegaDateSection::getEndDate() const
+{
+    return 0;
+}
+
+int64_t MegaDateSection::getCount() const
+{
+    return 0;
+}
+
+MegaDateSectionList::MegaDateSectionList() {}
+
+MegaDateSectionList::~MegaDateSectionList() {}
+
+MegaDateSectionList* MegaDateSectionList::copy() const
+{
+    return nullptr;
+}
+
+const MegaDateSection* MegaDateSectionList::get(int /*i*/) const
+{
+    return nullptr;
+}
+
+int MegaDateSectionList::size() const
+{
+    return 0;
 }
 
 MegaSearchPage::MegaSearchPage()

@@ -118,6 +118,14 @@ public:
         return false;
     }
 
+    bool groupAllNodesByDate(const mega::DateSectionParams&,
+                             const std::vector<mega::NodeHandle>&,
+                             std::vector<mega::DateSection>&,
+                             mega::CancelToken) override
+    {
+        return false;
+    }
+
     auto getNodeTagsBelow(mega::CancelToken, mega::NodeHandle, const std::string&)
         -> std::optional<std::set<std::string>> override
     {

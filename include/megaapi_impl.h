@@ -3661,31 +3661,70 @@ private:
     static int validateBoolFilterOption(const int value);
 };
 
-class MegaListAllNodesFilterPrivate: public MegaListAllNodesFilter
+// Shared MegaNodeScopeFilter scope virtuals + storage, parameterised on the
+// concrete public filter (MegaListAllNodesFilter or MegaGroupNodesByDateFilter).
+// Lets both Private filters reuse one copy without duplication or a diamond.
+template<class Base>
+class NodeScopeFilterImpl: public Base
 {
 public:
-    MegaListAllNodesFilterPrivate* copy() const override
+    void byCategory(int mimeType) override
     {
-        return new MegaListAllNodesFilterPrivate(*this);
+        if (mimeType <= MegaApi::FILE_TYPE_DEFAULT || MegaApi::FILE_TYPE_LAST < mimeType)
+        {
+            LOG_warn << "Invalid mimeType for node filter: " << mimeType << ". Ignored.";
+            return;
+        }
+        mCategory = mimeType;
     }
-
-    void byCategory(int mimeType) override;
-    void byLocationHandles(const MegaHandleList* ancestorHandles) override;
-    void byExcludeLocationHandles(const MegaHandleList* excludeHandles) override;
-    void byLocation(int scope) override;
-    void bySensitivity(int filterOption) override;
 
     int byCategory() const override
     {
         return mCategory;
     }
 
-    MegaHandleList* byLocationHandles() const override;
-    MegaHandleList* byExcludeLocationHandles() const override;
+    void byLocationHandles(const MegaHandleList* ancestorHandles) override
+    {
+        copyMegaHandleListInto(ancestorHandles, mLocationHandles);
+    }
+
+    MegaHandleList* byLocationHandles() const override
+    {
+        return toMegaHandleList(mLocationHandles);
+    }
+
+    void byExcludeLocationHandles(const MegaHandleList* excludeHandles) override
+    {
+        copyMegaHandleListInto(excludeHandles, mExcludeLocationHandles);
+    }
+
+    MegaHandleList* byExcludeLocationHandles() const override
+    {
+        return toMegaHandleList(mExcludeLocationHandles);
+    }
+
+    void byLocation(int scope) override
+    {
+        mLocation = scope;
+    }
 
     int byLocation() const override
     {
         return mLocation;
+    }
+
+    void bySensitivity(int filterOption) override
+    {
+        switch (filterOption)
+        {
+            case MegaNodeScopeFilter::SENSITIVITY_SHOW_ALL:
+            case MegaNodeScopeFilter::SENSITIVITY_HIDE_SENSITIVE:
+                mSensitivity = filterOption;
+                return;
+            default:
+                LOG_warn << "Invalid value for bySensitivity: " << filterOption << ". Ignored.";
+                return;
+        }
     }
 
     int bySensitivity() const override
@@ -3693,14 +3732,157 @@ public:
         return mSensitivity;
     }
 
-private:
-    static void copyMegaHandleListInto(const MegaHandleList* src, std::vector<MegaHandle>& dst);
+protected:
+    static void copyMegaHandleListInto(const MegaHandleList* src, std::vector<MegaHandle>& dst)
+    {
+        dst.clear();
+        if (!src)
+            return;
+        const unsigned size = src->size();
+        for (unsigned i = 0; i < size; ++i)
+            dst.push_back(src->get(i));
+    }
+
+    static MegaHandleList* toMegaHandleList(const std::vector<MegaHandle>& handles)
+    {
+        auto* list = MegaHandleList::createInstance();
+        for (const MegaHandle h: handles)
+            list->addMegaHandle(h);
+        return list;
+    }
 
     int mCategory = MegaApi::FILE_TYPE_DEFAULT;
     std::vector<MegaHandle> mLocationHandles; // empty == use mLocation scope
     std::vector<MegaHandle> mExcludeLocationHandles; // empty == disabled
-    int mLocation = MegaListAllNodesFilter::LOCATION_CLOUD_DRIVE_AND_VAULT;
-    int mSensitivity = MegaListAllNodesFilter::SENSITIVITY_SHOW_ALL;
+    int mLocation = MegaNodeScopeFilter::LOCATION_CLOUD_DRIVE_AND_VAULT;
+    int mSensitivity = MegaNodeScopeFilter::SENSITIVITY_SHOW_ALL;
+};
+
+class MegaGroupNodesByDateFilterPrivate: public NodeScopeFilterImpl<MegaGroupNodesByDateFilter>
+{
+public:
+    MegaGroupNodesByDateFilterPrivate* copy() const override
+    {
+        return new MegaGroupNodesByDateFilterPrivate(*this);
+    }
+
+    void byGranularity(int granularity) override
+    {
+        mGranularity = granularity;
+    }
+
+    int byGranularity() const override
+    {
+        return mGranularity;
+    }
+
+private:
+    int mGranularity = MegaGroupNodesByDateFilter::SECTION_GRANULARITY_MONTH;
+};
+
+class MegaListAllNodesFilterPrivate: public NodeScopeFilterImpl<MegaListAllNodesFilter>
+{
+public:
+    MegaListAllNodesFilterPrivate* copy() const override
+    {
+        return new MegaListAllNodesFilterPrivate(*this);
+    }
+
+    void byTimestampAnchor(int64_t startDate, int64_t endDate, int sectionOrder) override;
+
+    int64_t byTimestampAnchorStartDate() const override
+    {
+        return mTimestampAnchorStartDate;
+    }
+
+    int64_t byTimestampAnchorEndDate() const override
+    {
+        return mTimestampAnchorEndDate;
+    }
+
+    int byTimestampAnchorOrder() const override
+    {
+        return mTimestampAnchorOrder;
+    }
+
+private:
+    int64_t mTimestampAnchorStartDate = 0;
+    int64_t mTimestampAnchorEndDate = 0;
+    int mTimestampAnchorOrder = -1;
+};
+
+class MegaDateSectionPrivate: public MegaDateSection
+{
+public:
+    MegaDateSectionPrivate(std::string groupId, int64_t startDate, int64_t endDate, int64_t count):
+        mGroupId(std::move(groupId)),
+        mStartDate(startDate),
+        mEndDate(endDate),
+        mCount(count)
+    {}
+
+    MegaDateSectionPrivate* copy() const override
+    {
+        return new MegaDateSectionPrivate(*this);
+    }
+
+    const char* getGroupId() const override
+    {
+        return mGroupId.c_str();
+    }
+
+    int64_t getStartDate() const override
+    {
+        return mStartDate;
+    }
+
+    int64_t getEndDate() const override
+    {
+        return mEndDate;
+    }
+
+    int64_t getCount() const override
+    {
+        return mCount;
+    }
+
+private:
+    std::string mGroupId;
+    int64_t mStartDate;
+    int64_t mEndDate;
+    int64_t mCount;
+};
+
+class MegaDateSectionListPrivate: public MegaDateSectionList
+{
+public:
+    MegaDateSectionListPrivate() = default;
+
+    explicit MegaDateSectionListPrivate(std::vector<MegaDateSectionPrivate> sections):
+        mSections(std::move(sections))
+    {}
+
+    MegaDateSectionListPrivate* copy() const override
+    {
+        return new MegaDateSectionListPrivate(*this);
+    }
+
+    const MegaDateSection* get(int i) const override
+    {
+        if (i < 0 || static_cast<size_t>(i) >= mSections.size())
+            return nullptr;
+        // mSections is immutable after construction, so the returned pointer
+        // stays valid for the life of *this (cf. MegaBannerListPrivate::get).
+        return &mSections[static_cast<size_t>(i)];
+    }
+
+    int size() const override
+    {
+        return static_cast<int>(mSections.size());
+    }
+
+private:
+    std::vector<MegaDateSectionPrivate> mSections;
 };
 
 class MegaSearchPagePrivate : public MegaSearchPage
@@ -4574,11 +4756,22 @@ public:
                                          size_t maxElements,
                                          const MegaSearchCursorOffset* cursor);
 
+        MegaDateSectionList* groupAllNodesByDate(const MegaGroupNodesByDateFilter* filter,
+                                                 int order,
+                                                 CancelToken cancelToken);
+
     private:
         sharedNode_vector searchInNodeManager(const MegaSearchFilter* filter,
                                               int order,
                                               CancelToken cancelToken,
                                               const MegaSearchPage* searchPage);
+
+        // Validates the scope fields shared by both entry points into `out`;
+        // false (logging via @p logPrefix) on null filter or any invalid field.
+        // Does NOT touch `out.order` — each caller validates order itself.
+        bool parseListAllFilterIntoBase(const MegaNodeScopeFilter* filter,
+                                        const char* logPrefix,
+                                        ListAllFilterParams& out) const;
 
         // Validates + converts public MegaListAllNodesFilter / cursor inputs into
         // an internal ListAllNodesParams. Returns std::nullopt (and logs a warning)
@@ -4590,6 +4783,12 @@ public:
                                int order,
                                size_t maxElements,
                                const MegaSearchCursorOffset* cursor) const;
+
+        // Validates + converts public MegaGroupNodesByDateFilter inputs (scope +
+        // granularity) into an internal DateSectionParams. Returns std::nullopt on
+        // filter-level rejection (mime, location, exclude-handles, granularity).
+        std::optional<DateSectionParams>
+            buildDateSectionParams(const MegaGroupNodesByDateFilter* filter, int order) const;
 
     public:
         bool processMegaTree(MegaNode* node, MegaTreeProcessor* processor, bool recursive = 1);

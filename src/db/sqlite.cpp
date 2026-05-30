@@ -1538,6 +1538,12 @@ void SqliteAccountState::finalise()
     }
     mStmtListAllNodesByPage.clear();
 
+    for (auto& s: mStmtDateSections)
+    {
+        sqlite3_finalize(s.second);
+    }
+    mStmtDateSections.clear();
+
     sqlite3_finalize(mStmtNodeTagsBelow);
     mStmtNodeTagsBelow = nullptr;
 
@@ -2531,7 +2537,9 @@ bool SqliteAccountState::searchNodes(const NodeSearchFilter& filter,
 }
 
 // ---------------------------------------------------------------------------
-// listAllNodesByPage helpers (cursor-based pagination)
+// SQL + cache-key helpers for listAllNodesByPage and groupAllNodesByDate.
+// Shared infrastructure (cache-key digit bases, CacheKeyBuilder, subtree-scope
+// SQL) sits up top; the date-section-specific helpers follow.
 // ---------------------------------------------------------------------------
 
 namespace
@@ -2577,6 +2585,8 @@ std::string buildOrderByForListAll(int order)
 //   ?2                              = mimeFilter      (omitted for grouped mime types)
 //   ?filesRootParam     .. +N-1     = filesRoots      (N = numRoots ≥ 1)
 //   ?excludeHandleParam .. +M-1     = excludeHandles  (M = numExcludes, may be 0)
+//   ?timestampAnchorParam           = mStartSeconds (ASC) or mEndSeconds (DESC),
+//                                     scaled by unitsPerSecond (only if hasTimestampAnchor)
 //   ?cursorStartParam onward        = cursor fields   (only if hasCursor)
 //
 // Grouped mime types (ALL_DOCS, ALL_VISUAL_MEDIA) bake the mimetype as a literal in
@@ -2584,51 +2594,112 @@ std::string buildOrderByForListAll(int order)
 
 static const QueryTagId kLaIdPageSize{1};
 
+inline bool isAscOrder(int order)
+{
+    switch (order)
+    {
+        case OrderByClause::DEFAULT_ASC:
+        case OrderByClause::SIZE_ASC:
+        case OrderByClause::CTIME_ASC:
+        case OrderByClause::MTIME_ASC:
+        case OrderByClause::LABEL_ASC:
+        case OrderByClause::FAV_ASC:
+            return true;
+        default:
+            return false;
+    }
+}
+
 // Upper bounds on the filesRoots and excludeHandles IN-lists embedded in the SQL;
-// also cap cache-key packing in computeListAllCacheId.
+// also cap cache-key packing in computeListAllCacheId / computeDateSectionsCacheId.
 constexpr size_t kListAllMaxRoots = kListAllMaxLocationHandles;
 constexpr size_t kListAllMaxExcludes = kListAllMaxLocationHandles;
 
-// Cache key for mStmtListAllNodesByPage. Each input is one
-// "digit" in a positional number, with a different base per
-// digit (its declared range). Every valid combination maps
-// to a unique key — distinct SQL shapes never collide on one
-// prepared statement (numRoots / numExcludes set IN-list
-// arity; excludeSensitive gates a WHERE clause).
-//
-// locationScope is omitted: it only picks rootnodes; SQL
-// depends only on numRoots.
-//
-// Example — first page of photos (mimeType=1, order=1,
-// hasCursor=0, sens=0, numRoots=1, numExcludes=0):
-//   key = 1
-//   key = key * 21 + 1 = 22     // order, base 21
-//   key = key * 2  + 0 = 44     // hasCursor, base 2
-//   key = key * 2  + 0 = 88     // excludeSensitive, base 2
-//   key = key * 3  + 0 = 264    // numRoots-1, base 3
-//   key = key * 4  + 0 = 1056   // numExcludes, base 4
-// → 1056
-inline size_t computeListAllCacheId(MimeType_t mimeType,
-                                    int order,
-                                    bool hasCursor,
-                                    bool excludeSensitive,
-                                    size_t numRoots,
-                                    size_t numExcludes)
+constexpr size_t kListAllOrderStride = static_cast<size_t>(OrderByClause::LAST) + 1;
+constexpr size_t kMimeTypeCount = static_cast<size_t>(MIME_TYPE_MAX) + 1;
+constexpr size_t kAnchorDirectionStride = static_cast<size_t>(AnchorDirectionDigit::Max) + 1;
+constexpr size_t kDateSectionGranularityStride =
+    static_cast<size_t>(DateSectionGranularity::Max) + 1;
+
+// Cache-key space upper bound; assert it stays within 32 bits (size_t is 32-bit on
+// armv7) if a base grows.
+constexpr size_t kListAllMaxCacheKey = kMimeTypeCount * kListAllOrderStride * 2 /* hasCursor */ *
+                                       kAnchorDirectionStride * 2 /* excludeSensitive */ *
+                                       kListAllMaxRoots * (kListAllMaxExcludes + 1);
+static_assert(kListAllMaxCacheKey < (uint64_t{1} << 32),
+              "cache-key product no longer fits in 32 bits; revisit bounds");
+
+// Same bound for the date-section key (granularity digit replaces hasCursor + anchorDir).
+constexpr size_t kDateSectionMaxCacheKey =
+    kMimeTypeCount * kListAllOrderStride * kDateSectionGranularityStride *
+    2 /* excludeSensitive */ * kListAllMaxRoots * (kListAllMaxExcludes + 1);
+static_assert(kDateSectionMaxCacheKey < (uint64_t{1} << 32),
+              "date-section cache-key product no longer fits in 32 bits; revisit bounds");
+
+// CacheKeyBuilder: positional-number digit packing. Each `append(value, base)`
+// does `mKey = mKey * base + value` and asserts `value < base` — the single
+// enforcement point for the no-aliasing invariant (a digit >= its base carries
+// into the next and collides with another shape's cache slot). Pass each digit's
+// true cardinality as `base`. Under NDEBUG the assert is stripped; upper layers
+// (MegaApiImpl::buildListAllParams / buildDateSectionParams) reject out-of-range
+// inputs first.
+class CacheKeyBuilder
 {
-    static_assert(OrderByClause::FAV_DESC == 20, "FAV_DESC changed; update kListAllOrderStride");
-    constexpr size_t kListAllOrderStride = static_cast<size_t>(OrderByClause::FAV_DESC) + 1;
+public:
+    constexpr CacheKeyBuilder() noexcept = default;
 
-    assert(static_cast<size_t>(order) < kListAllOrderStride);
-    assert(numRoots > 0 && numRoots <= kListAllMaxRoots);
-    assert(numExcludes <= kListAllMaxExcludes);
+    constexpr CacheKeyBuilder& append(size_t value, size_t base) noexcept
+    {
+        assert(value < base && "CacheKeyBuilder digit out of range — would alias cache slots");
+        mKey = mKey * base + value;
+        return *this;
+    }
 
-    size_t key = static_cast<size_t>(mimeType);
-    key = key * kListAllOrderStride + static_cast<size_t>(order);
-    key = key * 2 + (hasCursor ? 1u : 0u);
-    key = key * 2 + (excludeSensitive ? 1u : 0u);
-    key = key * kListAllMaxRoots + (numRoots - 1);
-    key = key * (kListAllMaxExcludes + 1) + numExcludes;
-    return key;
+    constexpr size_t build() const noexcept
+    {
+        return mKey;
+    }
+
+private:
+    size_t mKey = 0;
+};
+
+// SQL-shape helpers below (timestamp-column routing, GID/bound/route expressions) stay
+// internal to this TU. The cache-key functions that consume the strides and CacheKeyBuilder
+// above need external linkage for the Sqlite_test regression test, so they can't sit
+// inside the anonymous namespace.
+
+// Metadata for a timeline timestamp column, used by the SQL builders + bind site
+// below; extend via timestampColumnForOrder(). Internal to this TU.
+//
+// SQL-injection invariant: rawColumnExpr / secondsColumnExpr are concatenated into
+// prepared-statement text, so they MUST be hard-coded SQL fragments ("mtime" or
+// "(capture_ts / 1000)") — never user-derived data.
+struct TimestampColumnDescriptor
+{
+    std::string rawColumnExpr; ///< column ref for range / index use (e.g. "mtime")
+    std::string secondsColumnExpr; ///< wrapped to epoch seconds; "(<col>/1000)" for ms columns
+    int64_t invalidSentinel; ///< rows where rawColumnExpr <= this are excluded (today: 0)
+    int64_t unitsPerSecond; ///< 1 for seconds, 1000 for ms; applied at bind time
+    bool descending; ///< drives ORDER BY direction in the section query
+};
+
+// Single source of truth for which OrderByClause values are supported timeline
+// orders and the column / unit / direction each maps to; std::nullopt otherwise.
+std::optional<TimestampColumnDescriptor> timestampColumnForOrder(int order)
+{
+    // ⚠️ Adding a case for a NEW column also requires extending computeListAllCacheId —
+    // its anchor digit only encodes direction, which identifies the column only while
+    // mtime is the sole one here.
+    switch (order)
+    {
+        case OrderByClause::MTIME_ASC:
+            return TimestampColumnDescriptor{"mtime", "mtime", 0, 1, false};
+        case OrderByClause::MTIME_DESC:
+            return TimestampColumnDescriptor{"mtime", "mtime", 0, 1, true};
+        default:
+            return std::nullopt;
+    }
 }
 
 // SQL fragment for the computed isZero column used by LABEL sort orders.
@@ -2903,6 +2974,41 @@ bool bindCursorParamsForListAll(int& sqlResult,
     return true;
 }
 
+// Binds the timestamp-anchor half-bound into stmt at anchorParam: ASC → mStartSeconds,
+// DESC → mEndSeconds (the open side stays unbounded so pages walk into adjacent sections).
+// Returns false only if the anchor order has no timestamp column. The API layer rejects
+// such orders, so the caller treats false as an internal error and aborts the query.
+bool bindTimestampAnchorParamForListAll(int& sqlResult,
+                                        sqlite3_stmt* stmt,
+                                        const TimestampAnchorFilter& anchor,
+                                        int anchorParam)
+{
+    const auto colOpt = timestampColumnForOrder(anchor.mOrder);
+    assert(colOpt.has_value());
+    if (!colOpt)
+        return false;
+    const auto col = *colOpt;
+
+    // Scale seconds → column units. unitsPerSecond is always 1 today, so the overflow
+    // clamps are dead; they guard a future ms-resolution column against signed-overflow UB.
+    auto scaleSat = [&](int64_t v) -> sqlite3_int64
+    {
+        if (col.unitsPerSecond > 1)
+        {
+            if (v > std::numeric_limits<int64_t>::max() / col.unitsPerSecond)
+                return std::numeric_limits<sqlite3_int64>::max();
+            if (v < std::numeric_limits<int64_t>::min() / col.unitsPerSecond)
+                return std::numeric_limits<sqlite3_int64>::min();
+        }
+        return static_cast<sqlite3_int64>(v * col.unitsPerSecond);
+    };
+
+    const sqlite3_int64 bound =
+        isAscOrder(anchor.mOrder) ? scaleSat(anchor.mStartSeconds) : scaleSat(anchor.mEndSeconds);
+    bindValue(sqlResult, stmt, anchorParam, bound, sqlite3_bind_int64);
+    return true;
+}
+
 // Result columns for listAllNodesByPage (omits ctime, which no sort order uses).
 const std::string& listAllNodesResultCols()
 {
@@ -3009,12 +3115,44 @@ ExcludeSqlFragments buildExcludeFragment(int excludeHandleParam, size_t numExclu
     };
 }
 
-std::string buildUpWalkExists(int filesRootParam,
-                              size_t numRoots,
-                              bool excludeSensitive,
-                              int excludeHandleParam,
-                              size_t numExcludes)
+// Subtree-scope SQL slots shared by every list-all / date-section builder: the
+// param slots and counts that drive buildUpWalkExists (root walk, sensitivity,
+// exclude handles). Computed once per public call and threaded down unchanged.
+struct SubtreeScopeSql
 {
+    int filesRootParam; ///< first ?slot of the contiguous filesRoots run
+    size_t numRoots;
+    bool excludeSensitive; ///< walk + reject sensitive ancestors
+    int excludeHandleParam; ///< first ?slot of the contiguous exclude run
+    size_t numExcludes;
+};
+
+// Keyset-pagination cursor slot (list-all only). When `has` is false this is the
+// first page and `startParam` is unused.
+struct CursorSql
+{
+    bool has;
+    int startParam; ///< first ?slot of the cursor's keyset values
+};
+
+// Timestamp-anchor slot (list-all only). When `has` is false there is no anchor;
+// `order` selects the column + direction (its own ASC/DESC), `param` is the
+// single half-bound's ?slot.
+struct AnchorSql
+{
+    bool has;
+    int param;
+    int order;
+};
+
+std::string buildUpWalkExists(const SubtreeScopeSql& scope)
+{
+    const int filesRootParam = scope.filesRootParam;
+    const size_t numRoots = scope.numRoots;
+    const bool excludeSensitive = scope.excludeSensitive;
+    const int excludeHandleParam = scope.excludeHandleParam;
+    const size_t numExcludes = scope.numExcludes;
+
     assert(numRoots >= 1);
     static const std::string undefStr{std::to_string(static_cast<sqlite3_int64>(UNDEF))};
     static const std::string sensMask{std::to_string(1ULL << Node::FLAGS_IS_MARKED_SENSITIVE)};
@@ -3067,15 +3205,395 @@ std::string buildUpWalkExists(int filesRootParam,
 // Builds a single-route SELECT for listAllNodesByPage given a mime filter condition
 // (either a literal value for grouped/CTE routes or a bound parameter for simple ones).
 //
-// Applies three always-on filters in addition to the caller-provided mime filter:
+// Always-on filters (in addition to the caller-provided mime filter):
 //   1. (flags & FLAGS_IS_VERSION) = 0   — exclude file versions
 //   2. EXISTS(walk up to any of the caller-supplied filesRoots) — restrict the row to the
-//                                         subtree rooted at Cloud / Vault / explicit ancestor
-//   3. [cursor] / [bounding]            — keyset pagination, optional
-// When excludeSensitive is true, filter 2 also requires every walked ancestor (n inclusive,
-// matched root exclusive) to have FLAGS_IS_MARKED_SENSITIVE clear.
+//      subtree rooted at Cloud / Vault / explicit ancestor. When excludeSensitive is true,
+//      it also requires every walked ancestor (n inclusive, matched root exclusive) to have
+//      FLAGS_IS_MARKED_SENSITIVE clear.
+// Optional filters, appended in this order before ORDER BY / LIMIT:
+//   3. anchor (when set)  — `<col> > invalidSentinel` plus a half-bound: `<col> >= ?` for an
+//      ASC sectionOrder, `<col> < ?` for DESC. Column/direction come from the anchor's own
+//      sectionOrder, independent of the page order.
+//   4. cursor (when set)  — keyset bounding + pagination predicates (buildBoundingWhereForListAll
+//      / buildCursorWhereForListAll).
+std::string buildListAllRouteSelect(const std::string& mimeFilterClause,
+                                    int order,
+                                    const SubtreeScopeSql& scope,
+                                    const CursorSql& cursor,
+                                    const AnchorSql& anchor)
+{
+    std::vector<std::string> conditions;
+    conditions.push_back(mimeFilterClause);
+    conditions.push_back("(n.flags & " + std::to_string(1ULL << Node::FLAGS_IS_VERSION) + ") = 0");
+    conditions.push_back(buildUpWalkExists(scope));
+
+    if (anchor.has)
+    {
+        // Direction comes from the anchor's own sectionOrder, not the page order.
+        auto col = timestampColumnForOrder(anchor.order);
+        assert(col && "timestampColumnForOrder returned nullopt at anchor build");
+        if (!col)
+            col = timestampColumnForOrder(OrderByClause::MTIME_DESC);
+
+        // Exclude no-timestamp nodes (matches the section query, so anchored pages
+        // match section membership). Needed for both directions: a DESC anchor has no
+        // lower bound and would otherwise leak mtime<=0 nodes that belong to no section.
+        conditions.push_back(col->rawColumnExpr + " > " + std::to_string(col->invalidSentinel));
+
+        const std::string p = "?" + std::to_string(anchor.param);
+        if (isAscOrder(anchor.order))
+        {
+            // ASC anchor: <col> >= mStartSeconds.
+            conditions.push_back(col->rawColumnExpr + " >= " + p);
+        }
+        else
+        {
+            // DESC anchor: <col> < mEndSeconds.
+            conditions.push_back(col->rawColumnExpr + " < " + p);
+        }
+    }
+
+    if (cursor.has)
+    {
+        conditions.push_back(buildBoundingWhereForListAll(order, cursor.startParam));
+        conditions.push_back(buildCursorWhereForListAll(order, cursor.startParam));
+    }
+
+    return "SELECT " + listAllNodesResultCols() +
+           " \n"
+           "FROM nodes AS n \n" +
+           buildWhereClauseForListAll(std::move(conditions)) + "ORDER BY \n" +
+           buildOrderByForListAll(order) +
+           " \n"
+           "LIMIT " +
+           kLaIdPageSize;
+}
+
+std::string buildGroupedListAllQuery(MimeType_t mimeType,
+                                     int order,
+                                     const SubtreeScopeSql& scope,
+                                     const CursorSql& cursor,
+                                     const AnchorSql& anchor)
+{
+    assert(isGroupMimeTypeForListAll(mimeType));
+
+    const auto& routeMimeTypes = groupedMimeTypesForListAll(mimeType);
+    std::string ctes;
+    std::string merged;
+
+    for (size_t i = 0; i < routeMimeTypes.size(); ++i)
+    {
+        const std::string routeName = "route" + std::to_string(i);
+        if (!ctes.empty())
+        {
+            ctes += ",\n\n";
+            merged += "UNION ALL\n";
+        }
+
+        ctes += routeName + " AS (\n" +
+                buildListAllRouteSelect("mimetypeVirtual = " +
+                                            std::to_string(static_cast<int>(routeMimeTypes[i])),
+                                        order,
+                                        scope,
+                                        cursor,
+                                        anchor) +
+                "\n)";
+        merged += "SELECT " + listAllNodesResultCols() + " \nFROM " + routeName + "\n";
+    }
+
+    return "WITH \n\n" + ctes +
+           "\n\n"
+           "SELECT " +
+           listAllNodesResultCols() +
+           " \n"
+           "FROM (\n" +
+           merged +
+           ") AS merged \n"
+           "ORDER BY \n" +
+           buildOrderByForListAll(order) +
+           " \n"
+           "LIMIT " +
+           kLaIdPageSize;
+}
+
+bool validateListAllHandles(const std::vector<NodeHandle>& handles,
+                            size_t maxSize,
+                            const char* label,
+                            const char* maxLabel,
+                            const char* logPrefix)
+{
+    if (handles.size() > maxSize)
+    {
+        LOG_warn << logPrefix << ": " << label << ".size()=" << handles.size() << " exceeds "
+                 << maxLabel << "=" << maxSize;
+        return false;
+    }
+    if (std::any_of(handles.begin(),
+                    handles.end(),
+                    [](NodeHandle h)
+                    {
+                        return h.isUndef();
+                    }))
+    {
+        LOG_warn << logPrefix << ": " << label
+                 << " contains UNDEF handle — caller contract requires all handles to be valid; "
+                    "returning empty";
+        return false;
+    }
+    return true;
+}
+
+// ── Date-section helpers (groupAllNodesByDate) ───────────────────────────────
 //
-// Rendered SQL examples (regenerate from this builder + buildUpWalkExists if either changes):
+// Inner-SELECT gid expression: gid := strftime(<fmt>, <secondsExpr>, 'unixepoch').
+// strftime takes the unix-time value + 'unixepoch' modifier directly (no nested
+// datetime() needed). Granularity picks the strftime format; secondsExpr comes
+// from the descriptor so a future column stored in milliseconds can wrap as
+// "(col / 1000)" without changing this builder.
+std::string buildDateSectionGidExpr(const TimestampColumnDescriptor& col,
+                                    DateSectionGranularity granularity)
+{
+    const char* fmt = nullptr;
+    switch (granularity)
+    {
+        case DateSectionGranularity::Day:
+            fmt = "'%Y-%m-%d'";
+            break;
+        case DateSectionGranularity::Month:
+            fmt = "'%Y-%m'";
+            break;
+        case DateSectionGranularity::Year:
+            fmt = "'%Y'";
+            break;
+        default:
+            assert(false && "unknown DateSectionGranularity");
+            fmt = "'%Y-%m'";
+            break;
+    }
+    return "strftime(" + std::string(fmt) + ", " + col.secondsColumnExpr + ", 'unixepoch')";
+}
+
+// Outer-SELECT bound expressions: gid is concatenated with a fixed datetime
+// tail to form a SQLite-recognised literal ('YYYY-MM-DD HH:MM:SS'), then
+// strftime('%s', …) returns the epoch seconds as TEXT; CAST AS INTEGER so
+// sqlite3_column_int64() reads it directly. modifier picks the next bucket
+// boundary (DAY/MONTH/YEAR).
+struct DateSectionBoundExprs
+{
+    std::string startExpr; ///< bucket lower bound (inclusive), as int64
+    std::string endExpr; ///< bucket upper bound (exclusive), as int64
+};
+
+DateSectionBoundExprs buildDateSectionBoundExprs(DateSectionGranularity granularity)
+{
+    const char* concatTail = nullptr;
+    const char* modifier = nullptr;
+    switch (granularity)
+    {
+        case DateSectionGranularity::Day:
+            concatTail = "' 00:00:00'"; // gid e.g. "2024-07-15" → "2024-07-15 00:00:00"
+            modifier = "'+1 day'";
+            break;
+        case DateSectionGranularity::Month:
+            concatTail = "'-01 00:00:00'"; // gid e.g. "2024-07" → "2024-07-01 00:00:00"
+            modifier = "'+1 month'";
+            break;
+        case DateSectionGranularity::Year:
+            concatTail = "'-01-01 00:00:00'"; // gid e.g. "2024" → "2024-01-01 00:00:00"
+            modifier = "'+1 year'";
+            break;
+        default:
+            assert(false && "unknown DateSectionGranularity");
+            concatTail = "'-01 00:00:00'";
+            modifier = "'+1 month'";
+            break;
+    }
+    const std::string base = std::string("gid || ") + concatTail;
+    return {
+        "CAST(strftime('%s', " + base + ") AS INTEGER)",
+        "CAST(strftime('%s', " + base + ", " + modifier + ") AS INTEGER)",
+    };
+}
+
+// Per-route inner SELECT — same WHERE shape as buildListAllRouteSelect plus
+// the "<col> > invalidSentinel" guard, GROUP BY gid. Returns columns
+// (gid, cnt). Used as a CTE body by the simple-mime and grouped paths.
+std::string buildDateSectionInnerSelect(const std::string& mimeFilterClause,
+                                        const TimestampColumnDescriptor& col,
+                                        DateSectionGranularity granularity,
+                                        const SubtreeScopeSql& scope)
+{
+    const std::string gidExpr = buildDateSectionGidExpr(col, granularity);
+
+    std::vector<std::string> conditions;
+    conditions.push_back(mimeFilterClause);
+    conditions.push_back("(n.flags & " + std::to_string(1ULL << Node::FLAGS_IS_VERSION) + ") = 0");
+    // `<col> > invalidSentinel` is the SDK's canonical "has timestamp" check
+    // (mega_invalid_timestamp == 0); also prevents a spurious "1970-..." bucket.
+    conditions.push_back(col.rawColumnExpr + " > " + std::to_string(col.invalidSentinel));
+    conditions.push_back(buildUpWalkExists(scope));
+
+    return "SELECT " + gidExpr +
+           " AS gid, \n"
+           "       COUNT(*) AS cnt \n"
+           "FROM nodes AS n \n" +
+           buildWhereClauseForListAll(std::move(conditions)) + "GROUP BY gid";
+}
+
+// Simple-mime full section query: 2-tier CTE — inner does GROUP BY, outer
+// adds bucket_start / bucket_end computed from gid string. Result columns:
+// (gid TEXT, bucket_start INTEGER, bucket_end INTEGER, cnt INTEGER).
+//
+// See SqliteAccountState::groupAllNodesByDate for a rendered SQL example.
+std::string buildDateSectionRouteSelect(const std::string& mimeFilterClause,
+                                        int order,
+                                        DateSectionGranularity granularity,
+                                        const SubtreeScopeSql& scope)
+{
+    auto col = timestampColumnForOrder(order);
+    assert(col && "timestampColumnForOrder returned nullopt at date-section build");
+    if (!col)
+        col = timestampColumnForOrder(OrderByClause::MTIME_DESC);
+
+    const std::string innerSelect =
+        buildDateSectionInnerSelect(mimeFilterClause, *col, granularity, scope);
+    const auto bounds = buildDateSectionBoundExprs(granularity);
+
+    return "WITH grouped AS ( \n" + innerSelect +
+           " \n"
+           ") \n"
+           "SELECT gid, \n"
+           "       " +
+           bounds.startExpr +
+           " AS bucket_start, \n"
+           "       " +
+           bounds.endExpr +
+           " AS bucket_end, \n"
+           "       cnt \n"
+           "FROM grouped \n"
+           // gid is a zero-padded ISO fragment from strftime, so lexicographic
+           // ORDER BY matches chronological order. A non-ISO gid would break this.
+           "ORDER BY gid " +
+           (col->descending ? "DESC" : "ASC");
+}
+
+// Date-section only: literal IN-list lets grouped mime share the simple-mime
+// CTE shape. listAllNodesByPage keeps the per-route UNION ALL form for its
+// per-route LIMIT.
+std::string buildGroupedMimeInListClause(MimeType_t mimeType)
+{
+    assert(isGroupMimeTypeForListAll(mimeType));
+    const auto& routeMimeTypes = groupedMimeTypesForListAll(mimeType);
+
+    std::string inList;
+    for (size_t i = 0; i < routeMimeTypes.size(); ++i)
+    {
+        if (i > 0)
+            inList += ", ";
+        inList += std::to_string(static_cast<int>(routeMimeTypes[i]));
+    }
+    return "mimetypeVirtual IN (" + inList + ")";
+}
+
+} // anonymous namespace (sqlite query + cache-key helpers)
+
+// Cache key for mStmtListAllNodesByPage. Distinct SQL shapes never collide
+// on one prepared statement — numRoots / numExcludes set IN-list arity;
+// excludeSensitive gates a WHERE clause; hasCursor adds cursor predicates;
+// anchorDir picks one of three half-bound shapes (none / >= / <).
+// locationScope is omitted: it only picks rootnodes; SQL depends only on
+// numRoots.
+//
+// Digit order: mimeType, order, hasCursor, anchorDir, excludeSensitive,
+// numRoots-1, numExcludes (see the append() chain below for each base).
+size_t computeListAllCacheId(MimeType_t mimeType,
+                             int order,
+                             bool hasCursor,
+                             AnchorDirectionDigit anchorDir,
+                             bool excludeSensitive,
+                             size_t numRoots,
+                             size_t numExcludes)
+{
+    assert(numRoots > 0); // numRoots - 1 below would underflow; append() bounds the rest
+
+    // anchorDir encodes only the anchor direction, not which timestamp column.
+    // Safe only while timestampColumnForOrder() has a single column (mtime); a
+    // second column would need its identity folded in here too (see the warning
+    // at timestampColumnForOrder).
+    return CacheKeyBuilder{}
+        .append(static_cast<size_t>(mimeType), kMimeTypeCount)
+        .append(static_cast<size_t>(order), kListAllOrderStride)
+        .append(hasCursor ? 1u : 0u, 2)
+        .append(static_cast<size_t>(anchorDir), kAnchorDirectionStride)
+        .append(excludeSensitive ? 1u : 0u, 2)
+        .append(numRoots - 1, kListAllMaxRoots)
+        .append(numExcludes, kListAllMaxExcludes + 1)
+        .build();
+}
+
+// Cache key for mStmtDateSections — same shape as computeListAllCacheId but
+// with a base-3 granularity digit instead of hasCursor + anchorDir (the
+// section query has no cursor and no timestamp-anchor filter). Declared in
+// include/mega/db/sqlite.h for the same test-reach reason as above.
+size_t computeDateSectionsCacheId(MimeType_t mimeType,
+                                  int order,
+                                  DateSectionGranularity granularity,
+                                  bool excludeSensitive,
+                                  size_t numRoots,
+                                  size_t numExcludes)
+{
+    assert(numRoots > 0);
+
+    return CacheKeyBuilder{}
+        .append(static_cast<size_t>(mimeType), kMimeTypeCount)
+        .append(static_cast<size_t>(order), kListAllOrderStride)
+        .append(static_cast<size_t>(granularity), kDateSectionGranularityStride)
+        .append(excludeSensitive ? 1u : 0u, 2)
+        .append(numRoots - 1, kListAllMaxRoots)
+        .append(numExcludes, kListAllMaxExcludes + 1)
+        .build();
+}
+
+bool SqliteAccountState::validateListAllEntry(MimeType_t mimeType,
+                                              const std::vector<NodeHandle>& filesRoots,
+                                              const std::vector<NodeHandle>& excludeHandles,
+                                              const char* logPrefix)
+{
+    if (!db)
+        return false;
+
+    if (mimeType <= MIME_TYPE_UNKNOWN || mimeType > MIME_TYPE_ALL_VISUAL_MEDIA)
+    {
+        LOG_warn << logPrefix << ": invalid mimeType value " << mimeType;
+        return false;
+    }
+
+    if (filesRoots.empty())
+    {
+        LOG_warn << logPrefix << ": filesRoots is empty; returning empty";
+        return false;
+    }
+
+    if (!validateListAllHandles(filesRoots,
+                                kListAllMaxRoots,
+                                "filesRoots",
+                                "kListAllMaxRoots",
+                                logPrefix))
+        return false;
+
+    if (!validateListAllHandles(excludeHandles,
+                                kListAllMaxExcludes,
+                                "excludeHandles",
+                                "kListAllMaxExcludes",
+                                logPrefix))
+        return false;
+
+    return true;
+}
+
+// Rendered SQL examples for the query this method assembles and binds (regenerate from
+// buildListAllRouteSelect + buildUpWalkExists if either changes):
 //
 // Example 1 — ORDER_DEFAULT_ASC, 1 root, no cursor, no excludes, excludeSensitive=false.
 // Slot layout: ?1=LIMIT, ?2=mimeFilter, ?3=filesRoots[0].
@@ -3097,9 +3615,12 @@ std::string buildUpWalkExists(int filesRootParam,
 //   ORDER BY name COLLATE NATURALNOCASE ASC, nodehandle ASC
 //   LIMIT ?1
 //
-// Example 2 — ORDER_SIZE_DESC, 2 roots, hasCursor=true, 1 exclude, excludeSensitive=true.
+// Example 2 — ORDER_SIZE_DESC, 2 roots, hasCursor=true, 1 exclude, excludeSensitive=true,
+// byTimestampAnchor with MTIME_DESC sectionOrder. The anchor column + direction come from
+// its own sectionOrder, independent of the SIZE_DESC page order; its slot sits before the
+// cursor slots.
 // Slot layout: ?1=LIMIT, ?2=mimeFilter, ?3..?4=filesRoots, ?5=excludeHandles[0],
-// ?6=cursor.lastSize, ?7=cursor.lastName, ?8=cursor.lastHandle.
+// ?6=anchor bound, ?7=cursor.lastSize, ?8=cursor.lastName, ?9=cursor.lastHandle.
 //
 //   SELECT nodehandle, counter, node, type, sizeVirtual, mtime, name, label, fav
 //   FROM nodes AS n
@@ -3126,158 +3647,29 @@ std::string buildUpWalkExists(int filesRootParam,
 //         AND up.h NOT IN (?5)
 //       LIMIT 1
 //     )
-//     AND (sizeVirtual < ?6 OR (sizeVirtual = ?6 AND name <= ?7 COLLATE NATURALNOCASE))
-//     AND (sizeVirtual < ?6
-//          OR (sizeVirtual = ?6 AND name < ?7 COLLATE NATURALNOCASE)
-//          OR (sizeVirtual = ?6 AND name = ?7 COLLATE NATURALNOCASE AND nodehandle < ?8))
+//     AND mtime > 0    -- anchor: exclude no-timestamp nodes
+//     AND mtime < ?6   -- anchor: MTIME_DESC half-bound (< endDate)
+//     AND (sizeVirtual < ?7 OR (sizeVirtual = ?7 AND name <= ?8 COLLATE NATURALNOCASE))
+//     AND (sizeVirtual < ?7
+//          OR (sizeVirtual = ?7 AND name < ?8 COLLATE NATURALNOCASE)
+//          OR (sizeVirtual = ?7 AND name = ?8 COLLATE NATURALNOCASE AND nodehandle < ?9))
 //   ORDER BY sizeVirtual DESC, name COLLATE NATURALNOCASE DESC, nodehandle DESC
 //   LIMIT ?1
-std::string buildListAllRouteSelect(const std::string& mimeFilterClause,
-                                    int order,
-                                    bool hasCursor,
-                                    int cursorStartParam,
-                                    int filesRootParam,
-                                    size_t numRoots,
-                                    bool excludeSensitive,
-                                    int excludeHandleParam,
-                                    size_t numExcludes)
-{
-    std::vector<std::string> conditions;
-    conditions.push_back(mimeFilterClause);
-    conditions.push_back("(n.flags & " + std::to_string(1ULL << Node::FLAGS_IS_VERSION) + ") = 0");
-    conditions.push_back(buildUpWalkExists(filesRootParam,
-                                           numRoots,
-                                           excludeSensitive,
-                                           excludeHandleParam,
-                                           numExcludes));
-
-    if (hasCursor)
-    {
-        conditions.push_back(buildBoundingWhereForListAll(order, cursorStartParam));
-        conditions.push_back(buildCursorWhereForListAll(order, cursorStartParam));
-    }
-
-    return "SELECT " + listAllNodesResultCols() +
-           " \n"
-           "FROM nodes AS n \n" +
-           buildWhereClauseForListAll(std::move(conditions)) + "ORDER BY \n" +
-           buildOrderByForListAll(order) +
-           " \n"
-           "LIMIT " +
-           kLaIdPageSize;
-}
-
-std::string buildGroupedListAllQuery(MimeType_t mimeType,
-                                     int order,
-                                     bool hasCursor,
-                                     int cursorStartParam,
-                                     int filesRootParam,
-                                     size_t numRoots,
-                                     bool excludeSensitive,
-                                     int excludeHandleParam,
-                                     size_t numExcludes)
-{
-    assert(isGroupMimeTypeForListAll(mimeType));
-
-    const auto& routeMimeTypes = groupedMimeTypesForListAll(mimeType);
-    std::string ctes;
-    std::string merged;
-
-    for (size_t i = 0; i < routeMimeTypes.size(); ++i)
-    {
-        const std::string routeName = "route" + std::to_string(i);
-        if (!ctes.empty())
-        {
-            ctes += ",\n\n";
-            merged += "UNION ALL\n";
-        }
-
-        ctes += routeName + " AS (\n" +
-                buildListAllRouteSelect("mimetypeVirtual = " +
-                                            std::to_string(static_cast<int>(routeMimeTypes[i])),
-                                        order,
-                                        hasCursor,
-                                        cursorStartParam,
-                                        filesRootParam,
-                                        numRoots,
-                                        excludeSensitive,
-                                        excludeHandleParam,
-                                        numExcludes) +
-                "\n)";
-        merged += "SELECT " + listAllNodesResultCols() + " \nFROM " + routeName + "\n";
-    }
-
-    return "WITH \n\n" + ctes +
-           "\n\n"
-           "SELECT " +
-           listAllNodesResultCols() +
-           " \n"
-           "FROM (\n" +
-           merged +
-           ") AS merged \n"
-           "ORDER BY \n" +
-           buildOrderByForListAll(order) +
-           " \n"
-           "LIMIT " +
-           kLaIdPageSize;
-}
-
-bool validateListAllHandles(const std::vector<NodeHandle>& handles,
-                            size_t maxSize,
-                            const char* label,
-                            const char* maxLabel)
-{
-    if (handles.size() > maxSize)
-    {
-        LOG_warn << "listAllNodesByPage: " << label << ".size()=" << handles.size() << " exceeds "
-                 << maxLabel << "=" << maxSize;
-        return false;
-    }
-    if (std::any_of(handles.begin(),
-                    handles.end(),
-                    [](NodeHandle h)
-                    {
-                        return h.isUndef();
-                    }))
-    {
-        LOG_warn << "listAllNodesByPage: " << label
-                 << " contains UNDEF handle — caller contract requires all handles to be valid; "
-                    "returning empty";
-        return false;
-    }
-    return true;
-}
-
-} // anonymous namespace (listAllNodesByPage helpers)
-
+//
+// The optional pieces layer onto that skeleton: excludeSensitive/excludeHandles
+// add sensSeen/excSeen columns to the up-walk CTE (buildUpWalkExists); a cursor
+// appends keyset predicates (buildCursorWhereForListAll); an anchor appends a
+// half-bound on the timestamp column (see buildListAllRouteSelect).
 bool SqliteAccountState::listAllNodesByPage(
     const ListAllNodesParams& params,
     const std::vector<NodeHandle>& filesRoots,
     std::vector<std::pair<NodeHandle, NodeSerialized>>& nodes,
     CancelToken cancelFlag)
 {
-    if (!db)
-        return false;
-
-    if (params.mimeType == MIME_TYPE_UNKNOWN)
-    {
-        LOG_warn << "listAllNodesByPage: invalid mimeType value " << params.mimeType;
-        return false;
-    }
-
-    if (filesRoots.empty())
-    {
-        LOG_warn << "listAllNodesByPage: filesRoots is empty; returning empty";
-        return false;
-    }
-
-    if (!validateListAllHandles(filesRoots, kListAllMaxRoots, "filesRoots", "kListAllMaxRoots"))
-        return false;
-
-    if (!validateListAllHandles(params.excludeHandles,
-                                kListAllMaxExcludes,
-                                "excludeHandles",
-                                "kListAllMaxExcludes"))
+    if (!validateListAllEntry(params.mimeType,
+                              filesRoots,
+                              params.excludeHandles,
+                              "listAllNodesByPage"))
         return false;
 
     if (cancelFlag.exists())
@@ -3287,6 +3679,7 @@ bool SqliteAccountState::listAllNodesByPage(
                                  static_cast<void*>(&cancelFlag));
 
     const bool hasCursor = params.cursor.has_value();
+    const bool hasTimestampAnchor = params.timestampAnchor.has_value();
     const size_t numRoots = filesRoots.size();
     const size_t numExcludes = params.excludeHandles.size();
 
@@ -3295,20 +3688,42 @@ bool SqliteAccountState::listAllNodesByPage(
     // Group mime types use literal per-route WHERE clauses in CTEs — no parameter slot needed.
     const bool mimeFilterNeedsParam = !isGroupMimeType;
 
+    // Anchor presence + direction (none / ASC / DESC) is a base-3 cache-key
+    // digit. Direction comes from the anchor's own sectionOrder, so the ASC and
+    // DESC SQL shapes get distinct cache slots.
+    const AnchorDirectionDigit anchorDir = !hasTimestampAnchor ? AnchorDirectionDigit::None :
+                                           isAscOrder(params.timestampAnchor->mOrder) ?
+                                                                 AnchorDirectionDigit::Asc :
+                                                                 AnchorDirectionDigit::Desc;
     const size_t cacheId = computeListAllCacheId(params.mimeType,
                                                  params.order,
                                                  hasCursor,
+                                                 anchorDir,
                                                  params.excludeSensitive,
                                                  numRoots,
                                                  numExcludes);
-    sqlite3_stmt*& stmt = mStmtListAllNodesByPage[cacheId];
+    // Look up without creating a slot; cache only after a successful prepare
+    // (below), so a prepare failure leaves no dead nullptr entry behind.
+    auto stmtIt = mStmtListAllNodesByPage.find(cacheId);
+    sqlite3_stmt* stmt = (stmtIt != mStmtListAllNodesByPage.end()) ? stmtIt->second : nullptr;
 
     // Slot layout: ?1=pageSize, optional mimeFilter, numRoots contiguous filesRoot slots,
-    // numExcludes contiguous exclude-handle slots, then the optional cursor slots.
+    // numExcludes contiguous exclude-handle slots, then the optional timestamp-anchor
+    // slot (1 when set), then the optional cursor slots.
     const int mimeFilterParam = 2;
     const int filesRootParam = mimeFilterParam + (mimeFilterNeedsParam ? 1 : 0);
     const int excludeHandleParam = filesRootParam + static_cast<int>(numRoots);
-    const int cursorStartParam = excludeHandleParam + static_cast<int>(numExcludes);
+    const int timestampAnchorParam = excludeHandleParam + static_cast<int>(numExcludes);
+    const int cursorStartParam = timestampAnchorParam + (hasTimestampAnchor ? 1 : 0);
+    const int timestampAnchorOrder = hasTimestampAnchor ? params.timestampAnchor->mOrder : 0;
+
+    const SubtreeScopeSql scope{filesRootParam,
+                                numRoots,
+                                params.excludeSensitive,
+                                excludeHandleParam,
+                                numExcludes};
+    const CursorSql cursor{hasCursor, cursorStartParam};
+    const AnchorSql anchor{hasTimestampAnchor, timestampAnchorParam, timestampAnchorOrder};
 
     int sqlResult = SQLITE_OK;
     if (!stmt)
@@ -3316,27 +3731,15 @@ bool SqliteAccountState::listAllNodesByPage(
         std::string query;
         if (isGroupMimeType)
         {
-            query = buildGroupedListAllQuery(params.mimeType,
-                                             params.order,
-                                             hasCursor,
-                                             cursorStartParam,
-                                             filesRootParam,
-                                             numRoots,
-                                             params.excludeSensitive,
-                                             excludeHandleParam,
-                                             numExcludes);
+            query = buildGroupedListAllQuery(params.mimeType, params.order, scope, cursor, anchor);
         }
         else
         {
             query = buildListAllRouteSelect("mimetypeVirtual = ?" + std::to_string(mimeFilterParam),
                                             params.order,
-                                            hasCursor,
-                                            cursorStartParam,
-                                            filesRootParam,
-                                            numRoots,
-                                            params.excludeSensitive,
-                                            excludeHandleParam,
-                                            numExcludes);
+                                            scope,
+                                            cursor,
+                                            anchor);
         }
         sqlResult = sqlite3_prepare_v2(db, query.c_str(), -1, &stmt, nullptr);
         if (sqlResult != SQLITE_OK)
@@ -3345,6 +3748,7 @@ bool SqliteAccountState::listAllNodesByPage(
             errorHandler(sqlResult, "List all nodes by page (cursor-based)", true);
             return false;
         }
+        mStmtListAllNodesByPage[cacheId] = stmt; // cache only after a successful prepare
     }
 
     const sqlite3_int64 pageSize =
@@ -3376,6 +3780,18 @@ bool SqliteAccountState::listAllNodesByPage(
                   sqlite3_bind_int64);
     }
 
+    if (hasTimestampAnchor && !bindTimestampAnchorParamForListAll(sqlResult,
+                                                                  stmt,
+                                                                  *params.timestampAnchor,
+                                                                  timestampAnchorParam))
+    {
+        LOG_warn << "listAllNodesByPage: unknown timestamp-anchor order "
+                 << params.timestampAnchor->mOrder;
+        sqlite3_progress_handler(db, -1, nullptr, nullptr);
+        sqlite3_reset(stmt);
+        return false;
+    }
+
     if (hasCursor && !bindCursorParamsForListAll(sqlResult,
                                                  stmt,
                                                  params.order,
@@ -3396,6 +3812,179 @@ bool SqliteAccountState::listAllNodesByPage(
     sqlite3_reset(stmt);
 
     return result;
+}
+
+// Rendered SQL example for the query this method assembles and binds (regenerate from
+// buildDateSectionRouteSelect if it changes):
+//
+// ORDER_MODIFICATION_DESC, Month granularity, simple mime, 1 root, no excludes,
+// excludeSensitive=false. Slot layout: ?1=mimeFilter, ?2=filesRoots[0]. No LIMIT,
+// no cursor, no anchor — the section query always spans the whole scope.
+//
+//   WITH grouped AS (
+//     SELECT strftime('%Y-%m', mtime, 'unixepoch') AS gid,
+//            COUNT(*) AS cnt
+//     FROM nodes AS n
+//     WHERE mimetypeVirtual = ?1
+//       AND (n.flags & 1) = 0
+//       AND mtime > 0
+//       AND EXISTS (
+//         WITH RECURSIVE up(h, sensSeen) AS (
+//           SELECT n.parenthandle, 0
+//           UNION ALL
+//           SELECT p.parenthandle, 0
+//           FROM nodes AS p JOIN up ON p.nodehandle = up.h
+//           WHERE up.h IS NOT NULL AND up.h != -1   -- UNDEF
+//         )
+//         SELECT 1 FROM up WHERE up.h IN (?2) LIMIT 1
+//       )
+//     GROUP BY gid
+//   )
+//   SELECT gid,
+//          CAST(strftime('%s', gid || '-01 00:00:00') AS INTEGER) AS bucket_start,
+//          CAST(strftime('%s', gid || '-01 00:00:00', '+1 month') AS INTEGER) AS bucket_end,
+//          cnt
+//   FROM grouped
+//   ORDER BY gid DESC
+//
+// Day/Year swap the strftime format and the bucket concat-tail/modifier (see
+// buildDateSectionGidExpr / buildDateSectionBoundExprs); a grouped mime replaces
+// `mimetypeVirtual = ?1` with a literal IN-list and drops the ?1 slot;
+// excludeSensitive / excludes add sensSeen / excSeen columns to the up-walk CTE.
+bool SqliteAccountState::groupAllNodesByDate(const DateSectionParams& params,
+                                             const std::vector<NodeHandle>& filesRoots,
+                                             std::vector<DateSection>& out,
+                                             CancelToken cancelFlag)
+{
+    if (!validateListAllEntry(params.mimeType,
+                              filesRoots,
+                              params.excludeHandles,
+                              "groupAllNodesByDate"))
+        return false;
+
+    if (!timestampColumnForOrder(params.order))
+    {
+        LOG_warn << "groupAllNodesByDate: unsupported order " << params.order;
+        return false;
+    }
+
+    const int gran = static_cast<int>(params.granularity);
+    if (gran < static_cast<int>(DateSectionGranularity::Day) ||
+        gran > static_cast<int>(DateSectionGranularity::Year))
+    {
+        LOG_warn << "groupAllNodesByDate: invalid granularity " << gran;
+        return false;
+    }
+
+    if (cancelFlag.exists())
+        sqlite3_progress_handler(db,
+                                 NUM_VIRTUAL_MACHINE_INSTRUCTIONS,
+                                 SqliteAccountState::progressHandler,
+                                 static_cast<void*>(&cancelFlag));
+
+    const size_t numRoots = filesRoots.size();
+    const size_t numExcludes = params.excludeHandles.size();
+
+    const bool isGroupMimeType = isGroupMimeTypeForListAll(params.mimeType);
+    const bool mimeFilterNeedsParam = !isGroupMimeType;
+
+    const size_t cacheId = computeDateSectionsCacheId(params.mimeType,
+                                                      params.order,
+                                                      params.granularity,
+                                                      params.excludeSensitive,
+                                                      numRoots,
+                                                      numExcludes);
+
+    auto stmtIt = mStmtDateSections.find(cacheId);
+    sqlite3_stmt* stmt = (stmtIt != mStmtDateSections.end()) ? stmtIt->second : nullptr;
+
+    // Slot layout: optional mimeFilter (?1 when set), numRoots contiguous filesRoot
+    // slots, numExcludes contiguous exclude-handle slots. No pageSize, no cursor.
+    const int mimeFilterParam = 1;
+    const int filesRootParam = mimeFilterParam + (mimeFilterNeedsParam ? 1 : 0);
+    const int excludeHandleParam = filesRootParam + static_cast<int>(numRoots);
+
+    int sqlResult = SQLITE_OK;
+    if (!stmt)
+    {
+        // Grouped: literal `IN (X, Y, ...)`; simple: bound `= ?`.
+        const std::string mimeFilterClause =
+            isGroupMimeType ? buildGroupedMimeInListClause(params.mimeType) :
+                              ("mimetypeVirtual = ?" + std::to_string(mimeFilterParam));
+
+        const SubtreeScopeSql scope{filesRootParam,
+                                    numRoots,
+                                    params.excludeSensitive,
+                                    excludeHandleParam,
+                                    numExcludes};
+        const std::string query =
+            buildDateSectionRouteSelect(mimeFilterClause, params.order, params.granularity, scope);
+
+        sqlResult = sqlite3_prepare_v2(db, query.c_str(), -1, &stmt, nullptr);
+        if (sqlResult != SQLITE_OK)
+        {
+            sqlite3_progress_handler(db, -1, nullptr, nullptr);
+            errorHandler(sqlResult, "Group all nodes by date", true);
+            // No slot was inserted, so there's nothing to erase and no dangling ref.
+            return false;
+        }
+        mStmtDateSections[cacheId] = stmt; // cache only after a successful prepare
+    }
+
+    if (mimeFilterNeedsParam)
+        bindValue(sqlResult,
+                  stmt,
+                  mimeFilterParam,
+                  static_cast<int>(params.mimeType),
+                  sqlite3_bind_int);
+
+    for (size_t i = 0; i < numRoots; ++i)
+    {
+        bindValue(sqlResult,
+                  stmt,
+                  filesRootParam + static_cast<int>(i),
+                  static_cast<sqlite3_int64>(filesRoots[i].as8byte()),
+                  sqlite3_bind_int64);
+    }
+
+    for (size_t i = 0; i < numExcludes; ++i)
+    {
+        bindValue(sqlResult,
+                  stmt,
+                  excludeHandleParam + static_cast<int>(i),
+                  static_cast<sqlite3_int64>(params.excludeHandles[i].as8byte()),
+                  sqlite3_bind_int64);
+    }
+
+    if (sqlResult == SQLITE_OK)
+    {
+        int rc;
+        while ((rc = sqlite3_step(stmt)) == SQLITE_ROW)
+        {
+            const unsigned char* gidText = sqlite3_column_text(stmt, 0);
+            if (!gidText)
+                continue; // Defensive: WHERE <col> > sentinel prevents NULL gid
+                          // unless DB/driver is corrupted.
+
+            // Column order matches the outer SELECT in buildDateSectionRouteSelect
+            // (both simple-mime and grouped-mime paths): (gid, bucket_start,
+            // bucket_end, cnt).
+            DateSection s;
+            s.mGroupId = reinterpret_cast<const char*>(gidText);
+            s.mStartDate = sqlite3_column_int64(stmt, 1);
+            s.mEndDate = sqlite3_column_int64(stmt, 2);
+            s.mCount = sqlite3_column_int64(stmt, 3);
+            out.push_back(std::move(s));
+        }
+        if (rc != SQLITE_DONE)
+            sqlResult = rc;
+    }
+
+    sqlite3_progress_handler(db, -1, nullptr, nullptr);
+    errorHandler(sqlResult, "Group all nodes by date", true);
+    sqlite3_reset(stmt);
+
+    return sqlResult == SQLITE_OK;
 }
 
 bool SqliteAccountState::getNodesByFingerprintNoMtime(

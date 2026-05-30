@@ -61,7 +61,9 @@ target_sources(test_unit
     uripath_test.cpp
     Sqlite_test.cpp
     SqliteLexicographicListing_test.cpp
+    DateSection_test.cpp
     SqliteNodesPerf_test.cpp
+    SqliteDateSectionsPerf_test.cpp
     file_access_tests.cpp
     jsonsplitter_test.cpp
     megaclient_test.cpp

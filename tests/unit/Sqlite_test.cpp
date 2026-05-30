@@ -9,6 +9,7 @@
 #include <mega/db/sqlite.h>
 #include <mega/localpath.h>
 
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <mega.h>
@@ -979,6 +980,8 @@ TEST(Sqlite, MigrationOpenOnAlreadyMigratedDbIsIdempotent)
 
 #ifdef USE_SQLITE
 
+#include "CacheKeyCombinations.h"
+#include "SearchByPageTestBase.h"
 #include "utils.h"
 
 #include <mega/megaapp.h>
@@ -990,407 +993,7 @@ namespace fs = std::filesystem;
 namespace
 {
 
-// Convenience helper for building ListAllNodesParams in tests. Defaults to the
-// "Cloud + Vault" scope (explicitAncestors empty, locationScope = 1); tests
-// that exercise a specific subtree pass one or more explicit ancestor handles.
-ListAllNodesParams makeParams(MimeType_t mime,
-                              int order,
-                              size_t maxElements,
-                              bool excludeSensitive = false,
-                              std::optional<NodeSearchCursorOffset> cursor = std::nullopt,
-                              std::vector<NodeHandle> explicitAncestors = {},
-                              std::vector<NodeHandle> excludeHandles = {},
-                              int locationScope = 1)
-{
-    ListAllNodesParams p;
-    p.mimeType = mime;
-    p.order = order;
-    p.maxElements = maxElements;
-    p.excludeSensitive = excludeSensitive;
-    p.cursor = std::move(cursor);
-    p.explicitAncestors = std::move(explicitAncestors);
-    p.excludeHandles = std::move(excludeHandles);
-    p.locationScope = locationScope;
-    return p;
-}
-
-// Collect the handles from a NodeManager-layer result (sharedNode_vector) into
-// a std::set for set-membership assertions. Unordered semantics, dedupes
-// duplicates if any. Used by Group G filter-semantics tests.
-std::set<NodeHandle> handlesOf(const sharedNode_vector& nodes)
-{
-    std::set<NodeHandle> result;
-    for (const auto& n: nodes)
-        result.insert(n->nodeHandle());
-    return result;
-}
-
-// DbTable-layer overload: rows are (handle, serialised) pairs.
-std::set<NodeHandle> handlesOf(const std::vector<std::pair<NodeHandle, NodeSerialized>>& rows)
-{
-    std::set<NodeHandle> result;
-    for (const auto& p: rows)
-        result.insert(p.first);
-    return result;
-}
-
-// ─── Per-node metadata captured at insertion time ────────────────────────────
-// Used to build NodeSearchCursorOffset without relying on attribute decryption.
-struct NodeMeta
-{
-    std::string name;
-    nodetype_t type = FILENODE;
-    int64_t size = 0;
-    int64_t mtime = 0;
-    int label = 0; ///< 0 = unlabelled, 1-7 = colour
-    int fav = 0; ///< 0 or 1
-    bool sensitive = false; ///< sets the "sen" attribute when true
-};
-
-// Attribute name IDs used across multiple test fixtures and test cases.
-const nameid kNameId = AttrMap::string2nameid("n");
-const nameid kFavId = AttrMap::string2nameid("fav");
-const nameid kLabelId = AttrMap::string2nameid("lbl");
-
-// Sort order + page size pair used by parameterised pagination tests.
-struct OrderAndPageSize
-{
-    int order;
-    size_t pageSize;
-};
-
-// ─── Shared test fixture ───────────────────────────────────────────────────────
-/**
- * Base fixture used by ListAllNodesByPageTest and GroupedListAllNodesByPageTest.
- *
- * Dataset (created in SetUp):
- *   ROOT folder
- *   5 sub-folders   "Folder_A" … "Folder_E"
- *   20 file nodes   "file_01.txt" … "file_20.txt"
- *     size  = i * 100  (i = 1 … 20)
- *     mtime = 1'700'000'000 + i
- *     label = i % 4      (0 = unlabelled, 1 / 2 / 3 cycling)
- *     fav   = (i % 5 == 0) ? 1 : 0   (files 5, 10, 15, 20)
- */
-class SearchByPageTest: public ::testing::Test
-{
-protected:
-    mega::MegaApp mApp;
-    NodeManager::MissingParentNodes mMissingParentNodes;
-    std::shared_ptr<MegaClient> mClient;
-    fs::path mTestDir;
-
-    uint64_t mNextHandle = 1;
-    NodeHandle mRootHandle;
-    std::map<handle, NodeMeta> mMeta; ///< Metadata for all inserted nodes
-
-    static constexpr int NUM_FILES = 20;
-    static constexpr int NUM_FOLDERS = 5;
-
-    // Handles exposed for the Cloud-Drive / version / sensitive filter tests.
-    // These reference the jpg + Vault/Rubbish subtrees built by populateDB().
-    NodeHandle hFilesRoot; // alias of mRootHandle, kept for readability
-    NodeHandle hVault, hRubbish;
-    NodeHandle hNormalFolder, hSensFolder;
-    NodeHandle hClean, hSelfSensitive, hHead, hVersionV1, hVersionV2, hUnderSens;
-    NodeHandle hVaultFile, hRubbishFile;
-
-    void SetUp() override
-    {
-        mTestDir = fs::current_path() / "search_by_page_test";
-        // Remove any leftover directory from a previous crashed run to avoid
-        // SQLite "database is locked" errors caused by stale WAL files.
-        fs::remove_all(mTestDir);
-        fs::create_directories(mTestDir);
-
-        auto* dbAccess = new SqliteDbAccess(LocalPath::fromAbsolutePath(path_u8string(mTestDir)));
-
-        mClient = mt::makeClient(mApp, dbAccess);
-        mClient->sid =
-            "AWA5YAbtb4JO-y2zWxmKZpSe5-6XM7CTEkA-3Nv7J4byQUpOazdfSC1ZUFlS-kah76gPKUEkTF9g7MeE";
-        mClient->opensctable();
-
-        populateDB();
-
-        if (auto* sa = dynamic_cast<SqliteAccountState*>(mClient->sctable.get()))
-            sa->createIndexes(/*enableSearch=*/true, /*enableLexi=*/true);
-    }
-
-    void TearDown() override
-    {
-        mClient.reset();
-        fs::remove_all(mTestDir);
-    }
-
-    // ── Low-level node factory ────────────────────────────────────────────────
-    //
-    // `isFetching` is forwarded to NodeManager::addNode and defaults to true
-    // (historical behaviour). Pass false when building subtrees whose
-    // relationships must survive in RAM — notably file-version chains, whose
-    // FLAGS_IS_VERSION bit requires the immediate parent pointer to stay live
-    // instead of being evicted through the single-slot mNodeToWriteInDb buffer.
-    std::shared_ptr<Node> addNode(nodetype_t type,
-                                  std::shared_ptr<Node> parent,
-                                  const NodeMeta& meta,
-                                  bool isFetching = true)
-    {
-        NodeHandle h = NodeHandle().set6byte(mNextHandle++);
-        Node& ref = mt::makeNode(*mClient, type, h, parent.get());
-        auto node = std::shared_ptr<Node>(&ref);
-
-        node->attrs.map[kNameId] = meta.name;
-
-        if (type == FILENODE)
-        {
-            node->size = static_cast<m_off_t>(meta.size);
-            node->mtime = static_cast<m_time_t>(meta.mtime);
-            node->ctime = node->mtime;
-            node->crc[0] = static_cast<int32_t>(mNextHandle);
-            node->isvalid = true;
-            node->serializefingerprint(&node->attrs.map['c']);
-            node->setfingerprint();
-
-            // sizeVirtual in the DB is derived from NodeCounter.storage.
-            // Without this, ORDER BY sizeVirtual returns 0 for all files and
-            // cursor-based pagination for SIZE sorts would not advance.
-            NodeCounter nc;
-            nc.files = 1;
-            nc.storage = meta.size;
-            node->setCounter(nc);
-        }
-
-        if (meta.fav)
-            node->attrs.map[kFavId] = "1";
-
-        if (meta.label > 0)
-            node->attrs.map[kLabelId] = std::to_string(meta.label);
-
-        if (meta.sensitive)
-            node->attrs.map[AttrMap::string2nameid("sen")] = "1";
-
-        mClient->mNodeManager.addNode(node,
-                                      /*notify=*/false,
-                                      isFetching,
-                                      mMissingParentNodes);
-        mClient->mNodeManager.saveNodeInDb(node.get());
-
-        auto& stored = mMeta[h.as8byte()] = meta;
-        stored.type = type;
-        return node;
-    }
-
-    // ── Dataset construction ──────────────────────────────────────────────────
-    //
-    // Builds the shared base dataset used by every SearchByPageTest subclass:
-    //
-    //   CloudDrive (ROOTNODE, mRootHandle/hFilesRoot)
-    //   ├── Folder_A..E                           (5 folders)
-    //   ├── file_01.txt .. file_20.txt            (20 documents)
-    //   ├── normal_folder/                        (non-sensitive)
-    //   │   ├── clean.jpg
-    //   │   ├── self_sensitive.jpg   [sen=1]
-    //   │   └── head.jpg                          (HEAD)
-    //   │       ├── head.jpg         (version v1, FILENODE child of FILENODE)
-    //   │       └── head.jpg         (version v2)
-    //   └── sens_folder/             [sen=1]      (sensitive ancestor)
-    //       └── under_sens.jpg
-    //   Vault (VAULTNODE) / vault_file.jpg
-    //   Rubbish (RUBBISHNODE) / rubbish_file.jpg
-    //
-    // The .jpg / Vault / Rubbish additions are transparent to pagination tests
-    // that query single-mime DOCUMENT — Vault/Rubbish roots fall outside the
-    // Cloud-Drive-rooted filter, jpg files don't match MIME_TYPE_DOCUMENT, and
-    // version children are always excluded by listAllNodesByPage.
-    virtual void populateDB()
-    {
-        NodeMeta rootMeta{"ROOT", ROOTNODE, 0, 0, 0, 0};
-        auto root = addNode(ROOTNODE, nullptr, rootMeta);
-        mRootHandle = root->nodeHandle();
-        hFilesRoot = mRootHandle;
-
-        const std::string alpha = "ABCDE";
-        for (int i = 0; i < NUM_FOLDERS; ++i)
-        {
-            NodeMeta fm;
-            fm.name = "Folder_" + std::string(1, alpha[static_cast<size_t>(i)]);
-            fm.type = FOLDERNODE;
-            addNode(FOLDERNODE, root, fm);
-        }
-
-        // File nodes
-        for (int i = 1; i <= NUM_FILES; ++i)
-        {
-            NodeMeta fm;
-            // Zero-padded name so lexicographic order == numeric order
-            const std::string pad = (i < 10 ? "0" : "");
-            fm.name = "file_" + pad + std::to_string(i) + ".txt";
-            fm.size = static_cast<int64_t>(i) * 100;
-            fm.mtime = 1'700'000'000LL + i;
-            fm.label = i % 4; // 0 = unlabelled, 1/2/3 cycling
-            fm.fav = (i % 5 == 0) ? 1 : 0;
-            addNode(FILENODE, root, fm);
-        }
-
-        // Vault + Rubbish roots. NodeManager auto-registers them via
-        // setrootnode_internal so the rootnodes.{vault,rubbish} columns are set.
-        auto vault = addNode(VAULTNODE,
-                             nullptr,
-                             NodeMeta{"Vault", VAULTNODE},
-                             /*isFetching=*/false);
-        auto rubbish = addNode(RUBBISHNODE,
-                               nullptr,
-                               NodeMeta{"Rubbish", RUBBISHNODE},
-                               /*isFetching=*/false);
-        hVault = vault->nodeHandle();
-        hRubbish = rubbish->nodeHandle();
-
-        // Folders under Cloud Drive root. sens_folder carries the SENS bit so
-        // its descendants must be filtered out when excludeSensitive=true.
-        NodeMeta sensFolderMeta{"sens_folder", FOLDERNODE};
-        sensFolderMeta.sensitive = true;
-        auto normal = addNode(FOLDERNODE,
-                              root,
-                              NodeMeta{"normal_folder", FOLDERNODE},
-                              /*isFetching=*/false);
-        auto sens = addNode(FOLDERNODE, root, sensFolderMeta, /*isFetching=*/false);
-        hNormalFolder = normal->nodeHandle();
-        hSensFolder = sens->nodeHandle();
-
-        const int64_t baseMtime = 1'800'000'000LL;
-
-        // isFetching=false keeps HEAD + version children in RAM so
-        // FLAGS_IS_VERSION can still be computed from the parent pointer.
-        hClean = addNode(FILENODE,
-                         normal,
-                         NodeMeta{"clean.jpg", FILENODE, 100, baseMtime + 1},
-                         /*isFetching=*/false)
-                     ->nodeHandle();
-
-        NodeMeta selfSensMeta{"self_sensitive.jpg", FILENODE, 200, baseMtime + 2};
-        selfSensMeta.sensitive = true;
-        hSelfSensitive =
-            addNode(FILENODE, normal, selfSensMeta, /*isFetching=*/false)->nodeHandle();
-
-        auto head = addNode(FILENODE,
-                            normal,
-                            NodeMeta{"head.jpg", FILENODE, 300, baseMtime + 3},
-                            /*isFetching=*/false);
-        hHead = head->nodeHandle();
-        hVersionV1 = addNode(FILENODE,
-                             head,
-                             NodeMeta{"head.jpg", FILENODE, 290, baseMtime + 2},
-                             /*isFetching=*/false)
-                         ->nodeHandle();
-        hVersionV2 = addNode(FILENODE,
-                             head,
-                             NodeMeta{"head.jpg", FILENODE, 280, baseMtime + 1},
-                             /*isFetching=*/false)
-                         ->nodeHandle();
-
-        hUnderSens = addNode(FILENODE,
-                             sens,
-                             NodeMeta{"under_sens.jpg", FILENODE, 400, baseMtime + 4},
-                             /*isFetching=*/false)
-                         ->nodeHandle();
-
-        hVaultFile = addNode(FILENODE,
-                             vault,
-                             NodeMeta{"vault_file.jpg", FILENODE, 500, baseMtime + 5},
-                             /*isFetching=*/false)
-                         ->nodeHandle();
-        hRubbishFile = addNode(FILENODE,
-                               rubbish,
-                               NodeMeta{"rubbish_file.jpg", FILENODE, 600, baseMtime + 6},
-                               /*isFetching=*/false)
-                           ->nodeHandle();
-    }
-
-    // Single call, no limit, no cursor — returns every distinct handle matching
-    // @p mime (after Cloud+Vault/version/optional-sensitive filtering).
-    std::set<NodeHandle> allMatchesAsSet(MimeType_t mime, int order, bool excludeSensitive) const
-    {
-        auto nodes = mClient->mNodeManager.listAllNodesByPage(
-            makeParams(mime, order, /*maxElements=*/0, excludeSensitive),
-            CancelToken{});
-        std::set<NodeHandle> out;
-        for (const auto& n: nodes)
-            out.insert(n->nodeHandle());
-        return out;
-    }
-
-    // ── Multi-page accumulation helper ─────────────────────────────────────────
-    // Accumulates all pages until empty, starting from `startCursor` (default:
-    // first page). Bounded to mMeta.size()+2 iterations so that a stuck cursor
-    // produces a test failure rather than an infinite hang.
-    std::vector<NodeHandle>
-        collectAllByPage(int order,
-                         size_t pageSize,
-                         MimeType_t mimeType,
-                         std::optional<NodeSearchCursorOffset> startCursor = std::nullopt,
-                         bool excludeSensitive = false) const
-    {
-        std::vector<NodeHandle> result;
-        std::optional<NodeSearchCursorOffset> cursor = startCursor;
-
-        const size_t maxPages = mMeta.size() + 2;
-        size_t pageCount = 0;
-
-        while (pageCount < maxPages)
-        {
-            ++pageCount;
-            auto page = mClient->mNodeManager.listAllNodesByPage(
-                makeParams(mimeType, order, pageSize, excludeSensitive, cursor),
-                CancelToken{});
-            if (page.empty())
-                break;
-            for (const auto& n: page)
-                result.push_back(n->nodeHandle());
-            cursor = cursorFor(page.back()->nodeHandle(), order);
-        }
-
-        if (pageCount >= maxPages)
-        {
-            ADD_FAILURE() << "collectAllByPage: exceeded " << maxPages
-                          << " pages for order=" << order
-                          << " – cursor likely not advancing (possible infinite loop)";
-        }
-
-        return result;
-    }
-
-    // ── Build a cursor anchored at node h for the given sort order ────────────
-    NodeSearchCursorOffset cursorFor(NodeHandle h, int order) const
-    {
-        const NodeMeta& m = mMeta.at(h.as8byte());
-
-        NodeSearchCursorOffset c;
-        c.mLastName = m.name;
-        c.mLastHandle = h.as8byte();
-
-        switch (order)
-        {
-            case OrderByClause::SIZE_ASC:
-            case OrderByClause::SIZE_DESC:
-                c.mLastSize = m.size;
-                break;
-            case OrderByClause::MTIME_ASC:
-            case OrderByClause::MTIME_DESC:
-                c.mLastMtime = m.mtime;
-                break;
-            case OrderByClause::LABEL_ASC:
-            case OrderByClause::LABEL_DESC:
-                c.mLastLabel = m.label;
-                break;
-            case OrderByClause::FAV_ASC:
-            case OrderByClause::FAV_DESC:
-                c.mLastFav = m.fav;
-                break;
-            default:
-                break;
-        }
-        return c;
-    }
-};
+using namespace mega::pagetest;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  listAllNodesByPage – cursor-based global pagination tests
@@ -3363,6 +2966,185 @@ TEST(Sqlite, ResumeRespectsIndexEnableFlags)
             << "search index missing despite search=on";
         EXPECT_EQ(1u, set.count("lexicographics3keyindex")) << "lexi index missing despite lexi=on";
     }
+}
+
+// ---------------------------------------------------------------------------
+// CacheKeyBuilder regression coverage. Pins computeListAllCacheId /
+// computeDateSectionsCacheId (src/db/sqlite.cpp) to the pre-refactor
+// arithmetic, so any change to digit order/stride is caught here rather than
+// causing silent prepared-statement aliasing in production.
+// ---------------------------------------------------------------------------
+
+// Oracle = the v1 inline arithmetic, copied verbatim. The production
+// function in sqlite.cpp is the CacheKeyBuilder-based rewrite. They MUST
+// produce identical size_t for every legal input.
+size_t oracleComputeListAllCacheId(MimeType_t mimeType,
+                                   int order,
+                                   bool hasCursor,
+                                   AnchorDirectionDigit anchorDir,
+                                   bool excludeSensitive,
+                                   size_t numRoots,
+                                   size_t numExcludes)
+{
+    constexpr size_t orderStride = static_cast<size_t>(OrderByClause::FAV_DESC) + 1;
+    constexpr size_t maxRoots = 3; // mirrors kListAllMaxLocationHandles
+    constexpr size_t maxExcludes = 3;
+    constexpr size_t anchorStride = 3;
+
+    size_t key = static_cast<size_t>(mimeType);
+    key = key * orderStride + static_cast<size_t>(order);
+    key = key * 2 + (hasCursor ? 1u : 0u);
+    key = key * anchorStride + static_cast<size_t>(anchorDir);
+    key = key * 2 + (excludeSensitive ? 1u : 0u);
+    key = key * maxRoots + (numRoots - 1);
+    key = key * (maxExcludes + 1) + numExcludes;
+    return key;
+}
+
+size_t oracleComputeDateSectionsCacheId(MimeType_t mimeType,
+                                        int order,
+                                        DateSectionGranularity granularity,
+                                        bool excludeSensitive,
+                                        size_t numRoots,
+                                        size_t numExcludes)
+{
+    constexpr size_t orderStride = static_cast<size_t>(OrderByClause::FAV_DESC) + 1;
+    constexpr size_t maxRoots = 3;
+    constexpr size_t maxExcludes = 3;
+
+    size_t key = static_cast<size_t>(mimeType);
+    key = key * orderStride + static_cast<size_t>(order);
+    key = key * 3 + static_cast<size_t>(granularity);
+    key = key * 2 + (excludeSensitive ? 1u : 0u);
+    key = key * maxRoots + (numRoots - 1);
+    key = key * (maxExcludes + 1) + numExcludes;
+    return key;
+}
+
+// Dimension arrays (kAllMimeTypes / kAllValidOrders / kAllAnchorDirs /
+// kAllGranularities) live in CacheKeyCombinations.h.
+
+TEST(CacheKeyBuilder, ListAll_MatchesOracleArithmetic)
+{
+    // Nested for-loops, NOT TEST_P — ~24k combinations would create 24k
+    // gtest entries and dwarf the rest of test_unit's listing.
+    size_t checked = 0;
+    for (auto mime: kAllMimeTypes)
+        for (int order: kAllValidOrders)
+            for (bool hasCursor: {false, true})
+                for (auto anchorDir: kAllAnchorDirs)
+                    for (bool sens: {false, true})
+                        for (size_t roots = 1; roots <= 3; ++roots)
+                            for (size_t excludes = 0; excludes <= 3; ++excludes)
+                            {
+                                const size_t actual = computeListAllCacheId(mime,
+                                                                            order,
+                                                                            hasCursor,
+                                                                            anchorDir,
+                                                                            sens,
+                                                                            roots,
+                                                                            excludes);
+                                const size_t expected = oracleComputeListAllCacheId(mime,
+                                                                                    order,
+                                                                                    hasCursor,
+                                                                                    anchorDir,
+                                                                                    sens,
+                                                                                    roots,
+                                                                                    excludes);
+                                ASSERT_EQ(actual, expected)
+                                    << "mime=" << mime << " order=" << order
+                                    << " hasCursor=" << hasCursor
+                                    << " anchorDir=" << static_cast<int>(anchorDir)
+                                    << " sens=" << sens << " roots=" << roots
+                                    << " excludes=" << excludes;
+                                ++checked;
+                            }
+    EXPECT_EQ(checked, 14u * 12u * 2u * 3u * 2u * 3u * 4u); // 24192
+}
+
+TEST(CacheKeyBuilder, DateSections_MatchesOracleArithmetic)
+{
+    size_t checked = 0;
+    for (auto mime: kAllMimeTypes)
+        for (int order: kAllValidOrders)
+            for (auto gran: kAllGranularities)
+                for (bool sens: {false, true})
+                    for (size_t roots = 1; roots <= 3; ++roots)
+                        for (size_t excludes = 0; excludes <= 3; ++excludes)
+                        {
+                            const size_t actual = computeDateSectionsCacheId(mime,
+                                                                             order,
+                                                                             gran,
+                                                                             sens,
+                                                                             roots,
+                                                                             excludes);
+                            const size_t expected = oracleComputeDateSectionsCacheId(mime,
+                                                                                     order,
+                                                                                     gran,
+                                                                                     sens,
+                                                                                     roots,
+                                                                                     excludes);
+                            ASSERT_EQ(actual, expected)
+                                << "mime=" << mime << " order=" << order
+                                << " gran=" << static_cast<int>(gran) << " sens=" << sens
+                                << " roots=" << roots << " excludes=" << excludes;
+                            ++checked;
+                        }
+    EXPECT_EQ(checked, 14u * 12u * 3u * 2u * 3u * 4u); // 12096
+}
+
+TEST(CacheKeyBuilder, ListAll_DistinctInputsProduceDistinctKeys)
+{
+    // Spot-check the no-collision property on a handful of dimensions:
+    // any single-digit flip must change the key.
+    const auto baseKey = computeListAllCacheId(MIME_TYPE_PHOTO,
+                                               OrderByClause::MTIME_DESC,
+                                               /*hasCursor=*/false,
+                                               AnchorDirectionDigit::None,
+                                               /*sens=*/false,
+                                               /*roots=*/1,
+                                               /*excludes=*/0);
+
+    EXPECT_NE(baseKey,
+              computeListAllCacheId(MIME_TYPE_VIDEO,
+                                    OrderByClause::MTIME_DESC,
+                                    false,
+                                    AnchorDirectionDigit::None,
+                                    false,
+                                    1,
+                                    0));
+    EXPECT_NE(baseKey,
+              computeListAllCacheId(MIME_TYPE_PHOTO,
+                                    OrderByClause::MTIME_ASC,
+                                    false,
+                                    AnchorDirectionDigit::None,
+                                    false,
+                                    1,
+                                    0));
+    EXPECT_NE(baseKey,
+              computeListAllCacheId(MIME_TYPE_PHOTO,
+                                    OrderByClause::MTIME_DESC,
+                                    true,
+                                    AnchorDirectionDigit::None,
+                                    false,
+                                    1,
+                                    0));
+    EXPECT_NE(baseKey,
+              computeListAllCacheId(MIME_TYPE_PHOTO,
+                                    OrderByClause::MTIME_DESC,
+                                    false,
+                                    AnchorDirectionDigit::Asc,
+                                    false,
+                                    1,
+                                    0));
+    EXPECT_NE(baseKey,
+              computeListAllCacheId(MIME_TYPE_PHOTO,
+                                    OrderByClause::MTIME_DESC,
+                                    false,
+                                    AnchorDirectionDigit::Desc,
+                                    false,
+                                    1,
+                                    0));
 }
 
 } // anonymous namespace
