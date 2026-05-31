@@ -18,6 +18,46 @@ LRUCache<std::string, std::string> AndroidFileWrapper::localPathURICache(LRUCach
 std::mutex AndroidFileWrapper::URIDataCacheLock;
 std::mutex AndroidFileWrapper::localPathURICacheLock;
 
+namespace
+{
+// Check JNIEnv for a pending exception. If one is found: describe it, clear it, log an
+// error mentioning the calling context, and return true. Returns false when no
+// exception was pending.
+//
+// ALWAYS clear a pending exception before the next JNI call as required by the official docs:
+//
+// https://docs.oracle.com/en/java/javase/25/docs/specs/jni/design.html
+// "After an exception has been raised, the native code must first clear the exception
+// before making other JNI calls."
+//
+// Usage after CallBooleanMethod / CallIntMethod / CallLongMethod (no null return):
+//
+//     jboolean result = env->CallBooleanMethod(...);
+//     if (checkAndClearJniException(...))
+//         return ...;
+//
+// Usage after GetMethodID / GetStaticMethodID / GetFieldID:
+//
+//     jmethodID methodID = env->GetMethodID(...);
+//     if (methodID == nullptr)
+//     {
+//         checkAndClearJniException(...);
+//         return ...;
+//     }
+//
+bool checkAndClearJniException(JNIEnv* env, const char* callerFn, const char* javaMethod)
+{
+    if (!env->ExceptionCheck())
+    {
+        return false;
+    }
+    env->ExceptionDescribe();
+    env->ExceptionClear();
+    LOG_err << callerFn << ": " << javaMethod << " threw a JNI exception";
+    return true;
+}
+} // anonymous namespace
+
 AndroidFileWrapper::AndroidFileWrapper(const std::string& path):
     mURI(path)
 {
