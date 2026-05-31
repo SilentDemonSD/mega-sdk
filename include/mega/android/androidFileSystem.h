@@ -93,6 +93,9 @@ public:
     static std::optional<std::string> getLocalPathURI(const std::string& path);
     static void removeLocalPathURI(const std::string& path);
 
+    // Create .nomedia if missing. Returns true when the marker exists afterward.
+    static bool ensureDotNoMediaFile(const LocalPath& directory, FileSystemAccess& fsAccess);
+
 private:
     class JavaObject
     {

@@ -910,6 +910,21 @@ void AndroidFileWrapper::removeLocalPathURI(const std::string& path)
     localPathURICache.erase(path);
 }
 
+bool AndroidFileWrapper::ensureDotNoMediaFile(const LocalPath& directory,
+                                              FileSystemAccess& fsAccess)
+{
+    LocalPath noMediaPath = directory;
+    noMediaPath.appendWithSeparator(LocalPath::fromRelativePath(".nomedia"), true);
+
+    if (fsAccess.fileExistsAt(noMediaPath))
+    {
+        return true;
+    }
+
+    auto fa = fsAccess.newfileaccess();
+    return fa && fa->fopen(noMediaPath, OPEN_WRONLY, FSLogging::logOnError);
+}
+
 std::shared_ptr<AndroidFileWrapper>
     AndroidFileWrapper::getAndroidFileWrapperFromURI(const LocalPath& localPath,
                                                      bool create,
