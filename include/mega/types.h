@@ -1848,6 +1848,20 @@ public:
         return it->second->second;
     }
 
+    /** Remove @p key if present. Returns true when an entry was erased. */
+    bool erase(const Key& key)
+    {
+        const auto it = mMap.find(key);
+        if (it == mMap.end())
+        {
+            return false;
+        }
+
+        mList.erase(it->second);
+        mMap.erase(it);
+        return true;
+    }
+
     /**
      * @brief Returns the current number of elements in the cache.
      */

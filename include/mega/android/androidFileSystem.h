@@ -67,6 +67,9 @@ public:
     bool deleteEmptyFolder();
     // Rename an element. It is kept at same folder
     bool rename(const std::string& parentPath, const std::string& newName, bool overwrite);
+    // SAF moveDocument (API 24+), same tree only. Used by cross-parent renamelocal;
+    // returns false if unsupported or on failure (caller falls back to copy+delete).
+    bool move(const std::string& sourceParentUri, const std::string& targetParentUri);
 
     // Returns true if it's a folder
     bool isFolder();
@@ -78,10 +81,17 @@ public:
     std::optional<std::string> getPath();
     bool isURI();
 
+    // Refresh mURI from the backing Java FileWrapper after move/rename.
+    bool updateURIFromFileWrapper();
+
     static std::shared_ptr<AndroidFileWrapper> getAndroidFileWrapper(const std::string& path);
     static std::shared_ptr<AndroidFileWrapper> getAndroidFileWrapper(const LocalPath& localPath,
                                                                      bool create,
                                                                      bool lastIsFolder);
+
+    static void setLocalPathURI(const std::string& path, const std::string& uri);
+    static std::optional<std::string> getLocalPathURI(const std::string& path);
+    static void removeLocalPathURI(const std::string& path);
 
 private:
     class JavaObject
@@ -134,6 +144,8 @@ private:
     static constexpr char RENAME[] = "rename";
     static constexpr char RENAME_OVERRIDE[] = "renameOverwrite";
     static constexpr char CREATE_NESTED_PATH[] = "createNestedPath";
+    static constexpr char MOVE[] = "moveDocument";
+    static constexpr char GET_URI[] = "getUri";
 
     void setUriData(const URIData& uriData);
     std::optional<URIData> getURIData(const std::string& uri) const;
@@ -142,13 +154,13 @@ private:
     static LRUCache<std::string, std::string> localPathURICache;
     static std::mutex URIDataCacheLock;
     static std::mutex localPathURICacheLock;
-    static void setLocalPathURI(const std::string& path, const std::string& uri);
-    static std::optional<std::string> getLocalPathURI(const std::string& path);
     static std::shared_ptr<AndroidFileWrapper>
         getAndroidFileWrapperFromURI(const LocalPath& localPath, bool create, bool lastIsFolder);
 
     static std::shared_ptr<AndroidFileWrapper>
         getAndroidFileWrapperFromPath(const LocalPath& localPath, bool create, bool lastIsFolder);
+
+    static void removeUriDataFromCache(const std::string& uri);
 };
 
 /**
