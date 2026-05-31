@@ -7,6 +7,10 @@ JavaVM* MEGAjvm = nullptr;
 jclass fileWrapper = nullptr;
 jclass integerClass = nullptr;
 jclass arrayListClass = nullptr;
+/// Cached java/util/List class and method IDs — set at JNI_OnLoad, safe for background threads.
+jclass listClass = nullptr;
+jmethodID listSizeMethod = nullptr;
+jmethodID listGetMethod = nullptr;
 
 namespace mega
 {
@@ -282,11 +286,11 @@ std::string AndroidFileWrapper::getName()
     return data->mName.value();
 }
 
-std::vector<std::shared_ptr<AndroidFileWrapper>> AndroidFileWrapper::getChildren()
+std::optional<std::vector<std::shared_ptr<AndroidFileWrapper>>> AndroidFileWrapper::getChildren()
 {
     if (!exists())
     {
-        return {};
+        return std::nullopt;
     }
 
     JNIEnv* env{nullptr};
@@ -294,32 +298,64 @@ std::vector<std::shared_ptr<AndroidFileWrapper>> AndroidFileWrapper::getChildren
     jmethodID methodID = env->GetMethodID(fileWrapper, GET_CHILDREN_URIS, "()Ljava/util/List;");
     if (methodID == nullptr)
     {
-        env->ExceptionDescribe();
-        env->ExceptionClear();
-        LOG_err << "Error: AndroidFileWrapper::getchildren";
-        return {};
+        checkAndClearJniException(env,
+                                  "AndroidFileWrapper::getChildren",
+                                  "GetMethodID(FileWrapper.getChildrenUris)");
+        return std::nullopt;
     }
 
     jobject childrenUris = env->CallObjectMethod(mJavaObject->mObj, methodID);
-    jclass listClass = env->FindClass("java/util/List");
-    jmethodID sizeMethod = env->GetMethodID(listClass, "size", "()I");
-    jmethodID getMethod = env->GetMethodID(listClass, "get", "(I)Ljava/lang/Object;");
-    jint size = env->CallIntMethod(childrenUris, sizeMethod);
+    if (checkAndClearJniException(env,
+                                  "AndroidFileWrapper::getChildren",
+                                  "FileWrapper.getChildrenUris") ||
+        !childrenUris)
+    {
+        return std::nullopt;
+    }
+
+    // Use cached List class and method IDs (set at JNI_OnLoad).
+    if (!listClass || !listSizeMethod || !listGetMethod)
+    {
+        LOG_err << "Error: List class/methods not initialized";
+        env->DeleteLocalRef(childrenUris);
+        return std::nullopt;
+    }
+
+    jint size = env->CallIntMethod(childrenUris, listSizeMethod);
+    if (checkAndClearJniException(env, "AndroidFileWrapper::getChildren", "List.size"))
+    {
+        env->DeleteLocalRef(childrenUris);
+        return std::nullopt;
+    }
 
     std::vector<std::shared_ptr<AndroidFileWrapper>> children;
-    children.reserve(size);
+    children.reserve(static_cast<size_t>(size));
     for (jint i = 0; i < size; ++i)
     {
-        jstring element = (jstring)env->CallObjectMethod(childrenUris, getMethod, i);
+        jstring element = (jstring)env->CallObjectMethod(childrenUris, listGetMethod, i);
+        if (checkAndClearJniException(env, "AndroidFileWrapper::getChildren", "List.get"))
+        {
+            env->DeleteLocalRef(childrenUris);
+            return std::nullopt;
+        }
+        if (!element)
+        {
+            env->DeleteLocalRef(childrenUris);
+            return std::nullopt;
+        }
         const char* elementStr = env->GetStringUTFChars(element, nullptr);
         if (!elementStr)
         {
-            return {};
+            checkAndClearJniException(env, "AndroidFileWrapper::getChildren", "GetStringUTFChars");
+            env->DeleteLocalRef(element);
+            env->DeleteLocalRef(childrenUris);
+            return std::nullopt;
         }
         children.push_back(AndroidFileWrapper::getAndroidFileWrapper(elementStr));
         env->ReleaseStringUTFChars(element, elementStr);
         env->DeleteLocalRef(element);
     }
+    env->DeleteLocalRef(childrenUris);
 
     return children;
 }
@@ -1571,7 +1607,14 @@ bool AndroidDirAccess::dopen(LocalPath* path, FileAccess* f, bool doglob)
         return false;
     }
 
-    mChildren = mFileWrapper->getChildren();
+    auto children = mFileWrapper->getChildren();
+    if (!children.has_value())
+    {
+        mChildren.clear();
+        return false;
+    }
+
+    mChildren = std::move(children.value());
     return true;
 }
 
@@ -2048,7 +2091,13 @@ ScanResult AndroidFileSystemAccess::directoryScan(const LocalPath& targetPath,
     auto device = metadata.st_dev;
 
     auto children = targetWrapper->getChildren();
-    for (auto child: children)
+    if (!children.has_value())
+    {
+        LOG_warn << "directoryScan: getChildren() failed for: " << targetPath;
+        return SCAN_INACCESSIBLE;
+    }
+
+    for (const auto& child: children.value())
     {
         auto& result = (results.emplace_back(), results.back());
         result.localname = LocalPath::fromPlatformEncodedRelative(child->getName());
@@ -2179,7 +2228,15 @@ void AndroidFileSystemAccess::emptydirlocal(const LocalPath& path, dev_t)
         return;
     }
 
-    for (const auto& child: wrapper->getChildren())
+    auto children = wrapper->getChildren();
+    if (!children.has_value())
+    {
+        LOG_warn << "AndroidFileSystemAccess::emptydirlocal: getChildren() failed for "
+                 << path.toPath(false);
+        return;
+    }
+
+    for (const auto& child: children.value())
     {
         if (child->isFolder())
         {
@@ -2228,21 +2285,37 @@ bool AndroidFileSystemAccess::copy(const LocalPath& oldname,
 
     if (androidfileWrapper->isFolder())
     {
-        if (mkdirlocal(newname, false, true))
+        if (!mkdirlocal(newname, false, true))
         {
-            for (const auto& child: androidfileWrapper->getChildren())
+            LOG_err << "AndroidFileSystemAccess::copy: mkdirlocal failed for "
+                    << newname.toPath(false);
+            return false;
+        }
+
+        auto children = androidfileWrapper->getChildren();
+        if (!children.has_value())
+        {
+            LOG_err << "AndroidFileSystemAccess::copy: getChildren() failed for "
+                    << oldname.toPath(false) << "; aborting to avoid partial copy";
+            return false;
+        }
+
+        bool allOk = true;
+        for (const auto& child: children.value())
+        {
+            LocalPath childNewPath{newname};
+            childNewPath.appendWithSeparator(LocalPath::fromRelativePath(child->getName()), false);
+            LocalPath childOldPath{oldname};
+            childOldPath.appendWithSeparator(LocalPath::fromRelativePath(child->getName()), false);
+            if (!copy(childOldPath, childNewPath, overwrite))
             {
-                LocalPath childNewPath{newname};
-                childNewPath.appendWithSeparator(LocalPath::fromRelativePath(child->getName()),
-                                                 false);
-                LocalPath childOldPath{oldname};
-                childOldPath.appendWithSeparator(LocalPath::fromRelativePath(child->getName()),
-                                                 false);
-                copy(childOldPath, childNewPath, overwrite);
+                LOG_warn << "AndroidFileSystemAccess::copy: child copy failed: "
+                         << childOldPath.toPath(false) << " -> " << childNewPath.toPath(false);
+                allOk = false;
             }
         }
 
-        return true;
+        return allOk;
     }
 
     unique_ptr<FileAccess> oldFile{newfileaccess()};

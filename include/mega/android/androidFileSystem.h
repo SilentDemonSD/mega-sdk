@@ -19,6 +19,10 @@
 extern jclass fileWrapper;
 extern jclass integerClass;
 extern jclass arrayListClass;
+/// Cached java/util/List class and method IDs — set at JNI_OnLoad, safe for background threads.
+extern jclass listClass;
+extern jmethodID listSizeMethod;
+extern jmethodID listGetMethod;
 extern JavaVM* MEGAjvm;
 
 namespace mega
@@ -46,7 +50,12 @@ public:
     bool exists() const;
     int getFileDescriptor(bool write);
     std::string getName();
-    std::vector<std::shared_ptr<AndroidFileWrapper>> getChildren();
+    // Returns std::nullopt on JNI/Java failure (caller cannot distinguish "empty
+    // folder" from "enumeration failed" otherwise). On success returns the full
+    // child list — never a partial view: any mid-iteration error fails the whole
+    // call. Callers that act destructively on the result MUST treat std::nullopt
+    // as "do not proceed" (see copy/rmdirlocal/emptydirlocal).
+    std::optional<std::vector<std::shared_ptr<AndroidFileWrapper>>> getChildren();
     // Check if tree exists
     std::shared_ptr<AndroidFileWrapper> pathExists(const std::vector<std::string>& subPaths);
 
