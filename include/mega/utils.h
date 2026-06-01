@@ -941,20 +941,31 @@ struct UnicodeCodepointIteratorTraits<wchar_t>
     {
         assert(m && n && m < n);
 
+        using UnsignedWChar = std::make_unsigned_t<wchar_t>;
+
+        // wchar_t width and signedness is not guaranteed.
+        // Read the raw code unit bits as unsigned first, then widen.
+        const auto current = static_cast<uint32_t>(static_cast<UnsignedWChar>(*m));
+
         // Are we looking at a high surrogate?
-        if ((*m >> 10) == 0x36)
+        if ((current >> 10) == 0x36)
         {
-            // Is it followed by a low surrogate?
-            if (n - m < 2 || (m[1] >> 10) != 0x37)
+            if (n - m < 2)
             {
                 // Nope, the string is malformed.
                 return -1;
             }
 
-            // Compute addend.
-            const int32_t lo = m[1] & 0x3ff;
-            const int32_t hi = *m & 0x3ff;
-            const int32_t addend = (hi << 10) | lo;
+            const auto next = static_cast<uint32_t>(static_cast<UnsignedWChar>(m[1]));
+
+            if ((next >> 10) != 0x37)
+            {
+                return -1;
+            }
+
+            const auto lo = static_cast<int32_t>(next & 0x3ffu);
+            const auto hi = static_cast<int32_t>(current & 0x3ffu);
+            const auto addend = (hi << 10) | lo;
 
             // Store effective code point.
             codepoint = 0x10000 + addend;
@@ -963,14 +974,14 @@ struct UnicodeCodepointIteratorTraits<wchar_t>
         }
 
         // Are we looking at a low surrogate?
-        if ((*m >> 10) == 0x37)
+        if ((current >> 10) == 0x37)
         {
             // Then the string is malformed.
             return -1;
         }
 
         // Code point is encoded by a single code unit.
-        codepoint = *m;
+        codepoint = static_cast<int32_t>(current);
 
         return 1;
     }
