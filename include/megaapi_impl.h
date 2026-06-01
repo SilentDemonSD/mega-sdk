@@ -5073,7 +5073,7 @@ public:
         // sc requests to close existing wsc and immediately retrieve pending actionpackets
         RequestQueue scRequestQueue;
 
-        long long notificationNumber;
+        std::atomic<long long> notificationNumber;
         set<MegaRequestListener *> requestListeners;
         set<MegaTransferListener *> transferListeners;
         set<MegaScheduledCopyListener *> backupListeners;
