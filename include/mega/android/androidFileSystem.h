@@ -19,6 +19,8 @@
 extern jclass fileWrapper;
 extern jclass integerClass;
 extern jclass arrayListClass;
+/// Cached global reference to ChildMetadata — set at JNI_OnLoad, safe for background threads.
+extern jclass childMetadataClass;
 /// Cached java/util/List class and method IDs — set at JNI_OnLoad, safe for background threads.
 extern jclass listClass;
 extern jmethodID listSizeMethod;
@@ -56,6 +58,33 @@ public:
     // call. Callers that act destructively on the result MUST treat std::nullopt
     // as "do not proceed" (see copy/rmdirlocal/emptydirlocal).
     std::optional<std::vector<std::shared_ptr<AndroidFileWrapper>>> getChildren();
+
+    /**
+     * Metadata for a single child returned by getChildrenWithMetadata().
+     * Field names and types must match the Kotlin ChildMetadata data class exactly
+     * because they are read via JNI GetFieldID by name.
+     */
+    struct ChildMetadata
+    {
+        std::string uri;
+        std::string name;
+        bool isFolder;
+        long long size;
+        long long lastModified;
+        std::string path; ///< empty string when path resolution is not available
+    };
+
+    /**
+     * Returns batch metadata for all direct children of this folder using a single
+     * JNI call to FileWrapper.getChildrenWithMetadata() on the Java side.
+     *
+     * The Java side issues one ContentResolver.query() (1 SAF IPC) instead of
+     * N separate fromUri() + getPath() calls, reducing IPC from O(N) to O(1).
+     *
+     * Returns std::nullopt on JNI/Java failure so the caller (directoryScan) can
+     * return SCAN_INACCESSIBLE.
+     */
+    std::optional<std::vector<ChildMetadata>> getChildrenWithMetadata();
     // Check if tree exists
     std::shared_ptr<AndroidFileWrapper> pathExists(const std::vector<std::string>& subPaths);
 
@@ -158,6 +187,7 @@ private:
     static constexpr char CREATE_NESTED_PATH[] = "createNestedPath";
     static constexpr char MOVE[] = "moveDocument";
     static constexpr char GET_URI[] = "getUri";
+    static constexpr char GET_CHILDREN_META_DATA[] = "getChildrenWithMetadata";
 
     void setUriData(const URIData& uriData);
     std::optional<URIData> getURIData(const std::string& uri) const;

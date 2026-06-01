@@ -17,6 +17,7 @@ jmethodID getBytes = NULL;
 extern jclass fileWrapper;
 extern jclass integerClass;
 extern jclass arrayListClass;
+extern jclass childMetadataClass;
 extern jclass listClass;
 extern jmethodID listSizeMethod;
 extern jmethodID listGetMethod;
@@ -91,6 +92,16 @@ jint on_load(JavaVM *jvm, void *reserved)
 
     arrayListClass = megajni_new_global_ref_class(jenv, localArrayListClass, "global ref ArrayList");
     if (localArrayListClass) jenv->DeleteLocalRef(localArrayListClass);
+
+    jclass localChildMetadataClass = jenv->FindClass("mega/privacy/android/data/filewrapper/ChildMetadata");
+    if (!localChildMetadataClass)
+    {
+        jenv->ExceptionDescribe();
+        jenv->ExceptionClear();
+    }
+
+    childMetadataClass = megajni_new_global_ref_class(jenv, localChildMetadataClass, "global ref ChildMetadata");
+    if (localChildMetadataClass) jenv->DeleteLocalRef(localChildMetadataClass);
 
     jclass localListClass = jenv->FindClass("java/util/List");
     if (!localListClass)
