@@ -12430,6 +12430,33 @@ public class MegaApiJava {
         megaApi.fileServiceReclaim(options, createDelegateRequestListener(listener, false));
     }
 
+    /**
+     * @brief Group all nodes matching @p filter into date buckets, sorted
+     *        by the active timestamp column.
+     *
+     * Same scope / sensitivity / file-version exclusion as
+     * MegaApi::listAllNodesByPage; any FILE_TYPE_* the latter accepts is
+     * accepted here. Nodes with mtime <= 0 are excluded so the section
+     * list does not contain a spurious "1970-01-01" bucket. Sections with
+     * zero remaining items are omitted.
+     *
+     * Always returns the section list across the entire filter scope.
+     *
+     * Supported sort orders (@p order):
+     *   - ORDER_MODIFICATION_ASC / ORDER_MODIFICATION_DESC
+     *
+     * Other order values are rejected (empty list + warning).
+     *
+     * @param filter       Required. Node-selection scope and bucket
+     *                     granularity (MegaGroupNodesByDateFilter::byGranularity).
+     * @param order        Timeline sort order; controls section ordering
+     *                     (ASC = oldest first, DESC = newest first).
+     * @param cancelToken  Optional; may be null. If cancelled mid-scan the
+     *                     call returns an empty list.
+     *
+     * @return Owning list of sections (caller must delete). Empty on
+     *         rejection, cancellation, or when the filter matches no nodes.
+     */
     public MegaDateSectionList groupAllNodesByDate(MegaGroupNodesByDateFilter filter, int order, MegaCancelToken cancelToken) {
         return megaApi.groupAllNodesByDate(filter, order, cancelToken);
     }
