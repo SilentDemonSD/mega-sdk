@@ -12429,4 +12429,12 @@ public class MegaApiJava {
                                    MegaRequestListenerInterface listener) {
         megaApi.fileServiceReclaim(options, createDelegateRequestListener(listener, false));
     }
+
+    public MegaDateSectionList groupAllNodesByDate(MegaGroupNodesByDateFilter filter, int order, MegaCancelToken cancelToken) {
+        return megaApi.groupAllNodesByDate(filter, order, cancelToken);
+    }
+
+    public MegaNodeList listAllNodesByPage(MegaListAllNodesFilter filter, int order, MegaCancelToken cancelToken, int maxElements, MegaSearchCursorOffset cursor) {
+        return megaApi.listAllNodesByPage(filter, order, cancelToken, maxElements, cursor);
+    }
 }
