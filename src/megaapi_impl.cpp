@@ -36075,15 +36075,24 @@ int MegaHTTPServer::onMessageComplete(http_parser *parser)
         else
         {
             handle httpNodeHandle = MegaApi::base64ToHandle(httpctx->nodehandle.c_str());
-            string link =
-                MegaClient::publicLinkURL(httpctx->megaApi->getMegaClient()->mNewLinkFormat,
-                                          TypeOfLink::FILE,
-                                          httpNodeHandle,
-                                          httpctx->nodekey.c_str());
-            LOG_debug << httpctx->getLogName() << "Getting public link: " << link;
-            httpctx->megaApi->getPublicNode(link.c_str(), httpctx);
-            // getPublicNode result is processed inside httpctx onRequestFinish
-            return 0;
+            if (const auto v = MegaHTTPContext::publicNodes.get(httpNodeHandle))
+            {
+                // Get a copy from the cache
+                node = (*v)->copy();
+            }
+            else
+            {
+                // Send a request to the server to get its data
+                string link =
+                    MegaClient::publicLinkURL(httpctx->megaApi->getMegaClient()->mNewLinkFormat,
+                                              TypeOfLink::FILE,
+                                              httpNodeHandle,
+                                              httpctx->nodekey.c_str());
+                LOG_debug << httpctx->getLogName() << "Getting public link: " << link;
+                httpctx->megaApi->getPublicNode(link.c_str(), httpctx);
+                // getPublicNode result is processed inside httpctx onRequestFinish
+                return 0;
+            }
         }
     }
 
@@ -37259,6 +37268,12 @@ void MegaHTTPServer::sendNextBytes(MegaHTTPContext *httpctx)
 
 std::atomic_uint32_t MegaHTTPContext::nextId{0u};
 
+// Decide by the number of parallel public file link video streaming likely to be.
+// 16 might be enough
+constexpr std::size_t MAX_PUBLIC_NODES_CAPACITY = 16;
+
+LRUCache<handle, shared_ptr<MegaNode>> MegaHTTPContext::publicNodes{MAX_PUBLIC_NODES_CAPACITY};
+
 MegaHTTPContext::MegaHTTPContext():
     contextId{nextId++},
     logname{"(HttpCtx#" + std::to_string(contextId) + ") "},
@@ -37473,6 +37488,7 @@ void MegaHTTPContext::onRequestFinish(MegaApi *, MegaRequest *request, MegaError
     {
         node = request->getPublicMegaNode();
         nodereceived = true;
+        publicNodes.put(node->getHandle(), shared_ptr<MegaNode>{node->copy()});
     }
     uv_async_send(&asynchandle);
 }

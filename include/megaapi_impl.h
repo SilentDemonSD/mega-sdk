@@ -5976,6 +5976,8 @@ public:
     m_off_t rangeEnd;
     m_off_t rangeWritten;
     MegaNode *node;
+    // Cache public nodes to avoid getting their data from servers on each request
+    static LRUCache<handle, shared_ptr<MegaNode>> publicNodes;
     std::string path;
     std::string nodehandle;
     std::string nodekey;
