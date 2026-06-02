@@ -6,9 +6,12 @@
 #include <mega/fuse/platform/mount_db.h>
 #include <mega/fuse/platform/service_context.h>
 #include <mega/fuse/platform/utility.h>
+#include <mega/utils.h>
 
 #include <cassert>
-#include <cstring>
+#include <chrono>
+#include <cinttypes>
+#include <thread>
 
 namespace mega
 {
@@ -106,7 +109,10 @@ NTSTATUS Dispatcher::canDelete(FSP_FILE_SYSTEM* filesystem, PVOID context, PWSTR
 
     auto result = dispatcher.mMount.canDelete(context);
 
-    FUSEDebugF("canDelete: context: %p, result: %lu", context, result);
+    FUSEDebugF("canDelete: context: %p, result: %lx: %s",
+               context,
+               result,
+               winErrorMessage(FspWin32FromNtStatus(result)).c_str());
 
     return result;
 }
@@ -169,7 +175,9 @@ NTSTATUS Dispatcher::create(FSP_FILE_SYSTEM* filesystem,
 
     auto result = dispatcher.mMount.create(path_, options, access, *context, *info);
 
-    FUSEDebugF("create: result: %lu", result);
+    FUSEDebugF("create: result: %lx: %s",
+               result,
+               winErrorMessage(FspWin32FromNtStatus(result)).c_str());
 
     return result;
 }
@@ -186,7 +194,10 @@ NTSTATUS Dispatcher::flush(FSP_FILE_SYSTEM* filesystem, PVOID context, FSP_FSCTL
 
     auto result = dispatcher.mMount.flush(context, *info);
 
-    FUSEDebugF("flush: context: %p, result: %lu", context, result);
+    FUSEDebugF("flush: context: %p, result: %lx: %s",
+               context,
+               result,
+               winErrorMessage(FspWin32FromNtStatus(result)).c_str());
 
     return result;
 }
@@ -211,7 +222,10 @@ NTSTATUS Dispatcher::getDirInfoByName(FSP_FILE_SYSTEM* filesystem,
 
     auto result = dispatcher.mMount.getDirInfoByName(context, path_, *info);
 
-    FUSEDebugF("getDirInfoByName: context: %p, result: %lu", context, result);
+    FUSEDebugF("getDirInfoByName: context: %p, result: %lx: %s",
+               context,
+               result,
+               winErrorMessage(FspWin32FromNtStatus(result)).c_str());
 
     return result;
 }
@@ -230,7 +244,10 @@ NTSTATUS Dispatcher::getFileInfo(FSP_FILE_SYSTEM* filesystem,
 
     auto result = dispatcher.mMount.getFileInfo(context, *info);
 
-    FUSEDebugF("getFileInfo: context: %p, result: %lu", context, result);
+    FUSEDebugF("getFileInfo: context: %p, result: %lx: %s",
+               context,
+               result,
+               winErrorMessage(FspWin32FromNtStatus(result)).c_str());
 
     return result;
 }
@@ -251,7 +268,10 @@ NTSTATUS Dispatcher::getSecurity(FSP_FILE_SYSTEM* filesystem,
 
     auto result = dispatcher.mMount.getSecurity(context, descriptor, *descriptorLength);
 
-    FUSEDebugF("getSecurity: context: %p, result: %lu", context, result);
+    FUSEDebugF("getSecurity: context: %p, result: %lx: %s",
+               context,
+               result,
+               winErrorMessage(FspWin32FromNtStatus(result)).c_str());
 
     return result;
 }
@@ -274,7 +294,10 @@ NTSTATUS Dispatcher::getSecurityByName(FSP_FILE_SYSTEM* filesystem,
     auto result =
         dispatcher.mMount.getSecurityByName(path_, attributes, descriptor, descriptorLength);
 
-    FUSEDebugF("getSecurityByName: path: %s, result: %lu", fromWideString(path_).c_str(), result);
+    FUSEDebugF("getSecurityByName: path: %s, result: %lx: %s",
+               fromWideString(path_).c_str(),
+               result,
+               winErrorMessage(FspWin32FromNtStatus(result)).c_str());
 
     return result;
 }
@@ -314,10 +337,11 @@ NTSTATUS Dispatcher::open(FSP_FILE_SYSTEM* filesystem,
 
     auto result = mount.open(path_, options, access, *context, *info);
 
-    FUSEDebugF("open: context: %p, path: %s, result: %lu",
+    FUSEDebugF("open: context: %p, path: %s, result: %lx: %s",
                *context,
                fromWideString(path_).c_str(),
-               result);
+               result,
+               winErrorMessage(FspWin32FromNtStatus(result)).c_str());
 
     return result;
 }
@@ -343,7 +367,10 @@ NTSTATUS Dispatcher::overwrite(FSP_FILE_SYSTEM* filesystem,
 
     auto result = dispatcher.mMount.overwrite(context, *info);
 
-    FUSEDebugF("overwrite: context: %p, result: %lu", context, result);
+    FUSEDebugF("overwrite: context: %p, result: %lx: %s",
+               context,
+               result,
+               winErrorMessage(FspWin32FromNtStatus(result)).c_str());
 
     return result;
 }
@@ -370,7 +397,10 @@ NTSTATUS Dispatcher::read(FSP_FILE_SYSTEM* filesystem,
 
     auto result = dispatcher.mMount.read(context, buffer, offset, length, *numRead);
 
-    FUSEDebugF("read: context: %p, result: %lu", context, result);
+    FUSEDebugF("read: context: %p, result: %lx: %s",
+               context,
+               result,
+               winErrorMessage(FspWin32FromNtStatus(result)).c_str());
 
     return result;
 }
@@ -407,7 +437,10 @@ NTSTATUS Dispatcher::readDirectory(FSP_FILE_SYSTEM* filesystem,
     auto result =
         dispatcher.mMount.readDirectory(context, pattern_, marker_, buffer, length, *numWritten);
 
-    FUSEDebugF("readDirectory: context: %p, result: %lu", context, result);
+    FUSEDebugF("readDirectory: context: %p, result: %lx: %s",
+               context,
+               result,
+               winErrorMessage(FspWin32FromNtStatus(result)).c_str());
 
     return result;
 }
@@ -435,7 +468,10 @@ NTSTATUS Dispatcher::rename(FSP_FILE_SYSTEM* filesystem,
 
     auto result = dispatcher.mMount.rename(context, target_, replace);
 
-    FUSEDebugF("rename: context: %p, result: %lu", context, result);
+    FUSEDebugF("rename: context: %p, result: %lx: %s",
+               context,
+               result,
+               winErrorMessage(FspWin32FromNtStatus(result)).c_str());
 
     return result;
 }
@@ -461,7 +497,10 @@ NTSTATUS Dispatcher::setBasicInfo(FSP_FILE_SYSTEM* filesystem,
         dispatcher.mMount
             .setBasicInfo(context, attributes, created, accessed, written, changed, *info);
 
-    FUSEDebugF("setBasicInfo: context: %p, result: %lu", context, result);
+    FUSEDebugF("setBasicInfo: context: %p, result: %lx: %s",
+               context,
+               result,
+               winErrorMessage(FspWin32FromNtStatus(result)).c_str());
 
     return result;
 }
@@ -482,7 +521,10 @@ NTSTATUS Dispatcher::setFileSize(FSP_FILE_SYSTEM* filesystem,
 
     auto result = dispatcher.mMount.setFileSize(context, size, allocated, *info);
 
-    FUSEDebugF("setFileSize: context: %p, result: %lu", context, result);
+    FUSEDebugF("setFileSize: context: %p, result: %lx: %s",
+               context,
+               result,
+               winErrorMessage(FspWin32FromNtStatus(result)).c_str());
 
     return result;
 }
@@ -502,7 +544,10 @@ NTSTATUS Dispatcher::setSecurity(FSP_FILE_SYSTEM* filesystem,
 
     auto result = dispatcher.mMount.setSecurity(context, security, descriptor);
 
-    FUSEDebugF("setSecurity: context: %p, result: %lu", context, result);
+    FUSEDebugF("setSecurity: context: %p, result: %lx: %s",
+               context,
+               result,
+               winErrorMessage(FspWin32FromNtStatus(result)).c_str());
 
     return result;
 }
@@ -541,7 +586,10 @@ NTSTATUS Dispatcher::write(FSP_FILE_SYSTEM* filesystem,
     auto result = dispatcher.mMount
                       .write(context, buffer, offset, length, append, noGrow, *numWritten, *info);
 
-    FUSEDebugF("write: context: %p, result: %lu", context, result);
+    FUSEDebugF("write: context: %p, result: %lx: %s",
+               context,
+               result,
+               winErrorMessage(FspWin32FromNtStatus(result)).c_str());
 
     return result;
 }
@@ -591,9 +639,33 @@ Dispatcher::Dispatcher(Mount& mount, const NormalizedPath& path):
     // Try and create the filesystem.
     auto result = FspFileSystemCreate(&type[0], &parameters, &mOperations, &mFilesystem);
 
+    // FspFileSystemCreate registers a network mount's UNC prefix with the WinFSP MUP
+    // layer, which rejects a duplicate prefix with STATUS_OBJECT_NAME_COLLISION (surfaced
+    // as ERROR_FILE_EXISTS / 0x80070050). When a same-named mount was just torn down, the
+    // previous volume can still hold the prefix until its kernel-side teardown completes,
+    // so recreating it may transiently collide. Retry briefly to absorb that window.
+    constexpr std::chrono::milliseconds retryDelay{200};
+    for (int attempt = 0; attempt < 10; ++attempt)
+    {
+        auto error = FspWin32FromNtStatus(result);
+
+        if (error != ERROR_FILE_EXISTS)
+            break;
+
+        FUSEWarningF("Prefix in use: %s: Retrying in %" PRIi64 "ms",
+                     mount.name().c_str(),
+                     retryDelay.count());
+
+        std::this_thread::sleep_for(retryDelay);
+
+        result = FspFileSystemCreate(&type[0], &parameters, &mOperations, &mFilesystem);
+    }
+
     // Couldn't create filesystem.
     if (!NT_SUCCESS(result))
-        throw FUSEErrorF("Couldn't create dispatcher: %lx", result);
+        throw FUSEErrorF("Couldn't create dispatcher: %lx: %s",
+                         result,
+                         winErrorMessage(FspWin32FromNtStatus(result)).c_str());
 
     // Ask WinFSP to log *everything*.
     FspFileSystemSetDebugLog(mFilesystem, std::numeric_limits<UINT32>::max());
@@ -651,7 +723,10 @@ void Dispatcher::start(const NormalizedPath& path)
 
     // Couldn't start the dispatcher.
     if (!NT_SUCCESS(result))
-        throw FUSEErrorF("Couldn't start dispatcher: %s: %lx", mMount.name().c_str(), result);
+        throw FUSEErrorF("Couldn't start dispatcher: %s: %lx: %s",
+                         mMount.name().c_str(),
+                         result,
+                         winErrorMessage(FspWin32FromNtStatus(result)).c_str());
 
     // Assume the mount's writable.
     auto* descriptor = &mMount.mMountDB.mReadWriteSecurityDescriptor;
@@ -670,7 +745,10 @@ void Dispatcher::start(const NormalizedPath& path)
 
     // Couldn't make the mount visible.
     if (!NT_SUCCESS(result))
-        throw FUSEErrorF("Couldn't set volume mount point: %s: %lx", mMount.name().c_str(), result);
+        throw FUSEErrorF("Couldn't set volume mount point: %s: %lx: %s",
+                         mMount.name().c_str(),
+                         result,
+                         winErrorMessage(FspWin32FromNtStatus(result)).c_str());
 
     // Latch the mount's actual path.
     mPath = [this]()
