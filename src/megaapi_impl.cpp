@@ -17888,8 +17888,7 @@ void MegaApiImpl::fireOnRequestTemporaryError(MegaRequestPrivate *request, uniqu
 void MegaApiImpl::fireOnTransferStart(MegaTransferPrivate *transfer)
 {
     assert(threadId == std::this_thread::get_id());
-    notificationNumber++;
-    transfer->setNotificationNumber(notificationNumber);
+    transfer->setNotificationNumber(++notificationNumber);
 
     for(set<MegaTransferListener *>::iterator it = transferListeners.begin(); it != transferListeners.end() ;)
     {
@@ -17911,8 +17910,7 @@ void MegaApiImpl::fireOnTransferStart(MegaTransferPrivate *transfer)
 void MegaApiImpl::fireOnTransferFinish(MegaTransferPrivate *transfer, unique_ptr<MegaErrorPrivate> e)
 {
     assert(threadId == std::this_thread::get_id());
-    notificationNumber++;
-    transfer->setNotificationNumber(notificationNumber);
+    transfer->setNotificationNumber(++notificationNumber);
     transfer->setLastError(e.get());
 
     if(e->getErrorCode())
@@ -17987,8 +17985,7 @@ void MegaApiImpl::fireOnTransferFinish(MegaTransferPrivate *transfer, unique_ptr
 void MegaApiImpl::fireOnTransferTemporaryError(MegaTransferPrivate *transfer, unique_ptr<MegaErrorPrivate> e)
 {
     assert(threadId == std::this_thread::get_id());
-    notificationNumber++;
-    transfer->setNotificationNumber(notificationNumber);
+    transfer->setNotificationNumber(++notificationNumber);
 
     transfer->setNumRetry(transfer->getNumRetry() + 1);
 
@@ -18017,8 +18014,7 @@ MegaClient *MegaApiImpl::getMegaClient()
 void MegaApiImpl::fireOnTransferUpdate(MegaTransferPrivate *transfer)
 {
     assert(threadId == std::this_thread::get_id());
-    notificationNumber++;
-    transfer->setNotificationNumber(notificationNumber);
+    transfer->setNotificationNumber(++notificationNumber);
 
     for(set<MegaTransferListener *>::iterator it = transferListeners.begin(); it != transferListeners.end() ;)
     {
@@ -18045,8 +18041,7 @@ void MegaApiImpl::fireOnFolderTransferUpdate(MegaTransferPrivate *transfer, int 
                         || (stage == MegaTransfer::STAGE_CREATE_TREE && transfer->getType() == MegaTransfer::TYPE_DOWNLOAD)))
             || threadId == std::this_thread::get_id());
 
-    notificationNumber++;
-    transfer->setNotificationNumber(notificationNumber);
+    transfer->setNotificationNumber(++notificationNumber);
 
     // This one is defined to only be called back on the listener for the transfer
     // not any of the global or megaapi listeners
@@ -18061,8 +18056,7 @@ void MegaApiImpl::fireOnFolderTransferUpdate(MegaTransferPrivate *transfer, int 
 bool MegaApiImpl::fireOnTransferData(MegaTransferPrivate *transfer)
 {
     assert(threadId == std::this_thread::get_id());
-    notificationNumber++;
-    transfer->setNotificationNumber(notificationNumber);
+    transfer->setNotificationNumber(++notificationNumber);
 
     bool result = false;
     MegaTransferListener* listener = transfer->getListener();
