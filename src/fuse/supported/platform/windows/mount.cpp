@@ -881,11 +881,14 @@ Mount::Mount(const MountInfo& info, MountDB& mountDB):
 
 Mount::~Mount()
 {
+    // Stop the dispatcher first so WinFSP delivers no new requests, then drain any
+    // already-accepted ones. Doing it in this order avoids a window where a late request
+    // could be scheduled after the drain and then abandoned (never replied) during
+    // executor teardown, leaving a pending IRP that holds the volume open.
+    mDispatcher.stop();
+
     // Wait for all outstanding requests to complete.
     mActivities.waitUntilIdle();
-
-    // Shut down the dispatcher.
-    mDispatcher.stop();
 
     FUSEDebugF("Mount destroyed: %s", path().toPath(false).c_str());
 }
