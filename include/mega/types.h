@@ -1671,6 +1671,9 @@ private:
         assert((expectedOwnerThread ? std::this_thread::get_id() == *mOwnerThreadId :
                                       std::this_thread::get_id() != *mOwnerThreadId) &&
                "SharedResource unexpected threadId");
+
+        // expectedOwnerThread is only used in the asserts above in debug mode
+        (void)expectedOwnerThread;
     }
 
     /**
