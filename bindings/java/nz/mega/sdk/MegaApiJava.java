@@ -3600,6 +3600,45 @@ public class MegaApiJava {
     }
 
     /**
+     * Get download URLs for a node
+     * <p>
+     * The associated request type with this request is MegaRequest::TYPE_GET_DOWNLOAD_URL
+     * Valid data in the MegaRequest object received on callbacks:
+     * - MegaRequest::getNodeHandle - Returns the handle of the node
+     * - MegaRequest::getFlag - Returns the singleUrl parameter
+     * <p>
+     * Valid data in the MegaRequest object received in onRequestFinish when the error code
+     * is MegaError::API_OK:
+     * - MegaRequest::getLink - Returns the download URL
+     *
+     * @param node      Node to get the download URL
+     * @param singleUrl True to get a single URL, false to get multiple URLs for chunked downloads
+     * @param listener  MegaRequestListener to track this request
+     */
+    public void getDownloadUrl(MegaNode node, boolean singleUrl, MegaRequestListenerInterface listener) {
+        megaApi.getDownloadUrl(node, singleUrl, createDelegateRequestListener(listener));
+    }
+
+    /**
+     * Get download URLs for a node
+     * <p>
+     * The associated request type with this request is MegaRequest::TYPE_GET_DOWNLOAD_URL
+     * Valid data in the MegaRequest object received on callbacks:
+     * - MegaRequest::getNodeHandle - Returns the handle of the node
+     * - MegaRequest::getFlag - Returns the singleUrl parameter
+     * <p>
+     * Valid data in the MegaRequest object received in onRequestFinish when the error code
+     * is MegaError::API_OK:
+     * - MegaRequest::getLink - Returns the download URL
+     *
+     * @param node      Node to get the download URL
+     * @param singleUrl True to get a single URL, false to get multiple URLs for chunked downloads
+     */
+    public void getDownloadUrl(MegaNode node, boolean singleUrl) {
+        megaApi.getDownloadUrl(node, singleUrl);
+    }
+
+    /**
      * Get the thumbnail of a node
      * <p>
      * If the node doesn't have a thumbnail the request fails with the MegaError::API_ENOENT
