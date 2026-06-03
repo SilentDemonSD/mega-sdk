@@ -5941,6 +5941,21 @@ struct FileStreamResultConsumption
     std::optional<Value> mValue;
 };
 
+class PublicNodeCache
+{
+public:
+    PublicNodeCache(std::size_t capacity);
+
+    // Get a copy and caller take ownership, or nullptr if there is no cached public nodes for h
+    MegaNode* getCopy(handle h);
+
+    void put(handle h, const std::shared_ptr<MegaNode>& n);
+
+private:
+    LRUCache<handle, shared_ptr<MegaNode>> mNodes;
+    mutable std::mutex mMutex;
+};
+
 class MegaHTTPContext: public MegaTCPContext, public std::enable_shared_from_this<MegaHTTPContext>
 {
 private:
@@ -5977,7 +5992,7 @@ public:
     m_off_t rangeWritten;
     MegaNode *node;
     // Cache public nodes to avoid getting their data from servers on each request
-    static LRUCache<handle, shared_ptr<MegaNode>> publicNodes;
+    static PublicNodeCache publicNodes;
     std::string path;
     std::string nodehandle;
     std::string nodekey;

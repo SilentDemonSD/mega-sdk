@@ -36075,12 +36075,8 @@ int MegaHTTPServer::onMessageComplete(http_parser *parser)
         else
         {
             handle httpNodeHandle = MegaApi::base64ToHandle(httpctx->nodehandle.c_str());
-            if (const auto v = MegaHTTPContext::publicNodes.get(httpNodeHandle))
-            {
-                // Get a copy from the cache
-                node = (*v)->copy();
-            }
-            else
+            node = MegaHTTPContext::publicNodes.getCopy(httpNodeHandle);
+            if (!node)
             {
                 // Send a request to the server to get its data
                 string link =
@@ -37272,7 +37268,28 @@ std::atomic_uint32_t MegaHTTPContext::nextId{0u};
 // 16 might be enough
 constexpr std::size_t MAX_PUBLIC_NODES_CAPACITY = 16;
 
-LRUCache<handle, shared_ptr<MegaNode>> MegaHTTPContext::publicNodes{MAX_PUBLIC_NODES_CAPACITY};
+PublicNodeCache MegaHTTPContext::publicNodes{MAX_PUBLIC_NODES_CAPACITY};
+
+PublicNodeCache::PublicNodeCache(std::size_t capacity):
+    mNodes{capacity}
+{}
+
+MegaNode* PublicNodeCache::getCopy(handle h)
+{
+    const std::lock_guard l{mMutex};
+    if (const std::optional<shared_ptr<MegaNode>> ptr = mNodes.get(h); ptr && *ptr)
+    {
+        return (*ptr)->copy();
+    }
+
+    return nullptr;
+}
+
+void PublicNodeCache::put(handle h, const std::shared_ptr<MegaNode>& ptr)
+{
+    const std::lock_guard l{mMutex};
+    mNodes.put(h, ptr);
+}
 
 MegaHTTPContext::MegaHTTPContext():
     contextId{nextId++},
@@ -37488,7 +37505,10 @@ void MegaHTTPContext::onRequestFinish(MegaApi *, MegaRequest *request, MegaError
     {
         node = request->getPublicMegaNode();
         nodereceived = true;
-        publicNodes.put(node->getHandle(), shared_ptr<MegaNode>{node->copy()});
+        if (node)
+        {
+            publicNodes.put(node->getHandle(), shared_ptr<MegaNode>{node->copy()});
+        }
     }
     uv_async_send(&asynchandle);
 }
