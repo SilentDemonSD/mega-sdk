@@ -3,6 +3,7 @@
 
 #include <gmock/gmock.h>
 
+#include <algorithm>
 #include <chrono>
 #include <memory>
 #include <string>
@@ -22,6 +23,37 @@ std::vector<std::string> toNames(MegaNodeList* nodes)
     for (int i = 0; i < nodes->size(); ++i)
         result.emplace_back(nodes->get(i)->getName());
     return result;
+}
+
+std::vector<MegaHandle> toHandles(MegaNodeList* nodes)
+{
+    std::vector<MegaHandle> result;
+    result.reserve(static_cast<size_t>(nodes->size()));
+    for (int i = 0; i < nodes->size(); ++i)
+        result.emplace_back(nodes->get(i)->getHandle());
+    return result;
+}
+
+// Fetch the full unbounded ordered set for a filter and return its handles (empty
+// if the call returns null — callers assert on the expected size).
+std::vector<MegaHandle> fetchAllHandles(MegaApi* api,
+                                        const MegaListAllNodesFilter* filter,
+                                        int order)
+{
+    std::unique_ptr<MegaNodeList> full{
+        api->listAllNodesByPageAtOffset(filter, order, nullptr, /*maxElements=*/0, /*offset=*/0)};
+    return full ? toHandles(full.get()) : std::vector<MegaHandle>{};
+}
+
+// Slice [offset, offset+limit) clamped to size. Casts to ptrdiff_t explicitly so the
+// vector-iterator arithmetic does not narrow on Win32 (ptrdiff_t is 32-bit there while
+// offset is int64_t).
+std::vector<MegaHandle> handleSlice(const std::vector<MegaHandle>& v, int64_t offset, size_t limit)
+{
+    const size_t from = std::min(static_cast<size_t>(offset), v.size());
+    const size_t to = std::min(from + limit, v.size());
+    return std::vector<MegaHandle>(v.begin() + static_cast<std::ptrdiff_t>(from),
+                                   v.begin() + static_cast<std::ptrdiff_t>(to));
 }
 
 /**
@@ -663,4 +695,119 @@ TEST_F(SdkTestListAllNodesByPageScope, Boundary_NullHandleLists_AreEquivalentToU
         toNames(results.get()),
         ElementsAreArray(
             {"inner1.jpg", "inner2.jpg", "outer.jpg", "sensitive_top.jpg", "sub_inherited.jpg"}));
+}
+
+// ─── Group 10: Offset-based windowing (fast-scroller support) ────────────────
+//
+// These four tests cover the new offset overload. They use
+// the SdkTestListAllNodesByPage fixture (3 photos: alpha.jpg, delta.jpg, golf.jpg in
+// ORDER_MODIFICATION_DESC → golf, delta, alpha; plus 2 videos bravo.mp4, echo.mp4 so
+// FILE_TYPE_ALL_VISUAL_MEDIA spans both grouped-CTE routes).
+
+// Negative offset must be rejected: the API returns a non-null empty list
+// instead of crashing or running a partially-valid query.
+TEST_F(SdkTestListAllNodesByPage, Offset_NegativeRejected)
+{
+    std::unique_ptr<MegaListAllNodesFilter> filter{MegaListAllNodesFilter::createInstance()};
+    filter->byCategory(MegaApi::FILE_TYPE_PHOTO);
+    std::unique_ptr<MegaNodeList> r{
+        megaApi[0]->listAllNodesByPageAtOffset(filter.get(),
+                                               MegaApi::ORDER_MODIFICATION_DESC,
+                                               nullptr,
+                                               /*maxElements=*/10,
+                                               /*offset=*/-1)};
+    ASSERT_NE(r, nullptr) << "API must return a non-null empty list, not crash";
+    EXPECT_EQ(r->size(), 0);
+}
+
+// End-to-end check: skipping offset=1 with maxElements=2 must yield the 2nd
+// and 3rd items of the unbounded ORDER_MODIFICATION_DESC result set.
+TEST_F(SdkTestListAllNodesByPage, Offset_PublicOverload_EndToEnd)
+{
+    std::unique_ptr<MegaListAllNodesFilter> filter{MegaListAllNodesFilter::createInstance()};
+    filter->byCategory(MegaApi::FILE_TYPE_PHOTO);
+    const int order = MegaApi::ORDER_MODIFICATION_DESC;
+
+    const std::vector<MegaHandle> expected = fetchAllHandles(megaApi[0].get(), filter.get(), order);
+    ASSERT_GE(expected.size(), 3u);
+
+    // Skip the first item and take the next two.
+    const int64_t offset = 1;
+    const size_t limit = 2;
+    std::unique_ptr<MegaNodeList> window{
+        megaApi[0]->listAllNodesByPageAtOffset(filter.get(),
+                                               order,
+                                               nullptr,
+                                               /*maxElements=*/limit,
+                                               offset)};
+    ASSERT_NE(window, nullptr);
+    EXPECT_EQ(toHandles(window.get()), handleSlice(expected, offset, limit));
+}
+
+// Grouped category (ALL_VISUAL_MEDIA = photos + videos) drives the UNION-ALL CTE
+// path through the full public stack. The fixture has both photos and videos, so
+// this exercises a real multi-route merge + offset end-to-end, not just the
+// single-route PHOTO path of the test above.
+TEST_F(SdkTestListAllNodesByPage, Offset_GroupedMime_EndToEnd)
+{
+    std::unique_ptr<MegaListAllNodesFilter> filter{MegaListAllNodesFilter::createInstance()};
+    filter->byCategory(MegaApi::FILE_TYPE_ALL_VISUAL_MEDIA);
+    const int order = MegaApi::ORDER_MODIFICATION_DESC;
+
+    const std::vector<MegaHandle> expected = fetchAllHandles(megaApi[0].get(), filter.get(), order);
+    ASSERT_GE(expected.size(), 3u) << "fixture should have >=3 visual-media nodes";
+
+    const int64_t offset = 1;
+    const size_t limit = 2;
+    std::unique_ptr<MegaNodeList> window{
+        megaApi[0]->listAllNodesByPageAtOffset(filter.get(),
+                                               order,
+                                               nullptr,
+                                               /*maxElements=*/limit,
+                                               offset)};
+    ASSERT_NE(window, nullptr);
+    EXPECT_EQ(toHandles(window.get()), handleSlice(expected, offset, limit));
+}
+
+// Fast-scroller flow: obtain date sections from groupAllNodesByDate, then use
+// byTimestampAnchor + offset to fetch the window for the first section.
+TEST_F(SdkTestListAllNodesByPage, Offset_FastScrollerFlow)
+{
+    const int order = MegaApi::ORDER_MODIFICATION_DESC;
+
+    // Build a grouping filter (default granularity = SECTION_GRANULARITY_MONTH).
+    std::unique_ptr<MegaGroupNodesByDateFilter> gfilter{
+        MegaGroupNodesByDateFilter::createInstance()};
+    gfilter->byCategory(MegaApi::FILE_TYPE_PHOTO);
+
+    std::unique_ptr<MegaDateSectionList> sections{
+        megaApi[0]->groupAllNodesByDate(gfilter.get(), order, nullptr)};
+    ASSERT_NE(sections, nullptr);
+    ASSERT_GT(sections->size(), 0);
+
+    // Use the first section's bounds as a timestamp anchor.
+    const MegaDateSection* sec = sections->get(0);
+    ASSERT_NE(sec, nullptr);
+
+    std::unique_ptr<MegaListAllNodesFilter> filter{MegaListAllNodesFilter::createInstance()};
+    filter->byCategory(MegaApi::FILE_TYPE_PHOTO);
+    filter->byTimestampAnchor(sec->getStartDate(), sec->getEndDate(), order);
+
+    // Ground truth: the full anchored set (no limit), in order.
+    const std::vector<MegaHandle> expected = fetchAllHandles(megaApi[0].get(), filter.get(), order);
+    ASSERT_GE(expected.size(), 2u);
+
+    // The anchored offset window must equal that set sliced at [offset, offset+limit):
+    // validates node identity and order, not just cardinality.
+    const int64_t offset = 1;
+    const size_t limit = 2;
+    std::unique_ptr<MegaNodeList> window{
+        megaApi[0]->listAllNodesByPageAtOffset(filter.get(),
+                                               order,
+                                               nullptr,
+                                               /*maxElements=*/limit,
+                                               offset)};
+    ASSERT_NE(window, nullptr);
+    EXPECT_EQ(toHandles(window.get()), handleSlice(expected, offset, limit))
+        << "anchored offset window must equal the unbounded set sliced at [offset, offset+limit)";
 }

@@ -369,6 +369,7 @@ struct ListAllNodesParams: ListAllFilterParams
     /// anchor's own order (see MegaListAllNodesFilter::byTimestampAnchor); the
     /// opposite side is left open so pages walk into adjacent sections.
     std::optional<TimestampAnchorFilter> timestampAnchor;
+    int64_t offset = 0; // Rows to skip (offset-based windowing). Mutually exclusive with cursor.
 };
 
 /// Parameters for NodeManager::groupAllNodesByDate. Same filter/root logic as

@@ -20850,6 +20850,43 @@ class MegaApi
                                          const MegaSearchCursorOffset* cursor);
 
         /**
+         * @brief Fetch a contiguous window of nodes by offset + limit from the ordered result.
+         *
+         * Skips @p offset nodes and returns up to @p maxElements. Compose with
+         * MegaListAllNodesFilter::byTimestampAnchor: anchor a page at a date section (from
+         * MegaApi::groupAllNodesByDate), then pass the local position within that section as
+         * @p offset to land on the on-screen window. A window near the section end bleeds
+         * contiguously into the adjacent section (the anchor is half-bounded). Offset
+         * positions are NOT stable under concurrent add/delete; re-fetch on change notifications.
+         *
+         * NOTE: without byTimestampAnchor, an @p offset of N forces the query to skip N rows
+         * (and, for grouped categories FILE_TYPE_ALL_DOCS / FILE_TYPE_ALL_VISUAL_MEDIA, to
+         * materialize offset+maxElements rows per route) while holding the SDK lock. Anchor the
+         * page to a date section to keep @p offset small; an unanchored deep offset is O(offset).
+         *
+         * This entry point takes no MegaSearchCursorOffset: offset windowing and keyset cursor
+         * pagination are mutually exclusive. It has a distinct name from
+         * listAllNodesByPage(..., const MegaSearchCursorOffset*) so that a literal 0 / NULL last
+         * argument is never ambiguous between the two pagination modes.
+         *
+         * @param filter       Required. Scope/category filter; may carry byTimestampAnchor.
+         * @param order        Sort order constant. Accepts the same set as
+         *                     listAllNodesByPage (ORDER_DEFAULT / SIZE / MODIFICATION /
+         *                     LABEL / FAV, each ASC/DESC); the fast-scroller flow uses
+         *                     NEWEST/OLDEST = ORDER_MODIFICATION_DESC/ASC.
+         * @param cancelToken  Optional; may be null.
+         * @param maxElements  Window size (limit). 0 means no limit.
+         * @param offset       Leading nodes to skip; must be >= 0 (negative => empty list).
+         * @return Up to maxElements nodes starting at offset; empty on invalid args or no match.
+         *         The caller takes ownership and must delete the returned object.
+         */
+        MegaNodeList* listAllNodesByPageAtOffset(const MegaListAllNodesFilter* filter,
+                                                 int order,
+                                                 MegaCancelToken* cancelToken,
+                                                 size_t maxElements,
+                                                 int64_t offset);
+
+        /**
          * @brief Group all nodes matching @p filter into date buckets, sorted
          *        by the active timestamp column.
          *

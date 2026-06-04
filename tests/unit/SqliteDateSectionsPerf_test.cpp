@@ -834,6 +834,208 @@ TEST_F(DISABLED_SqliteCacheEffectsPerfTest, GroupByDate_MapGrowthObservation)
                      << "could matter — track separately if customer-facing concern surfaces.";
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+//  Phase 5: offset-depth cost (real query latency vs offset)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Arm A: global offset depth curve (no anchor).
+//   Sweeps offset values {0, 100, 1000, 10000, 90000} with a fixed page of
+//   60 photos ordered MTIME_DESC against the full 100K-node dataset.
+//   Expected: latency grows linearly with offset (O(offset) SQLite OFFSET).
+//
+// Arm B: anchored deep jump.
+//   Fixes offset=100 and varies the timestamp anchor across early/mid/late day
+//   buckets, using bounds from DateSpreadFixtureBase::populateDB:
+//     mFirstBucketStartSec / mMidBucketStartSec / mLastBucketStartSec = midnight
+//     UTC of day 0 / numDays/2 (~365) / numDays-1 (~730); each window is one day.
+//   Expected: the anchor collapses an otherwise-deep seek (oldest bucket) to
+//   offset=100 within one day — O(1 bucket), independent of bucket depth.
+//
+// Arm C: keyset (cursor) page cost at the same depths as Arm A.
+//   Positions a cursor at each depth and times one page; expected to stay flat
+//   (index seek), the direct contrast to Arm A's O(offset) growth.
+
+class SqliteDateSectionsPerfPhase5Fixture: public SqliteDateSectionsPerfFixture
+{};
+
+using DISABLED_Offset_GlobalDepthCurve = SqliteDateSectionsPerfPhase5Fixture;
+using DISABLED_Offset_AnchoredDeepJump = SqliteDateSectionsPerfPhase5Fixture;
+using DISABLED_Offset_CursorDepthCurve = SqliteDateSectionsPerfPhase5Fixture;
+
+TEST_F(DISABLED_Offset_GlobalDepthCurve, GlobalOffsetDepthCurve)
+{
+    auto* table = nodesTable();
+    ASSERT_NE(table, nullptr);
+
+    const std::vector<NodeHandle> roots{mRootHandle};
+    constexpr size_t pageSize = 60;
+
+    // Each offset is measured once (not averaged): this is a single-shot
+    // cost probe, not a steady-state benchmark.  The DB call itself is what
+    // is timed — no volatile sink, no dead-code elimination concern.
+    for (const int64_t offset: {0LL, 100LL, 1000LL, 10000LL, 90000LL})
+    {
+        ListAllNodesParams lparams;
+        lparams.mimeType = MIME_TYPE_PHOTO;
+        lparams.order = OrderByClause::MTIME_DESC;
+        lparams.maxElements = pageSize;
+        lparams.excludeSensitive = false;
+        lparams.offset = offset;
+
+        // Warm prepare on offset=0 so statement caching doesn't inflate the
+        // first probe (only relevant for the very first iteration).
+        if (offset == 0)
+        {
+            std::vector<std::pair<NodeHandle, NodeSerialized>> warm;
+            CancelToken ct;
+            table->listAllNodesByPage(lparams, roots, warm, ct);
+        }
+
+        std::vector<std::pair<NodeHandle, NodeSerialized>> nodes;
+        CancelToken ct;
+        const auto t0 = std::chrono::steady_clock::now();
+        table->listAllNodesByPage(lparams, roots, nodes, ct);
+        const auto t1 = std::chrono::steady_clock::now();
+        const long long us = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+
+        GTEST_LOG_(INFO) << "GlobalOffsetDepthCurve [offset=" << offset
+                         << ", returned=" << nodes.size() << "]: " << us << " us";
+    }
+}
+
+TEST_F(DISABLED_Offset_AnchoredDeepJump, AnchoredDeepJump)
+{
+    auto* table = nodesTable();
+    ASSERT_NE(table, nullptr);
+
+    const std::vector<NodeHandle> roots{mRootHandle};
+    constexpr size_t pageSize = 60;
+    constexpr int64_t kFixedOffset = 100;
+    constexpr int64_t kOneDaySecs = 86400LL;
+
+    // Anchor positions: early (day 0), mid (~day 365), late (day 730).
+    // Bucket bounds are snapped-to-midnight values computed in populateDB.
+    struct AnchorCase
+    {
+        const char* label;
+        int64_t startSec;
+    };
+
+    const AnchorCase cases[] = {
+        {"early(day0)", mFirstBucketStartSec},
+        {"mid(day~365)", mMidBucketStartSec},
+        {"late(day730)", mLastBucketStartSec},
+    };
+
+    // Warm prepare (no anchor, no offset) so the prepared-statement cache is
+    // populated before we enter the timed section.
+    {
+        ListAllNodesParams warm;
+        warm.mimeType = MIME_TYPE_PHOTO;
+        warm.order = OrderByClause::MTIME_DESC;
+        warm.maxElements = pageSize;
+        std::vector<std::pair<NodeHandle, NodeSerialized>> warmOut;
+        CancelToken ct;
+        table->listAllNodesByPage(warm, roots, warmOut, ct);
+    }
+
+    for (const auto& c: cases)
+    {
+        ListAllNodesParams lparams;
+        lparams.mimeType = MIME_TYPE_PHOTO;
+        lparams.order = OrderByClause::MTIME_DESC;
+        lparams.maxElements = pageSize;
+        lparams.excludeSensitive = false;
+        lparams.offset = kFixedOffset;
+
+        TimestampAnchorFilter anchor;
+        anchor.mOrder = OrderByClause::MTIME_DESC;
+        anchor.mStartSeconds = c.startSec;
+        anchor.mEndSeconds = c.startSec + kOneDaySecs;
+        lparams.timestampAnchor = anchor;
+
+        std::vector<std::pair<NodeHandle, NodeSerialized>> nodes;
+        CancelToken ct;
+        const auto t0 = std::chrono::steady_clock::now();
+        table->listAllNodesByPage(lparams, roots, nodes, ct);
+        const auto t1 = std::chrono::steady_clock::now();
+        const long long us = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+
+        GTEST_LOG_(INFO) << "AnchoredDeepJump [anchor=" << c.label << ", offset=" << kFixedOffset
+                         << ", returned=" << nodes.size() << "]: " << us << " us";
+    }
+}
+
+// Arm C: keyset (cursor) page cost at the same depths as Arm A. A cursor seeks via
+// index to its position and reads pageSize rows, so the page cost should stay flat
+// regardless of depth — the contrast against Arm A's O(offset) growth.
+TEST_F(DISABLED_Offset_CursorDepthCurve, CursorDepthCurve)
+{
+    auto* table = nodesTable();
+    ASSERT_NE(table, nullptr);
+
+    const std::vector<NodeHandle> roots{mRootHandle};
+    constexpr size_t pageSize = 60;
+
+    auto fetch = [&](const ListAllNodesParams& p)
+    {
+        std::vector<std::pair<NodeHandle, NodeSerialized>> out;
+        CancelToken ct;
+        table->listAllNodesByPage(p, roots, out, ct);
+        return out;
+    };
+
+    // Warm prepare (first page, no cursor).
+    {
+        ListAllNodesParams warm;
+        warm.mimeType = MIME_TYPE_PHOTO;
+        warm.order = OrderByClause::MTIME_DESC;
+        warm.maxElements = pageSize;
+        fetch(warm);
+    }
+
+    for (const int64_t depth: {0LL, 100LL, 1000LL, 10000LL})
+    {
+        ListAllNodesParams lparams;
+        lparams.mimeType = MIME_TYPE_PHOTO;
+        lparams.order = OrderByClause::MTIME_DESC;
+        lparams.maxElements = pageSize;
+
+        // Untimed setup: position a keyset cursor just before `depth` by finding the
+        // node at rank depth-1 (offset probe) and building a cursor from it. Only the
+        // cursor fetch below is timed.
+        if (depth > 0)
+        {
+            ListAllNodesParams probe;
+            probe.mimeType = MIME_TYPE_PHOTO;
+            probe.order = OrderByClause::MTIME_DESC;
+            probe.maxElements = 1;
+            probe.offset = depth - 1;
+            const auto boundary = fetch(probe);
+            ASSERT_EQ(boundary.size(), 1u) << "depth=" << depth;
+
+            const auto n = mClient->mNodeManager.getNodeByHandle(boundary.front().first);
+            ASSERT_NE(n, nullptr);
+
+            NodeSearchCursorOffset c;
+            c.mLastName = n->displayname();
+            c.mLastHandle = n->nodeHandle().as8byte();
+            c.mLastMtime = n->mtime;
+            lparams.cursor = c;
+        }
+
+        std::vector<std::pair<NodeHandle, NodeSerialized>> nodes;
+        CancelToken ct;
+        const auto t0 = std::chrono::steady_clock::now();
+        table->listAllNodesByPage(lparams, roots, nodes, ct);
+        const auto t1 = std::chrono::steady_clock::now();
+        const long long us = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+
+        GTEST_LOG_(INFO) << "CursorDepthCurve [depth=" << depth << ", returned=" << nodes.size()
+                         << "]: " << us << " us";
+    }
+}
+
 } // anonymous namespace
 
 #endif // USE_SQLITE

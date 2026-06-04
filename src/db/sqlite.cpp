@@ -2582,7 +2582,10 @@ std::string buildOrderByForListAll(int order)
 
 // Parameter slot layout for listAllNodesByPage:
 //   ?1                              = LIMIT (always)
-//   ?2                              = mimeFilter      (omitted for grouped mime types)
+//   ?2                              = OFFSET (always)
+//   ?3                              = innerLimit (grouped CTEs only; always bound, unused for
+//                                     single-mime queries which do not reference ?3 in SQL)
+//   ?4                              = mimeFilter      (omitted for grouped mime types)
 //   ?filesRootParam     .. +N-1     = filesRoots      (N = numRoots ≥ 1)
 //   ?excludeHandleParam .. +M-1     = excludeHandles  (M = numExcludes, may be 0)
 //   ?timestampAnchorParam           = mStartSeconds (ASC) or mEndSeconds (DESC),
@@ -2590,9 +2593,14 @@ std::string buildOrderByForListAll(int order)
 //   ?cursorStartParam onward        = cursor fields   (only if hasCursor)
 //
 // Grouped mime types (ALL_DOCS, ALL_VISUAL_MEDIA) bake the mimetype as a literal in
-// per-route CTEs, so they do not consume slot ?2.
+// per-route CTEs, so they do not consume the mimeFilter slot (?4). The per-route CTEs
+// use ?3 (innerLimit = offset+pageSize) so that the outer UNION ALL merge receives
+// enough rows from each route; OFFSET ?2 is applied only at the outermost query.
 
 static const QueryTagId kLaIdPageSize{1};
+static const QueryTagId kLaIdOffset{2}; // always-present OFFSET slot
+static const QueryTagId kLaIdInnerLimit{
+    3}; // per-route CTE LIMIT for grouped mimes (= offset+pageSize)
 
 inline bool isAscOrder(int order)
 {
@@ -3221,7 +3229,8 @@ std::string buildListAllRouteSelect(const std::string& mimeFilterClause,
                                     int order,
                                     const SubtreeScopeSql& scope,
                                     const CursorSql& cursor,
-                                    const AnchorSql& anchor)
+                                    const AnchorSql& anchor,
+                                    bool asGroupedCte = false)
 {
     std::vector<std::string> conditions;
     conditions.push_back(mimeFilterClause);
@@ -3260,14 +3269,18 @@ std::string buildListAllRouteSelect(const std::string& mimeFilterClause,
         conditions.push_back(buildCursorWhereForListAll(order, cursor.startParam));
     }
 
+    // Grouped-CTE routes use kLaIdInnerLimit (= offset+pageSize) so the outer
+    // merge sees enough rows from each route. OFFSET is applied only at the
+    // outer query (buildGroupedListAllQuery). Standalone queries apply both.
+    const std::string tail = asGroupedCte ?
+                                 std::string("LIMIT ") + kLaIdInnerLimit :
+                                 std::string("LIMIT ") + kLaIdPageSize + " OFFSET " + kLaIdOffset;
+
     return "SELECT " + listAllNodesResultCols() +
            " \n"
            "FROM nodes AS n \n" +
            buildWhereClauseForListAll(std::move(conditions)) + "ORDER BY \n" +
-           buildOrderByForListAll(order) +
-           " \n"
-           "LIMIT " +
-           kLaIdPageSize;
+           buildOrderByForListAll(order) + " \n" + tail;
 }
 
 std::string buildGroupedListAllQuery(MimeType_t mimeType,
@@ -3297,7 +3310,8 @@ std::string buildGroupedListAllQuery(MimeType_t mimeType,
                                         order,
                                         scope,
                                         cursor,
-                                        anchor) +
+                                        anchor,
+                                        /*asGroupedCte=*/true) +
                 "\n)";
         merged += "SELECT " + listAllNodesResultCols() + " \nFROM " + routeName + "\n";
     }
@@ -3314,7 +3328,7 @@ std::string buildGroupedListAllQuery(MimeType_t mimeType,
            buildOrderByForListAll(order) +
            " \n"
            "LIMIT " +
-           kLaIdPageSize;
+           kLaIdPageSize + " OFFSET " + kLaIdOffset;
 }
 
 bool validateListAllHandles(const std::vector<NodeHandle>& handles,
@@ -3596,11 +3610,12 @@ bool SqliteAccountState::validateListAllEntry(MimeType_t mimeType,
 // buildListAllRouteSelect + buildUpWalkExists if either changes):
 //
 // Example 1 — ORDER_DEFAULT_ASC, 1 root, no cursor, no excludes, excludeSensitive=false.
-// Slot layout: ?1=LIMIT, ?2=mimeFilter, ?3=filesRoots[0].
+// Slot layout: ?1=LIMIT, ?2=OFFSET, ?3=innerLimit (unused here), ?4=mimeFilter,
+// ?5=filesRoots[0].
 //
 //   SELECT nodehandle, counter, node, type, sizeVirtual, mtime, name, label, fav
 //   FROM nodes AS n
-//   WHERE mimetypeVirtual = ?2
+//   WHERE mimetypeVirtual = ?4
 //     AND (n.flags & 1) = 0
 //     AND EXISTS (
 //       WITH RECURSIVE up(h, sensSeen) AS (
@@ -3610,51 +3625,52 @@ bool SqliteAccountState::validateListAllEntry(MimeType_t mimeType,
 //         FROM nodes AS p JOIN up ON p.nodehandle = up.h
 //         WHERE up.h IS NOT NULL AND up.h != -1   -- UNDEF
 //       )
-//       SELECT 1 FROM up WHERE up.h IN (?3) LIMIT 1
+//       SELECT 1 FROM up WHERE up.h IN (?5) LIMIT 1
 //     )
 //   ORDER BY name COLLATE NATURALNOCASE ASC, nodehandle ASC
-//   LIMIT ?1
+//   LIMIT ?1 OFFSET ?2
 //
 // Example 2 — ORDER_SIZE_DESC, 2 roots, hasCursor=true, 1 exclude, excludeSensitive=true,
 // byTimestampAnchor with MTIME_DESC sectionOrder. The anchor column + direction come from
 // its own sectionOrder, independent of the SIZE_DESC page order; its slot sits before the
 // cursor slots.
-// Slot layout: ?1=LIMIT, ?2=mimeFilter, ?3..?4=filesRoots, ?5=excludeHandles[0],
-// ?6=anchor bound, ?7=cursor.lastSize, ?8=cursor.lastName, ?9=cursor.lastHandle.
+// Slot layout: ?1=LIMIT, ?2=OFFSET, ?3=innerLimit (unused here), ?4=mimeFilter,
+// ?5..?6=filesRoots, ?7=excludeHandles[0], ?8=anchor bound,
+// ?9=cursor.lastSize, ?10=cursor.lastName, ?11=cursor.lastHandle.
 //
 //   SELECT nodehandle, counter, node, type, sizeVirtual, mtime, name, label, fav
 //   FROM nodes AS n
-//   WHERE mimetypeVirtual = ?2
+//   WHERE mimetypeVirtual = ?4
 //     AND (n.flags & 1) = 0
 //     AND EXISTS (
 //       WITH RECURSIVE up(h, sensSeen, excSeen) AS (
 //         SELECT n.parenthandle,
 //                ((n.flags & 4) != 0),
-//                (n.nodehandle IN (?5))
+//                (n.nodehandle IN (?7))
 //         UNION ALL
 //         SELECT p.parenthandle,
 //                up.sensSeen OR ((p.flags & 4) != 0),
-//                up.excSeen OR (p.nodehandle IN (?5))
+//                up.excSeen OR (p.nodehandle IN (?7))
 //         FROM nodes AS p JOIN up ON p.nodehandle = up.h
 //         WHERE up.h IS NOT NULL AND up.h != -1   -- UNDEF
 //           AND up.sensSeen = 0
 //           AND up.excSeen = 0
 //       )
 //       SELECT 1 FROM up
-//       WHERE up.h IN (?3, ?4)
+//       WHERE up.h IN (?5, ?6)
 //         AND up.sensSeen = 0
 //         AND up.excSeen = 0
-//         AND up.h NOT IN (?5)
+//         AND up.h NOT IN (?7)
 //       LIMIT 1
 //     )
 //     AND mtime > 0    -- anchor: exclude no-timestamp nodes
-//     AND mtime < ?6   -- anchor: MTIME_DESC half-bound (< endDate)
-//     AND (sizeVirtual < ?7 OR (sizeVirtual = ?7 AND name <= ?8 COLLATE NATURALNOCASE))
-//     AND (sizeVirtual < ?7
-//          OR (sizeVirtual = ?7 AND name < ?8 COLLATE NATURALNOCASE)
-//          OR (sizeVirtual = ?7 AND name = ?8 COLLATE NATURALNOCASE AND nodehandle < ?9))
+//     AND mtime < ?8   -- anchor: MTIME_DESC half-bound (< endDate)
+//     AND (sizeVirtual < ?9 OR (sizeVirtual = ?9 AND name <= ?10 COLLATE NATURALNOCASE))
+//     AND (sizeVirtual < ?9
+//          OR (sizeVirtual = ?9 AND name < ?10 COLLATE NATURALNOCASE)
+//          OR (sizeVirtual = ?9 AND name = ?10 COLLATE NATURALNOCASE AND nodehandle < ?11))
 //   ORDER BY sizeVirtual DESC, name COLLATE NATURALNOCASE DESC, nodehandle DESC
-//   LIMIT ?1
+//   LIMIT ?1 OFFSET ?2
 //
 // The optional pieces layer onto that skeleton: excludeSensitive/excludeHandles
 // add sensSeen/excSeen columns to the up-walk CTE (buildUpWalkExists); a cursor
@@ -3671,6 +3687,23 @@ bool SqliteAccountState::listAllNodesByPage(
                               params.excludeHandles,
                               "listAllNodesByPage"))
         return false;
+
+    // OFFSET 0 is a no-op, so cursor + offset==0 keeps pure keyset semantics; only a
+    // non-zero offset combined with a cursor is the ambiguous (rejected) case.
+    if (params.cursor.has_value() && params.offset != 0)
+    {
+        LOG_warn << "listAllNodesByPage: offset and cursor are mutually exclusive";
+        return false;
+    }
+
+    // Authoritative offset>=0 gate for callers that bypass the public wrapper (unit
+    // tests, future internal callers). SQLite silently clamps a negative OFFSET to 0,
+    // which would emit a full page instead of the documented empty result.
+    if (params.offset < 0)
+    {
+        LOG_warn << "listAllNodesByPage: negative offset (" << params.offset << ")";
+        return false;
+    }
 
     if (cancelFlag.exists())
         sqlite3_progress_handler(db,
@@ -3707,10 +3740,11 @@ bool SqliteAccountState::listAllNodesByPage(
     auto stmtIt = mStmtListAllNodesByPage.find(cacheId);
     sqlite3_stmt* stmt = (stmtIt != mStmtListAllNodesByPage.end()) ? stmtIt->second : nullptr;
 
-    // Slot layout: ?1=pageSize, optional mimeFilter, numRoots contiguous filesRoot slots,
-    // numExcludes contiguous exclude-handle slots, then the optional timestamp-anchor
-    // slot (1 when set), then the optional cursor slots.
-    const int mimeFilterParam = 2;
+    // Slot layout: ?1=pageSize, ?2=OFFSET (always), ?3=innerLimit (grouped CTEs only;
+    // unused for single mime), optional mimeFilter at ?4, numRoots contiguous filesRoot
+    // slots, numExcludes contiguous exclude-handle slots, then the optional
+    // timestamp-anchor slot (1 when set), then the optional cursor slots.
+    const int mimeFilterParam = 4;
     const int filesRootParam = mimeFilterParam + (mimeFilterNeedsParam ? 1 : 0);
     const int excludeHandleParam = filesRootParam + static_cast<int>(numRoots);
     const int timestampAnchorParam = excludeHandleParam + static_cast<int>(numExcludes);
@@ -3754,6 +3788,22 @@ bool SqliteAccountState::listAllNodesByPage(
     const sqlite3_int64 pageSize =
         params.maxElements == 0 ? -1 : static_cast<sqlite3_int64>(params.maxElements);
     bindValue(sqlResult, stmt, kLaIdPageSize, pageSize, sqlite3_bind_int64);
+    bindValue(sqlResult,
+              stmt,
+              kLaIdOffset,
+              static_cast<sqlite3_int64>(params.offset),
+              sqlite3_bind_int64);
+    // Saturate the offset+pageSize sum: an adversarial maxElements/offset pair could
+    // otherwise overflow sqlite3_int64 (signed-overflow UB) at this last bind point.
+    sqlite3_int64 innerLimit = -1;
+    if (pageSize >= 0)
+    {
+        const sqlite3_int64 off = static_cast<sqlite3_int64>(params.offset);
+        innerLimit = (off > std::numeric_limits<sqlite3_int64>::max() - pageSize) ?
+                         std::numeric_limits<sqlite3_int64>::max() :
+                         (pageSize + off);
+    }
+    bindValue(sqlResult, stmt, kLaIdInnerLimit, innerLimit, sqlite3_bind_int64);
 
     if (mimeFilterNeedsParam)
         bindValue(sqlResult,

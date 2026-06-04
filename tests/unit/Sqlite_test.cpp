@@ -2968,6 +2968,351 @@ TEST(Sqlite, ResumeRespectsIndexEnableFlags)
     }
 }
 
+// ─── Offset windowing ────────────────────────────────────────────────────────
+class ListAllNodesByPageOffsetTest: public mega::pagetest::SearchByPageTest
+{
+protected:
+    std::vector<NodeHandle> reference(int order, MimeType_t mime = MIME_TYPE_DOCUMENT) const
+    {
+        return collectAllByPage(order, /*pageSize=*/4, mime);
+    }
+
+    std::vector<NodeHandle>
+        offsetWindow(int order, size_t limit, int64_t offset, MimeType_t mime = MIME_TYPE_DOCUMENT)
+    {
+        auto nodes = mClient->mNodeManager.listAllNodesByPage(
+            mega::pagetest::makeParams(mime, order, limit, false, std::nullopt, {}, {}, 1, offset),
+            CancelToken{});
+        std::vector<NodeHandle> out;
+        for (const auto& n: nodes)
+            out.push_back(n->nodeHandle());
+        return out;
+    }
+
+    // Returns handles in the order returned by listAllNodesByPage for the given params.
+    std::vector<NodeHandle> handlesOfParams(const ListAllNodesParams& p)
+    {
+        auto nodes = mClient->mNodeManager.listAllNodesByPage(p, CancelToken{});
+        std::vector<NodeHandle> out;
+        for (const auto& n: nodes)
+            out.push_back(n->nodeHandle());
+        return out;
+    }
+};
+
+TEST_F(ListAllNodesByPageOffsetTest, Offset_Mid_SkipsExactly)
+{
+    const auto ref = reference(OrderByClause::DEFAULT_ASC);
+    ASSERT_GE(ref.size(), 7u);
+    const std::vector<NodeHandle> expected(ref.begin() + 3, ref.begin() + 7);
+
+    EXPECT_EQ(offsetWindow(OrderByClause::DEFAULT_ASC, /*limit=*/4, /*offset=*/3), expected);
+}
+
+// Grouped-mime offset, single dominant route. Uses MIME_TYPE_ALL_VISUAL_MEDIA
+// (grouped path: UNION ALL CTE over MIME_TYPE_PHOTO + MIME_TYPE_VIDEO routes),
+// but the base fixture has 5 MIME_TYPE_PHOTO and 0 MIME_TYPE_VIDEO nodes, so only
+// the PHOTO route is non-empty here. With offset >= limit, the outer OFFSET skips
+// past what a wrongly-bound inner CTE would supply, so this catches the two
+// inner-LIMIT binding bugs: under-fetch (LIMIT pageSize instead of offset+pageSize
+// → outer OFFSET falls short → empty/partial slice) and double-OFFSET (inner also
+// applying OFFSET → outer over-skips). It does NOT exercise cross-route merge
+// interleave (one non-empty route) — that is covered by
+// Offset_GroupedMime_DominantRoute_CrossesBoundary.
+TEST_F(ListAllNodesByPageOffsetTest, Offset_GroupedMime_MatchesReferenceSlice)
+{
+    const int order = OrderByClause::MTIME_DESC;
+    const auto ref = reference(order, MIME_TYPE_ALL_VISUAL_MEDIA);
+    ASSERT_GE(ref.size(), 4u) << "need >=4 visual-media nodes in the fixture";
+
+    // offset >= limit: outer OFFSET exposes any inner-LIMIT under-fetch / double-OFFSET.
+    EXPECT_EQ(offsetWindow(order, /*limit=*/2, /*offset=*/2, MIME_TYPE_ALL_VISUAL_MEDIA),
+              std::vector<NodeHandle>(ref.begin() + 2, ref.begin() + 4));
+    EXPECT_EQ(offsetWindow(order, /*limit=*/3, /*offset=*/1, MIME_TYPE_ALL_VISUAL_MEDIA),
+              std::vector<NodeHandle>(ref.begin() + 1, ref.begin() + 4));
+}
+
+TEST_F(ListAllNodesByPageOffsetTest, AllOrders_OffsetMatchesReferenceSlice)
+{
+    const std::vector<int> orders = {
+        OrderByClause::DEFAULT_ASC,
+        OrderByClause::DEFAULT_DESC,
+        OrderByClause::SIZE_ASC,
+        OrderByClause::SIZE_DESC,
+        OrderByClause::MTIME_ASC,
+        OrderByClause::MTIME_DESC,
+        OrderByClause::LABEL_ASC,
+        OrderByClause::LABEL_DESC,
+        OrderByClause::FAV_ASC,
+        OrderByClause::FAV_DESC,
+    };
+
+    for (int order: orders)
+    {
+        const auto ref = reference(order);
+        const size_t len = ref.size();
+        ASSERT_GT(len, 0u) << "order=" << order;
+
+        const std::vector<int64_t> offsets = {0,
+                                              1,
+                                              static_cast<int64_t>(len / 2),
+                                              static_cast<int64_t>(len) - 1,
+                                              static_cast<int64_t>(len),
+                                              static_cast<int64_t>(len) + 5};
+        const std::vector<size_t> limits = {1, 3, len, 0 /* no limit */};
+
+        for (int64_t k: offsets)
+        {
+            if (k < 0)
+                continue;
+            for (size_t l: limits)
+            {
+                const size_t from = std::min(static_cast<size_t>(k), len);
+                const size_t count = (l == 0) ? (len - from) : std::min(l, len - from);
+                const std::vector<NodeHandle> expected(
+                    ref.begin() + static_cast<std::ptrdiff_t>(from),
+                    ref.begin() + static_cast<std::ptrdiff_t>(from + count));
+                EXPECT_EQ(offsetWindow(order, l, k), expected)
+                    << "order=" << order << " offset=" << k << " limit=" << l;
+            }
+        }
+    }
+}
+
+TEST_F(ListAllNodesByPageOffsetTest, Offset_Zero_EqualsNoOffset)
+{
+    const auto noOffset = offsetWindow(OrderByClause::MTIME_DESC, /*limit=*/5, /*offset=*/0);
+    const auto ref = reference(OrderByClause::MTIME_DESC);
+    ASSERT_GE(ref.size(), 5u);
+    const std::vector<NodeHandle> first5(ref.begin(), ref.begin() + 5);
+    EXPECT_EQ(noOffset, first5);
+}
+
+TEST_F(ListAllNodesByPageOffsetTest, Offset_BeyondEnd_ReturnsEmpty)
+{
+    EXPECT_TRUE(offsetWindow(OrderByClause::DEFAULT_ASC, /*limit=*/5, /*offset=*/100).empty());
+}
+
+// A negative offset is rejected at the engine entry (mirrors the cursor-exclusivity
+// guard): rather than let SQLite clamp a negative OFFSET to 0 and emit a full
+// unwindowed page, SqliteAccountState::listAllNodesByPage returns no rows. Exercised
+// here directly through NodeManager, bypassing the public wrapper's own >=0 check.
+TEST_F(ListAllNodesByPageOffsetTest, Offset_Negative_ReturnsEmpty)
+{
+    EXPECT_TRUE(offsetWindow(OrderByClause::DEFAULT_ASC, /*limit=*/5, /*offset=*/-1).empty());
+}
+
+// A cursor combined with a non-zero offset is rejected at the engine entry: the two
+// pagination modes are mutually exclusive. (offset==0 is a no-op and stays allowed.)
+TEST_F(ListAllNodesByPageOffsetTest, Offset_WithCursor_Rejected)
+{
+    const int order = OrderByClause::DEFAULT_ASC;
+    auto p = mega::pagetest::makeParams(MIME_TYPE_PHOTO,
+                                        order,
+                                        /*maxElements=*/5,
+                                        false,
+                                        cursorFor(hClean, order),
+                                        {},
+                                        {},
+                                        1,
+                                        /*offset=*/1);
+    EXPECT_TRUE(handlesOfParams(p).empty());
+}
+
+TEST_F(ListAllNodesByPageOffsetTest, Offset_MaxElementsZero_SkipsThenAll)
+{
+    const auto ref = reference(OrderByClause::DEFAULT_ASC);
+    ASSERT_GE(ref.size(), 5u);
+    const std::vector<NodeHandle> tail(ref.begin() + 4, ref.end());
+    EXPECT_EQ(offsetWindow(OrderByClause::DEFAULT_ASC, /*limit=*/0, /*offset=*/4), tail);
+}
+
+TEST_F(ListAllNodesByPageOffsetTest, Offset_LastPartialWindow)
+{
+    const auto ref = reference(OrderByClause::DEFAULT_ASC);
+    const size_t len = ref.size();
+    ASSERT_GE(len, 2u);
+    const std::vector<NodeHandle> last2(ref.end() - 2, ref.end());
+    EXPECT_EQ(offsetWindow(OrderByClause::DEFAULT_ASC,
+                           /*limit=*/5,
+                           /*offset=*/static_cast<int64_t>(len) - 2),
+              last2);
+}
+
+// Offset + excludeSensitive filter: window at offset=1 equals reference[1..2).
+// Reference uses the same filter (excludeSensitive=true, MTIME_DESC, photos).
+// Base fixture has 3 photos visible under default scope with sens filtered out:
+//   clean.jpg (baseMtime+1), head.jpg (baseMtime+3), vault_file.jpg (baseMtime+5).
+TEST_F(ListAllNodesByPageOffsetTest, Offset_ExcludeSensitive_Slice)
+{
+    const int order = OrderByClause::MTIME_DESC;
+    const auto ref = collectAllByPage(order,
+                                      /*pageSize=*/4,
+                                      MIME_TYPE_PHOTO,
+                                      /*startCursor=*/std::nullopt,
+                                      /*excludeSensitive=*/true);
+    ASSERT_GE(ref.size(), 2u);
+    auto got = handlesOfParams(mega::pagetest::makeParams(MIME_TYPE_PHOTO,
+                                                          order,
+                                                          /*maxElements=*/1,
+                                                          /*excludeSensitive=*/true,
+                                                          std::nullopt,
+                                                          {},
+                                                          {},
+                                                          1,
+                                                          /*offset=*/1));
+    EXPECT_EQ(got, std::vector<NodeHandle>(ref.begin() + 1, ref.begin() + 2));
+}
+
+// Offset + multi-root union: window at offset=1, limit=2 equals reference[1..3).
+// Explicit roots {hFilesRoot, hVault, hRubbish} pull in all 5 photos.
+TEST_F(ListAllNodesByPageOffsetTest, Offset_MultiRootUnion_Slice)
+{
+    const int order = OrderByClause::MTIME_ASC;
+    const std::vector<NodeHandle> roots{hFilesRoot, hVault, hRubbish};
+    const auto ref = handlesOfParams(mega::pagetest::makeParams(MIME_TYPE_PHOTO,
+                                                                order,
+                                                                /*maxElements=*/0,
+                                                                false,
+                                                                std::nullopt,
+                                                                roots,
+                                                                {},
+                                                                1,
+                                                                /*offset=*/0));
+    ASSERT_GE(ref.size(), 3u);
+    auto got = handlesOfParams(mega::pagetest::makeParams(MIME_TYPE_PHOTO,
+                                                          order,
+                                                          /*maxElements=*/2,
+                                                          false,
+                                                          std::nullopt,
+                                                          roots,
+                                                          {},
+                                                          1,
+                                                          /*offset=*/1));
+    EXPECT_EQ(got, std::vector<NodeHandle>(ref.begin() + 1, ref.begin() + 3));
+}
+
+// Offset + excludeHandles subtree: window at offset=1, limit=1 equals reference[1..2).
+// Dropping hNormalFolder leaves vault_file.jpg and under_sens.jpg in default scope.
+TEST_F(ListAllNodesByPageOffsetTest, Offset_ExcludeSubtree_Slice)
+{
+    const int order = OrderByClause::MTIME_ASC;
+    const std::vector<NodeHandle> excludes{hNormalFolder};
+    const auto ref = handlesOfParams(mega::pagetest::makeParams(MIME_TYPE_PHOTO,
+                                                                order,
+                                                                /*maxElements=*/0,
+                                                                false,
+                                                                std::nullopt,
+                                                                {},
+                                                                excludes,
+                                                                1,
+                                                                /*offset=*/0));
+    ASSERT_GE(ref.size(), 2u);
+    // offset=1 (not 0) so OFFSET skipping actually composes with the exclude-subtree
+    // filter; an impl that ignored params.offset would now fail this slice.
+    auto got = handlesOfParams(mega::pagetest::makeParams(MIME_TYPE_PHOTO,
+                                                          order,
+                                                          /*maxElements=*/1,
+                                                          false,
+                                                          std::nullopt,
+                                                          {},
+                                                          excludes,
+                                                          1,
+                                                          /*offset=*/1));
+    EXPECT_EQ(got, std::vector<NodeHandle>(ref.begin() + 1, ref.begin() + 2));
+}
+
+// Offset + timestampAnchor (DESC): window at offset=1 equals reference[1..2).
+// mEndSeconds=1'900'000'000 admits all photos (baseMtime+1..+5 < 1'900'000'000).
+TEST_F(ListAllNodesByPageOffsetTest, Offset_Anchor_DESC_Slice)
+{
+    const int order = OrderByClause::MTIME_DESC;
+    auto p = mega::pagetest::makeParams(MIME_TYPE_PHOTO,
+                                        order,
+                                        /*maxElements=*/0,
+                                        false,
+                                        std::nullopt,
+                                        {},
+                                        {},
+                                        1,
+                                        /*offset=*/0);
+    TimestampAnchorFilter ta;
+    ta.mOrder = OrderByClause::MTIME_DESC; // DESC ⇒ upper bound: mtime < mEndSeconds
+    ta.mStartSeconds = 0;
+    ta.mEndSeconds = 1'900'000'000LL; // > all photo mtimes (baseMtime=1'800'000'000)
+    p.timestampAnchor = ta;
+    const auto ref = handlesOfParams(p);
+    ASSERT_GE(ref.size(), 2u);
+
+    p.maxElements = 1;
+    p.offset = 1;
+    EXPECT_EQ(handlesOfParams(p), std::vector<NodeHandle>(ref.begin() + 1, ref.begin() + 2));
+}
+
+// Offset + timestampAnchor (ASC): half-bound is mtime >= mStartSeconds (the DESC
+// upper-bound path is covered above). mStartSeconds sits between the photo mtimes
+// (baseMtime+1..+5) so the two earliest photos are cut off, proving the anchor
+// actually excludes rows; offset=1 then slices within the survivors.
+TEST_F(ListAllNodesByPageOffsetTest, Offset_Anchor_ASC_Slice)
+{
+    const int order = OrderByClause::MTIME_ASC;
+    auto p = mega::pagetest::makeParams(MIME_TYPE_PHOTO,
+                                        order,
+                                        /*maxElements=*/0,
+                                        false,
+                                        std::nullopt,
+                                        {},
+                                        {},
+                                        1,
+                                        /*offset=*/0);
+    TimestampAnchorFilter ta;
+    ta.mOrder = OrderByClause::MTIME_ASC; // ASC ⇒ lower bound: mtime >= mStartSeconds
+    ta.mStartSeconds = 1'800'000'003LL; // cuts off photos at baseMtime+1, +2
+    ta.mEndSeconds = 1'900'000'000LL; // unused for ASC; kept > start for validity
+    p.timestampAnchor = ta;
+    const auto ref = handlesOfParams(p);
+    ASSERT_GE(ref.size(), 2u);
+
+    // The anchor really excluded rows (full unanchored set is larger).
+    const auto full = handlesOfParams(mega::pagetest::makeParams(MIME_TYPE_PHOTO,
+                                                                 order,
+                                                                 /*maxElements=*/0,
+                                                                 false,
+                                                                 std::nullopt,
+                                                                 {},
+                                                                 {},
+                                                                 1,
+                                                                 /*offset=*/0));
+    EXPECT_LT(ref.size(), full.size());
+
+    p.maxElements = 1;
+    p.offset = 1;
+    EXPECT_EQ(handlesOfParams(p), std::vector<NodeHandle>(ref.begin() + 1, ref.begin() + 2));
+}
+
+// Dominant-route: photos all EARLIER than videos so the merged ASC order is
+// all photos then all videos. An offset crossing the photo/video boundary must
+// take items from the merged stream (proves inner top-(offset+limit), not per-CTE).
+TEST_F(ListAllNodesByPageOffsetTest, Offset_GroupedMime_DominantRoute_CrossesBoundary)
+{
+    auto normal = mClient->mNodeManager.getNodeByHandle(hNormalFolder);
+    ASSERT_NE(normal, nullptr);
+    // Videos with mtimes AFTER every photo (photos use baseMtime≈1'800'000'00x).
+    addNode(FILENODE, normal, NodeMeta{"vid_1.mp4", FILENODE, 700, 1'900'000'001LL}, false);
+    addNode(FILENODE, normal, NodeMeta{"vid_2.mp4", FILENODE, 800, 1'900'000'002LL}, false);
+    if (auto* sa = dynamic_cast<SqliteAccountState*>(mClient->sctable.get()))
+        sa->createIndexes(/*enableSearch=*/true, /*enableLexi=*/true);
+
+    const int order = OrderByClause::MTIME_ASC;
+    const auto ref = reference(order, MIME_TYPE_ALL_VISUAL_MEDIA);
+    ASSERT_GE(ref.size(), 4u);
+    // A window whose offset lands near the end of the photos and whose limit
+    // spills into the videos.
+    const int64_t off = static_cast<int64_t>(ref.size()) - 3;
+    EXPECT_EQ(offsetWindow(order, /*limit=*/3, off, MIME_TYPE_ALL_VISUAL_MEDIA),
+              std::vector<NodeHandle>(ref.end() - 3, ref.end()));
+}
+
 // ---------------------------------------------------------------------------
 // CacheKeyBuilder regression coverage. Pins computeListAllCacheId /
 // computeDateSectionsCacheId (src/db/sqlite.cpp) to the pre-refactor
