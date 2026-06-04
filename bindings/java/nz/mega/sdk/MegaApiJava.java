@@ -12561,6 +12561,6 @@ public class MegaApiJava {
      *         The caller takes ownership and must delete the returned object.
      */
     public MegaNodeList listAllNodesByPageAtOffset(MegaListAllNodesFilter filter, int order, int maxElements, MegaCancelToken cancelToken, long offset) {
-        return megaApi.listAllNodesByPageAtOffset(filter, order, cancelToken, maxElements, cursor);
+        return megaApi.listAllNodesByPageAtOffset(filter, order, cancelToken, maxElements, offset);
     }
 }
