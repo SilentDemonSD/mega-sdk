@@ -276,14 +276,6 @@ public class MegaApiJava {
     public final static int CLIENT_TYPE_VPN = MegaApi.CLIENT_TYPE_VPN;
     public final static int CLIENT_TYPE_PASSWORD_MANAGER = MegaApi.CLIENT_TYPE_PASSWORD_MANAGER;
 
-    public final static int SENSITIVITY_SHOW_ALL = MegaApi.SENSITIVITY_SHOW_ALL;
-    public final static int SENSITIVITY_HIDE_SENSITIVE = MegaApi.SENSITIVITY_HIDE_SENSITIVE;
-
-    public final static int LOCATION_CLOUD_DRIVE = MegaApi.LOCATION_CLOUD_DRIVE;
-    public final static int LOCATION_CLOUD_DRIVE_AND_VAULT = MegaApi.LOCATION_CLOUD_DRIVE_AND_VAULT;
-    public final static int LOCATION_CLOUD_DRIVE_VAULT_AND_RUBBISH = MegaApi.LOCATION_CLOUD_DRIVE_VAULT_AND_RUBBISH;
-
-
     /**
      * PITAG trigger codes exposed at API level.
      *
