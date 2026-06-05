@@ -36075,7 +36075,7 @@ int MegaHTTPServer::onMessageComplete(http_parser *parser)
         else
         {
             handle httpNodeHandle = MegaApi::base64ToHandle(httpctx->nodehandle.c_str());
-            node = MegaHTTPContext::publicNodes.getCopy(httpNodeHandle);
+            node = MegaHTTPContext::publicNodes.getCopy(httpNodeHandle).release();
             if (!node)
             {
                 // Send a request to the server to get its data
@@ -37274,12 +37274,12 @@ PublicNodeCache::PublicNodeCache(std::size_t capacity):
     mNodes{capacity}
 {}
 
-MegaNode* PublicNodeCache::getCopy(handle h)
+unique_ptr<MegaNode> PublicNodeCache::getCopy(handle h)
 {
     const std::lock_guard l{mMutex};
     if (const std::optional<shared_ptr<MegaNode>> ptr = mNodes.get(h); ptr && *ptr)
     {
-        return (*ptr)->copy();
+        return unique_ptr<MegaNode>{(*ptr)->copy()};
     }
 
     return nullptr;

@@ -5946,8 +5946,8 @@ class PublicNodeCache
 public:
     PublicNodeCache(std::size_t capacity);
 
-    // Get a copy and caller take ownership, or nullptr if there is no cached public nodes for h
-    MegaNode* getCopy(handle h);
+    // Get a copy, nullptr if there is no cached public nodes for h
+    std::unique_ptr<MegaNode> getCopy(handle h);
 
     void put(handle h, const std::shared_ptr<MegaNode>& n);
 
