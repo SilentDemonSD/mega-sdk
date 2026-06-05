@@ -37285,10 +37285,10 @@ unique_ptr<MegaNode> PublicNodeCache::getCopy(handle h)
     return nullptr;
 }
 
-void PublicNodeCache::put(handle h, const std::shared_ptr<MegaNode>& ptr)
+void PublicNodeCache::put(handle h, const std::shared_ptr<MegaNode> ptr)
 {
     const std::lock_guard l{mMutex};
-    mNodes.put(h, ptr);
+    mNodes.put(h, std::move(ptr));
 }
 
 MegaHTTPContext::MegaHTTPContext():

@@ -5949,7 +5949,7 @@ public:
     // Get a copy, nullptr if there is no cached public nodes for h
     std::unique_ptr<MegaNode> getCopy(handle h);
 
-    void put(handle h, const std::shared_ptr<MegaNode>& n);
+    void put(handle h, const std::shared_ptr<MegaNode> ptr);
 
 private:
     LRUCache<handle, shared_ptr<MegaNode>> mNodes;
