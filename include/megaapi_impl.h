@@ -5953,7 +5953,7 @@ public:
 
 private:
     LRUCache<handle, shared_ptr<MegaNode>> mNodes;
-    mutable std::mutex mMutex;
+    std::mutex mMutex;
 };
 
 class MegaHTTPContext: public MegaTCPContext, public std::enable_shared_from_this<MegaHTTPContext>
