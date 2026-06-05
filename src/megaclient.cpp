@@ -16989,6 +16989,16 @@ error MegaClient::trackSignature(attr_t signatureType, handle uh, const std::str
                 app->key_modified(uh, signatureType == ATTR_SIG_CU255_PUBK ? ATTR_CU25519_PUBK : ATTR_UNKNOWN);
                 sendevent(99451, "Key modification detected");
 
+                // The tracked key was replaced by a different one (even though this new key
+                // carries a valid signature, e.g. when the public Ed25519 was substituted too).
+                // Clear its verified status so the share-key path stops trusting the previous
+                // fingerprint until the change is re-verified.
+                if (authring->getAuthMethod(uh) == AUTH_METHOD_SIGNATURE)
+                {
+                    authring->update(uh, AUTH_METHOD_UNKNOWN);
+                    updateAuthring(authring, authringType, temporalAuthring, uh);
+                }
+
                 return API_EKEY;
             }
             else if (authring->getAuthMethod(uh) != AUTH_METHOD_SIGNATURE)
