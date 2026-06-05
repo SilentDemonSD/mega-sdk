@@ -17021,8 +17021,19 @@ error MegaClient::trackSignature(attr_t signatureType, handle uh, const std::str
         app->key_modified(uh, signatureType);
         sendevent(99452, "Signature mismatch for public key");
 
-        // flush the temporal authring if needed
-        if (temporalAuthring)
+        // The cached public key whose signature failed must no longer be trusted: clear its
+        // verified status in the authring.
+        bool downgraded = false;
+        if (keyTracked && authring->getAuthMethod(uh) == AUTH_METHOD_SIGNATURE)
+        {
+            LOG_warn << "Clearing verified status in " << User::attr2string(authringType)
+                     << " for user " << userID << " after signature verification failure";
+            authring->update(uh, AUTH_METHOD_UNKNOWN);
+            downgraded = true;
+        }
+
+        // persist the downgrade and/or flush the temporal authring if needed
+        if (downgraded || temporalAuthring)
         {
             updateAuthring(authring, authringType, temporalAuthring, uh);
         }
