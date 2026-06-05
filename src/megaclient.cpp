@@ -25003,10 +25003,17 @@ bool KeyManager::verificationRequired(handle userHandle)
         return !mClient.areCredentialsVerified(userHandle);
     }
 
-    // if no manual verification required, still check Ed25519 public key is SEEN
-    AuthRingsMap::const_iterator it = mClient.mAuthRings.find(ATTR_AUTHRING);
-    bool edAuthringFound = it != mClient.mAuthRings.end();
-    return !edAuthringFound || (it->second.getAuthMethod(userHandle) < AUTH_METHOD_SEEN);
+    // if no manual verification required, still check that contact Ed25519 public key is SEEN and
+    // that the contact Cu25519 public key signature is verified.
+    AuthRingsMap::const_iterator itEd = mClient.mAuthRings.find(ATTR_AUTHRING);
+    bool edAuthringFound = itEd != mClient.mAuthRings.end();
+    if (!edAuthringFound || itEd->second.getAuthMethod(userHandle) < AUTH_METHOD_SEEN)
+    {
+        return true;
+    }
+    AuthRingsMap::const_iterator itCu = mClient.mAuthRings.find(ATTR_AUTHCU255);
+    bool cuAuthringFound = itCu != mClient.mAuthRings.end();
+    return !cuAuthringFound || (itCu->second.getAuthMethod(userHandle) != AUTH_METHOD_SIGNATURE);
 }
 
 string KeyManager::serializeBackups() const
