@@ -11691,6 +11691,8 @@ int MegaClient::readuser(JSON* j, bool actionpackets)
                 // Keep them instead of the ones with no version from the fetch nodes.
                 if (!(uh == me && fetchingnodes))
                 {
+                    bool cu25519Changed = false;
+
                     if (!publicKey.empty())
                     {
                         u->pubk.setkey(AsymmCipher::PUBKEY,
@@ -11705,6 +11707,8 @@ int MegaClient::readuser(JSON* j, bool actionpackets)
 
                     if (puCu255.size())
                     {
+                        const UserAttribute* cu = u->getAttribute(ATTR_CU25519_PUBK);
+                        cu25519Changed = !cu || !cu->isValid() || cu->value() != puCu255;
                         u->setAttribute(ATTR_CU25519_PUBK, puCu255, {});
                     }
 
@@ -11715,7 +11719,18 @@ int MegaClient::readuser(JSON* j, bool actionpackets)
 
                     if (sigCu255.size())
                     {
+                        const UserAttribute* sig = u->getAttribute(ATTR_SIG_CU255_PUBK);
+                        cu25519Changed =
+                            cu25519Changed || !sig || !sig->isValid() || sig->value() != sigCu255;
                         u->setAttribute(ATTR_SIG_CU255_PUBK, sigCu255, {});
+                    }
+
+                    // For an already-established contact, re-verify when its Cu25519 key (or the
+                    // signature of it) changed. The new-contact transition below only fetches keys
+                    // on the first to VISIBLE transition.
+                    if (cu25519Changed && uh != me && statecurrent && u->show == VISIBLE)
+                    {
+                        fetchContactKeys(u);
                     }
                 }
 
@@ -11732,12 +11747,15 @@ int MegaClient::readuser(JSON* j, bool actionpackets)
                                 u->changed.email = true;
                             }
                         }
-                        else if (u->show == VISIBILITY_UNKNOWN && v == VISIBLE
-                                 && uh != me
-                                 && statecurrent)  // otherwise, fetched when statecurrent is set
+                        // A contact becoming visible (newly added (UNKNOWN) or re-added after
+                        // being removed (HIDDEN)) may carry keys we have not verified in their
+                        // current form.
+                        if ((u->show == VISIBILITY_UNKNOWN || u->show == HIDDEN) && v == VISIBLE &&
+                            uh != me && statecurrent) // otherwise, fetched when statecurrent is set
                         {
                             // new user --> fetch contact keys if they are not yet available.
-                            // If keys are available for the user, fetchContactKeys will call trackKey directly.
+                            // If keys are available for the user, fetchContactKeys will call
+                            // trackKey directly.
                             fetchContactKeys(u);
                         }
 
