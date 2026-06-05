@@ -36069,15 +36069,20 @@ int MegaHTTPServer::onMessageComplete(http_parser *parser)
         else
         {
             handle httpNodeHandle = MegaApi::base64ToHandle(httpctx->nodehandle.c_str());
-            string link =
-                MegaClient::publicLinkURL(httpctx->megaApi->getMegaClient()->mNewLinkFormat,
-                                          TypeOfLink::FILE,
-                                          httpNodeHandle,
-                                          httpctx->nodekey.c_str());
-            LOG_debug << httpctx->getLogName() << "Getting public link: " << link;
-            httpctx->megaApi->getPublicNode(link.c_str(), httpctx);
-            // getPublicNode result is processed inside httpctx onRequestFinish
-            return 0;
+            node = MegaHTTPContext::publicNodes.getCopy(httpNodeHandle).release();
+            if (!node)
+            {
+                // Send a request to the server to get its data
+                string link =
+                    MegaClient::publicLinkURL(httpctx->megaApi->getMegaClient()->mNewLinkFormat,
+                                              TypeOfLink::FILE,
+                                              httpNodeHandle,
+                                              httpctx->nodekey.c_str());
+                LOG_debug << httpctx->getLogName() << "Getting public link: " << link;
+                httpctx->megaApi->getPublicNode(link.c_str(), httpctx);
+                // getPublicNode result is processed inside httpctx onRequestFinish
+                return 0;
+            }
         }
     }
 
@@ -37253,6 +37258,33 @@ void MegaHTTPServer::sendNextBytes(MegaHTTPContext *httpctx)
 
 std::atomic_uint32_t MegaHTTPContext::nextId{0u};
 
+// Decide by the number of parallel public file link video streaming likely to be.
+// 16 might be enough
+constexpr std::size_t MAX_PUBLIC_NODES_CAPACITY = 16;
+
+PublicNodeCache MegaHTTPContext::publicNodes{MAX_PUBLIC_NODES_CAPACITY};
+
+PublicNodeCache::PublicNodeCache(std::size_t capacity):
+    mNodes{capacity}
+{}
+
+unique_ptr<MegaNode> PublicNodeCache::getCopy(handle h)
+{
+    const std::lock_guard l{mMutex};
+    if (const std::optional<shared_ptr<MegaNode>> ptr = mNodes.get(h); ptr && *ptr)
+    {
+        return unique_ptr<MegaNode>{(*ptr)->copy()};
+    }
+
+    return nullptr;
+}
+
+void PublicNodeCache::put(handle h, const std::shared_ptr<MegaNode> ptr)
+{
+    const std::lock_guard l{mMutex};
+    mNodes.put(h, std::move(ptr));
+}
+
 MegaHTTPContext::MegaHTTPContext():
     contextId{nextId++},
     logname{"(HttpCtx#" + std::to_string(contextId) + ") "},
@@ -37467,6 +37499,10 @@ void MegaHTTPContext::onRequestFinish(MegaApi *, MegaRequest *request, MegaError
     {
         node = request->getPublicMegaNode();
         nodereceived = true;
+        if (node)
+        {
+            publicNodes.put(node->getHandle(), shared_ptr<MegaNode>{node->copy()});
+        }
     }
     uv_async_send(&asynchandle);
 }
