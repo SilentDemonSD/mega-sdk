@@ -1865,6 +1865,8 @@ bool NodeManager::loadNodes_internal()
         return false;
     }
 
+    mTable->createIndexes(mClient.mEnableSearchDBIndexes, mClient.mEnableLexicographicDBIndexes);
+
     sharedNode_vector allRootNodes = getRootNodes_internal();
     for (const auto& node: allRootNodes)
     {
