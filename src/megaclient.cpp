@@ -16854,8 +16854,20 @@ error MegaClient::trackKey(attr_t keyType, handle uh, const std::string &pubKey)
                 app->key_modified(uh, keyType);
                 sendevent(99451, "Key modification detected");
 
-                // flush the temporal authring if needed
-                if (temporalAuthring)
+                // The identity (Ed25519) key changed. Clear its trusted status, while keeping the
+                // previously-tracked fingerprint as the anchor: if the known key returns it will be
+                // re-promoted to SEEN.
+                bool downgraded = false;
+                if (authring->getAuthMethod(uh) >= AUTH_METHOD_SEEN)
+                {
+                    LOG_warn << "Clearing trusted status in " << User::attr2string(authringType)
+                             << " for user " << userID << " after a key change";
+                    authring->update(uh, AUTH_METHOD_UNKNOWN);
+                    downgraded = true;
+                }
+
+                // persist the downgrade and/or flush the temporal authring if needed
+                if (downgraded || temporalAuthring)
                 {
                     updateAuthring(authring, authringType, temporalAuthring, uh);
                 }
@@ -16865,6 +16877,16 @@ error MegaClient::trackKey(attr_t keyType, handle uh, const std::string &pubKey)
         }
         else
         {
+            // A known key that had been cleared after a change has returned: re-promote it to
+            // SEEN. Do not auto-restore a manually-verified (FINGERPRINT) state. That requires
+            // explicit verification.
+            if (!authring->isSignedKey() && authring->getAuthMethod(uh) < AUTH_METHOD_SEEN)
+            {
+                LOG_warn << "Restoring SEEN status in " << User::attr2string(authringType)
+                         << " for user " << userID << " after the known key returned";
+                authring->update(uh, AUTH_METHOD_SEEN);
+            }
+
             LOG_debug << "Authentication of public key in " << User::attr2string(authringType)
                       << " for user " << userID << " was successful. Auth method: "
                       << AuthRing::authMethodToStr(authring->getAuthMethod(uh));
