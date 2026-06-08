@@ -241,6 +241,10 @@ public class AndroidGfxProcessor extends MegaGfxProcessor {
     }
 
     static public Bitmap getBitmap(String path, Rect rect, int orientation, int w, int h) {
+        if (path == null) {
+            return null;
+        }
+
         if (isVideoFile(path)) {
             Uri uri = Uri.parse(path);
             boolean contentUri = isContentUri(uri);
