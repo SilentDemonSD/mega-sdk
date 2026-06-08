@@ -45,6 +45,8 @@ typedef NS_ENUM(NSUInteger, Event) {
     EventDowngradeAttack = 19,
     EventConfirmUserEmail = 20,
     EventCreditCardExpiry = 21,
+    EventNetworkActivity = 22,
+    EventTransfersResumed = 23,
 };
 
 typedef NS_ENUM(NSInteger, ReasonError) {
