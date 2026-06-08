@@ -644,10 +644,15 @@ std::optional<std::vector<AndroidFileWrapper::ChildMetadata>>
                                    lastModified,
                                    getString(pathField)};
         {
+            // child.path is empty when path resolution is not available (see
+            // ChildMetadata::path); it must not be cached as a resolved path,
+            // otherwise getPath() would later return "" instead of std::nullopt.
+            std::optional<std::string> cachedPath =
+                child.path.empty() ? std::nullopt : std::make_optional(child.path);
             std::unique_lock<std::mutex> lock(URIDataCacheLock);
             URIDataCache.put(
                 child.uri,
-                AndroidFileWrapper::URIData{true, child.isFolder, child.name, child.path});
+                AndroidFileWrapper::URIData{true, child.isFolder, child.name, cachedPath});
         }
         LocalPath childPath = parentPath;
         childPath.appendWithSeparator(LocalPath::fromRelativePath(child.name), true);
@@ -1875,11 +1880,7 @@ bool AndroidDirAccess::dopen(LocalPath* path, FileAccess* f, bool doglob)
         return false;
     }
 
-    for (const auto& childMetaData: childrenMetaData.value())
-    {
-        mChildren.push_back(AndroidFileWrapper::getAndroidFileWrapper(childMetaData.uri));
-    }
-
+    mChildren = std::move(childrenMetaData.value());
     return true;
 }
 
@@ -1898,13 +1899,12 @@ bool AndroidDirAccess::dnext(LocalPath& path,
         return false;
     }
 
-    auto& next = mChildren[mIndex];
-    assert(next.get());
-    path = LocalPath::fromPlatformEncodedAbsolute(next->getURI());
-    name = LocalPath::fromPlatformEncodedRelative(next->getName());
+    const auto& next = mChildren[mIndex];
+    path = LocalPath::fromPlatformEncodedAbsolute(next.uri);
+    name = LocalPath::fromPlatformEncodedRelative(next.name);
     if (type)
     {
-        *type = next->isFolder() ? FOLDERNODE : FILENODE;
+        *type = next.isFolder ? FOLDERNODE : FILENODE;
     }
 
     mIndex++;

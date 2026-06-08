@@ -306,7 +306,7 @@ public:
 
 private:
     std::shared_ptr<AndroidFileWrapper> mFileWrapper;
-    std::vector<std::shared_ptr<AndroidFileWrapper>> mChildren;
+    std::vector<AndroidFileWrapper::ChildMetadata> mChildren;
     size_t mIndex{0};
 
     std::unique_ptr<PosixDirAccess> mGlobbing;
