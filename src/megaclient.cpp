@@ -23722,6 +23722,14 @@ string KeyManager::encryptShareKeyTo(handle userhandle, std::string shareKey)
         return std::string();
     }
 
+    // The share key to wrap must be exactly one AES block.
+    if (shareKey.size() != CryptoPP::AES::BLOCKSIZE)
+    {
+        LOG_err << "Refusing to encrypt share key with unexpected size: " << shareKey.size();
+        assert(false && "encryptShareKeyTo: share key to wrap must be exactly one AES block");
+        return std::string();
+    }
+
     std::string encryptedKey;
     encryptedKey.resize(CryptoPP::AES::BLOCKSIZE);
 
@@ -23741,6 +23749,15 @@ string KeyManager::decryptShareKeyFrom(handle userhandle, std::string key)
     std::string sharedKey = computeSymmetricKey(userhandle);
     if (!sharedKey.size())
     {
+        return std::string();
+    }
+
+    // The encrypted share key must be exactly one AES block.
+    if (key.size() != CryptoPP::AES::BLOCKSIZE)
+    {
+        LOG_err << "Refusing to decrypt share key with unexpected size: " << key.size();
+        mClient.sendevent(800041, "KeyMgr / Rejected inshare key with unexpected size");
+        assert(false && "decryptShareKeyFrom: encrypted share key must be exactly one AES block");
         return std::string();
     }
 
