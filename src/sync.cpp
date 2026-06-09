@@ -10059,6 +10059,14 @@ bool Sync::syncItem(SyncRow& row, SyncRow& parentRow, SyncPath& fullPath, PerFol
                             "a BACKUP!"
                          << " This will result on the backup being disabled."
                          << " Triplet: " << logTriplet(row, fullPath);
+                if (!mUnifiedSync.mConfig.mEnabled)
+                {
+                    // Sync is being disabled (e.g., removeFromBC while upload was completing).
+                    // Don't attempt to upsync to a deleted backup folder.
+                    LOG_debug << syncname << "XSF: backup sync is being disabled, skipping upsync."
+                              << " Triplet: " << logTriplet(row, fullPath);
+                    return false;
+                }
                 assert(false && "XSF - cloud item not present for a previously "
                                 "synced item should not happen for a backup!");
             }
