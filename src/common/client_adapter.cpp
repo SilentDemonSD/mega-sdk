@@ -1851,6 +1851,9 @@ void ClientPartialDownload::begin()
                 toCharPointer(mKeyData.mPrivateAuth),
                 toCharPointer(mKeyData.mPublicAuth),
                 toCharPointer(mKeyData.mChatAuth));
+
+            // Let the client know it has work to do.
+            mClient.client().waiter->notify();
         });
 }
 
