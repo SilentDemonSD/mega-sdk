@@ -17139,40 +17139,67 @@ void MegaApiImpl::nodes_current()
 
 void MegaApiImpl::checkLastPurgeNotification()
 {
-    // Requires statecurrent: the "no node newer than the purge" check needs a loaded node tree.
-    // If not ready yet, defer without marking notified; nodes_current() re-evaluates.
+    // Only inactivity purges are surfaced; other reasons have their own flows.
+    if (client->mLastPurge.reason != PURGE_REASON_INACTIVE)
+    {
+        return;
+    }
+
+    // The newer-node check needs a loaded tree; defer (without marking) until statecurrent.
     if (!(client->mLastPurge.ts > 0 && client->mLastPurge.ts != client->mLastPurgeNotifiedTs &&
           client->statecurrent))
     {
         return;
     }
 
-    // Suppress if already acknowledged on any device (^!lpack, cached from the ug response).
-    if (const User* u = client->ownuser())
-    {
-        const UserAttribute* attr = u->getAttribute(ATTR_LAST_PURGE_ACKNOWLEDGED);
-        if (attr && attr->isValid() && !attr->value().empty())
-        {
-            try
-            {
-                if (std::stoll(attr->value()) == client->mLastPurge.ts)
-                    return;
-            }
-            catch (...)
-            {}
-        }
-    }
-
-    // Suppress if a file newer than the purge exists (the notification would be obsolete).
-    // getRecentNodes returns files with ctime >= since, hence ts + 1 for "strictly newer".
-    if (!client->mNodeManager.getRecentNodes(1, client->mLastPurge.ts + 1, false).empty())
+    // ^!lpack lives on the own user; if not loaded yet, defer rather than fire blind.
+    const User* u = client->ownuser();
+    if (!u)
     {
         return;
     }
 
-    // Mark as notified only when actually fired, so later ug refreshes can re-evaluate
-    // if ^!lpack changes meanwhile (e.g. acknowledged on another device).
+    // Mark now (fire or suppress) so this ts is evaluated at most once per session.
     client->mLastPurgeNotifiedTs = client->mLastPurge.ts;
+
+    // Suppress if already acknowledged on any device (^!lpack).
+    const UserAttribute* attr = u->getAttribute(ATTR_LAST_PURGE_ACKNOWLEDGED);
+    if (attr && attr->isValid() && !attr->value().empty())
+    {
+        try
+        {
+            if (std::stoll(attr->value()) == client->mLastPurge.ts)
+                return;
+        }
+        catch (...)
+        {}
+    }
+
+    // Suppress if any own node (any type, under Cloud Drive / Vault / Rubbish, not in-shares) is
+    // newer than the purge. Descending only into folders skips versions; the early-exit on the
+    // first newer node keeps this fast in practice.
+    std::vector<std::shared_ptr<Node>> stack;
+    for (const NodeHandle root: {client->mNodeManager.getRootNodeFiles(),
+                                 client->mNodeManager.getRootNodeVault(),
+                                 client->mNodeManager.getRootNodeRubbish()})
+    {
+        if (std::shared_ptr<Node> n = client->nodeByHandle(root))
+            stack.push_back(std::move(n));
+    }
+    while (!stack.empty())
+    {
+        const std::shared_ptr<Node> n = std::move(stack.back());
+        stack.pop_back();
+        if (n->ctime > client->mLastPurge.ts)
+        {
+            return; // a node newer than the purge exists -> the notification is obsolete
+        }
+        if (n->type != FILENODE)
+        {
+            for (auto& child: client->mNodeManager.getChildren(n.get()))
+                stack.push_back(child);
+        }
+    }
 
     MegaEventPrivate* purgeEvent = new MegaEventPrivate(MegaEvent::EVENT_LAST_PURGE);
     purgeEvent->setNumber("ts", static_cast<int64_t>(client->mLastPurge.ts));

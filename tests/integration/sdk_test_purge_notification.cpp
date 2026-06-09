@@ -204,7 +204,7 @@ protected:
 
     // Upload a small file to the account root, giving the account content with a server-assigned
     // creation time (ctime) close to "now".
-    void uploadFileToRoot(const std::string& fileName)
+    void uploadFileToRoot(const std::string& fileName, MegaHandle* uploadedHandle = nullptr)
     {
         ASSERT_TRUE(createFile(fileName, false));
         std::unique_ptr<MegaNode> rootnode{megaApi[0]->getRootNode()};
@@ -223,6 +223,8 @@ protected:
                                 nullptr /*cancelToken*/))
             << "Cannot upload test file";
         ASSERT_NE(uploadedNode, INVALID_HANDLE);
+        if (uploadedHandle)
+            *uploadedHandle = uploadedNode;
     }
 
     // Re-login and fetch nodes. Resets the in-session dedup (mLastPurgeNotifiedTs back to 0) and
@@ -306,24 +308,24 @@ TEST_F(PurgeNotificationTest, EventCarriesWarningAndLastActiveForInactive)
 }
 
 /**
- * @brief When the purge reason is not inactivity, the optional offsets are absent.
+ * @brief EVENT_LAST_PURGE is only raised for inactivity purges; other reasons are ignored.
  */
-TEST_F(PurgeNotificationTest, EventOmitsWarningAndLastActiveForOtherReason)
+TEST_F(PurgeNotificationTest, EventSuppressedForNonInactiveReason)
 {
-    PurgeEventListener listener;
-    ScopedListener scoped(megaApi[0].get(), &listener);
-
+    // FUTURE_PURGE_TS so the newer-node rule can never suppress; only the reason gate should.
     ASSERT_NO_FATAL_FAILURE(injectLastPurge(FUTURE_PURGE_TS, ::mega::PURGE_REASON_BLOCKED));
+
+    mApi[0].resetlastEvent();
     ASSERT_NO_FATAL_FAILURE(refreshUserData());
 
-    ASSERT_TRUE(WaitFor(
-        [&listener]()
+    WaitFor(
+        [this]()
         {
-            return listener.fired();
+            return mApi[0].lastEventsContain(MegaEvent::EVENT_LAST_PURGE);
         },
-        defaultTimeoutMs));
-    EXPECT_FALSE(listener.warningTs());
-    EXPECT_FALSE(listener.lastActiveTs());
+        3000);
+    EXPECT_FALSE(mApi[0].lastEventsContain(MegaEvent::EVENT_LAST_PURGE))
+        << "Event should not fire for a non-inactivity purge reason";
 }
 
 /**
@@ -432,6 +434,72 @@ TEST_F(PurgeNotificationTest, EventSuppressedWhenNewerNodeExists)
         3000);
     EXPECT_FALSE(mApi[0].lastEventsContain(MegaEvent::EVENT_LAST_PURGE))
         << "Event should be suppressed when a node newer than the purge exists";
+}
+
+/**
+ * @brief EVENT_LAST_PURGE is suppressed when a folder (not just a file) is newer than the purge.
+ *
+ * Matches the webclient, which counts any node type. A folder created during the test has a ctime
+ * newer than the (past) purge timestamp, so the notification must be suppressed.
+ */
+TEST_F(PurgeNotificationTest, EventSuppressedWhenNewerFolderExists)
+{
+    std::unique_ptr<MegaNode> rootnode{megaApi[0]->getRootNode()};
+    ASSERT_TRUE(rootnode);
+    ASSERT_NE(createFolder(0, (getFilePrefix() + "_folder").c_str(), rootnode.get()),
+              INVALID_HANDLE)
+        << "Failed to create the test folder";
+    ASSERT_NO_FATAL_FAILURE(injectLastPurge(TEST_PURGE_TS));
+
+    ASSERT_NO_FATAL_FAILURE(reloginAndFetch());
+
+    mApi[0].resetlastEvent();
+    ASSERT_NO_FATAL_FAILURE(refreshUserData());
+
+    WaitFor(
+        [this]()
+        {
+            return mApi[0].lastEventsContain(MegaEvent::EVENT_LAST_PURGE);
+        },
+        3000);
+    EXPECT_FALSE(mApi[0].lastEventsContain(MegaEvent::EVENT_LAST_PURGE))
+        << "Event should be suppressed when a folder newer than the purge exists";
+}
+
+/**
+ * @brief EVENT_LAST_PURGE is suppressed when a node newer than the purge is in the Rubbish bin.
+ *
+ * Matches the webclient, which traverses RubbishID too. A file uploaded then moved to rubbish keeps
+ * its (recent) ctime, which is newer than the (past) purge timestamp, so it must suppress.
+ */
+TEST_F(PurgeNotificationTest, EventSuppressedWhenNewerNodeInRubbish)
+{
+    MegaHandle uploaded = INVALID_HANDLE;
+    ASSERT_NO_FATAL_FAILURE(uploadFileToRoot("purge_rubbish_node.txt", &uploaded));
+    ASSERT_NE(uploaded, INVALID_HANDLE);
+
+    std::unique_ptr<MegaNode> node{megaApi[0]->getNodeByHandle(uploaded)};
+    ASSERT_TRUE(node);
+    std::unique_ptr<MegaNode> rubbish{megaApi[0]->getRubbishNode()};
+    ASSERT_TRUE(rubbish);
+    ASSERT_EQ(doMoveNode(0, nullptr, node.get(), rubbish.get()), API_OK)
+        << "Failed to move the test file to rubbish";
+
+    ASSERT_NO_FATAL_FAILURE(injectLastPurge(TEST_PURGE_TS));
+
+    ASSERT_NO_FATAL_FAILURE(reloginAndFetch());
+
+    mApi[0].resetlastEvent();
+    ASSERT_NO_FATAL_FAILURE(refreshUserData());
+
+    WaitFor(
+        [this]()
+        {
+            return mApi[0].lastEventsContain(MegaEvent::EVENT_LAST_PURGE);
+        },
+        3000);
+    EXPECT_FALSE(mApi[0].lastEventsContain(MegaEvent::EVENT_LAST_PURGE))
+        << "Event should be suppressed when a node newer than the purge exists in rubbish";
 }
 
 /**
