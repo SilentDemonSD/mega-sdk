@@ -17888,8 +17888,7 @@ void MegaApiImpl::fireOnRequestTemporaryError(MegaRequestPrivate *request, uniqu
 void MegaApiImpl::fireOnTransferStart(MegaTransferPrivate *transfer)
 {
     assert(threadId == std::this_thread::get_id());
-    notificationNumber++;
-    transfer->setNotificationNumber(notificationNumber);
+    transfer->setNotificationNumber(++notificationNumber);
 
     for(set<MegaTransferListener *>::iterator it = transferListeners.begin(); it != transferListeners.end() ;)
     {
@@ -17911,8 +17910,7 @@ void MegaApiImpl::fireOnTransferStart(MegaTransferPrivate *transfer)
 void MegaApiImpl::fireOnTransferFinish(MegaTransferPrivate *transfer, unique_ptr<MegaErrorPrivate> e)
 {
     assert(threadId == std::this_thread::get_id());
-    notificationNumber++;
-    transfer->setNotificationNumber(notificationNumber);
+    transfer->setNotificationNumber(++notificationNumber);
     transfer->setLastError(e.get());
 
     if(e->getErrorCode())
@@ -17987,8 +17985,7 @@ void MegaApiImpl::fireOnTransferFinish(MegaTransferPrivate *transfer, unique_ptr
 void MegaApiImpl::fireOnTransferTemporaryError(MegaTransferPrivate *transfer, unique_ptr<MegaErrorPrivate> e)
 {
     assert(threadId == std::this_thread::get_id());
-    notificationNumber++;
-    transfer->setNotificationNumber(notificationNumber);
+    transfer->setNotificationNumber(++notificationNumber);
 
     transfer->setNumRetry(transfer->getNumRetry() + 1);
 
@@ -18017,8 +18014,7 @@ MegaClient *MegaApiImpl::getMegaClient()
 void MegaApiImpl::fireOnTransferUpdate(MegaTransferPrivate *transfer)
 {
     assert(threadId == std::this_thread::get_id());
-    notificationNumber++;
-    transfer->setNotificationNumber(notificationNumber);
+    transfer->setNotificationNumber(++notificationNumber);
 
     for(set<MegaTransferListener *>::iterator it = transferListeners.begin(); it != transferListeners.end() ;)
     {
@@ -18045,8 +18041,7 @@ void MegaApiImpl::fireOnFolderTransferUpdate(MegaTransferPrivate *transfer, int 
                         || (stage == MegaTransfer::STAGE_CREATE_TREE && transfer->getType() == MegaTransfer::TYPE_DOWNLOAD)))
             || threadId == std::this_thread::get_id());
 
-    notificationNumber++;
-    transfer->setNotificationNumber(notificationNumber);
+    transfer->setNotificationNumber(++notificationNumber);
 
     // This one is defined to only be called back on the listener for the transfer
     // not any of the global or megaapi listeners
@@ -18061,8 +18056,7 @@ void MegaApiImpl::fireOnFolderTransferUpdate(MegaTransferPrivate *transfer, int 
 bool MegaApiImpl::fireOnTransferData(MegaTransferPrivate *transfer)
 {
     assert(threadId == std::this_thread::get_id());
-    notificationNumber++;
-    transfer->setNotificationNumber(notificationNumber);
+    transfer->setNotificationNumber(++notificationNumber);
 
     bool result = false;
     MegaTransferListener* listener = transfer->getListener();
@@ -36075,15 +36069,20 @@ int MegaHTTPServer::onMessageComplete(http_parser *parser)
         else
         {
             handle httpNodeHandle = MegaApi::base64ToHandle(httpctx->nodehandle.c_str());
-            string link =
-                MegaClient::publicLinkURL(httpctx->megaApi->getMegaClient()->mNewLinkFormat,
-                                          TypeOfLink::FILE,
-                                          httpNodeHandle,
-                                          httpctx->nodekey.c_str());
-            LOG_debug << httpctx->getLogName() << "Getting public link: " << link;
-            httpctx->megaApi->getPublicNode(link.c_str(), httpctx);
-            // getPublicNode result is processed inside httpctx onRequestFinish
-            return 0;
+            node = MegaHTTPContext::publicNodes.getCopy(httpNodeHandle).release();
+            if (!node)
+            {
+                // Send a request to the server to get its data
+                string link =
+                    MegaClient::publicLinkURL(httpctx->megaApi->getMegaClient()->mNewLinkFormat,
+                                              TypeOfLink::FILE,
+                                              httpNodeHandle,
+                                              httpctx->nodekey.c_str());
+                LOG_debug << httpctx->getLogName() << "Getting public link: " << link;
+                httpctx->megaApi->getPublicNode(link.c_str(), httpctx);
+                // getPublicNode result is processed inside httpctx onRequestFinish
+                return 0;
+            }
         }
     }
 
@@ -37259,6 +37258,33 @@ void MegaHTTPServer::sendNextBytes(MegaHTTPContext *httpctx)
 
 std::atomic_uint32_t MegaHTTPContext::nextId{0u};
 
+// Decide by the number of parallel public file link video streaming likely to be.
+// 16 might be enough
+constexpr std::size_t MAX_PUBLIC_NODES_CAPACITY = 16;
+
+PublicNodeCache MegaHTTPContext::publicNodes{MAX_PUBLIC_NODES_CAPACITY};
+
+PublicNodeCache::PublicNodeCache(std::size_t capacity):
+    mNodes{capacity}
+{}
+
+unique_ptr<MegaNode> PublicNodeCache::getCopy(handle h)
+{
+    const std::lock_guard l{mMutex};
+    if (const std::optional<shared_ptr<MegaNode>> ptr = mNodes.get(h); ptr && *ptr)
+    {
+        return unique_ptr<MegaNode>{(*ptr)->copy()};
+    }
+
+    return nullptr;
+}
+
+void PublicNodeCache::put(handle h, const std::shared_ptr<MegaNode> ptr)
+{
+    const std::lock_guard l{mMutex};
+    mNodes.put(h, std::move(ptr));
+}
+
 MegaHTTPContext::MegaHTTPContext():
     contextId{nextId++},
     logname{"(HttpCtx#" + std::to_string(contextId) + ") "},
@@ -37473,6 +37499,10 @@ void MegaHTTPContext::onRequestFinish(MegaApi *, MegaRequest *request, MegaError
     {
         node = request->getPublicMegaNode();
         nodereceived = true;
+        if (node)
+        {
+            publicNodes.put(node->getHandle(), shared_ptr<MegaNode>{node->copy()});
+        }
     }
     uv_async_send(&asynchandle);
 }

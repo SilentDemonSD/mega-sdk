@@ -5073,7 +5073,7 @@ public:
         // sc requests to close existing wsc and immediately retrieve pending actionpackets
         RequestQueue scRequestQueue;
 
-        long long notificationNumber;
+        std::atomic<long long> notificationNumber;
         set<MegaRequestListener *> requestListeners;
         set<MegaTransferListener *> transferListeners;
         set<MegaScheduledCopyListener *> backupListeners;
@@ -5941,6 +5941,21 @@ struct FileStreamResultConsumption
     std::optional<Value> mValue;
 };
 
+class PublicNodeCache
+{
+public:
+    PublicNodeCache(std::size_t capacity);
+
+    // Get a copy, nullptr if there is no cached public nodes for h
+    std::unique_ptr<MegaNode> getCopy(handle h);
+
+    void put(handle h, const std::shared_ptr<MegaNode> ptr);
+
+private:
+    LRUCache<handle, shared_ptr<MegaNode>> mNodes;
+    std::mutex mMutex;
+};
+
 class MegaHTTPContext: public MegaTCPContext, public std::enable_shared_from_this<MegaHTTPContext>
 {
 private:
@@ -5976,6 +5991,8 @@ public:
     m_off_t rangeEnd;
     m_off_t rangeWritten;
     MegaNode *node;
+    // Cache public nodes to avoid getting their data from servers on each request
+    static PublicNodeCache publicNodes;
     std::string path;
     std::string nodehandle;
     std::string nodekey;

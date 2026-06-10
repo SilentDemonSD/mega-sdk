@@ -1252,6 +1252,10 @@ void SqliteAccountState::updateCounterAndFlags(NodeHandle nodeHandle, uint64_t f
     sqlite3_reset(mStmtUpdateNodeAndFlags);
 }
 
+// Single source of truth for the `nodes` table indexes. Invoked from every node-load path
+// (initCompleted = server fetch, dumpNodes = legacy upgrade, loadNodes = cache resume), so any
+// index added here is created on existing DBs too. Add new node indexes here, not elsewhere.
+// All statements are CREATE INDEX IF NOT EXISTS (idempotent).
 void SqliteAccountState::createIndexes(bool enableIndexesForSearching,
                                        bool enableIndexesForLexicographicalList)
 {
