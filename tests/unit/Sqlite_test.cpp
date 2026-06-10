@@ -3347,7 +3347,7 @@ TEST(Sqlite, ResumeRespectsIndexEnableFlags)
         EXPECT_EQ(0u, set.count("listallnodesdefaultidx"))
             << "search index built despite search=off";
         EXPECT_EQ(0u, set.count("ctimeindex")) << "search index built despite search=off";
-        EXPECT_EQ(0u, set.count("lexicopraphicindex")) << "lexi index built despite lexi=off";
+        EXPECT_EQ(0u, set.count("lexicographics3keyindex")) << "lexi index built despite lexi=off";
     }
 
     // search ON, lexi ON: resume must create the full set.
@@ -3361,7 +3361,7 @@ TEST(Sqlite, ResumeRespectsIndexEnableFlags)
         EXPECT_EQ(1u, set.count("parenthandleindex"));
         EXPECT_EQ(1u, set.count("listallnodesdefaultidx"))
             << "search index missing despite search=on";
-        EXPECT_EQ(1u, set.count("lexicopraphicindex")) << "lexi index missing despite lexi=on";
+        EXPECT_EQ(1u, set.count("lexicographics3keyindex")) << "lexi index missing despite lexi=on";
     }
 }
 

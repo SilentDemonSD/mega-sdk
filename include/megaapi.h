@@ -52,7 +52,10 @@ struct MegaTotpTokenGenResult
 struct MegaSearchLexicographicalOffset
 {
     std::string mLastName;
-    std::optional<int> mLastType{}; // eg. MegaNode::TYPE_FOLDER
+    // Deprecated and ignored: node type is folded into the S3 key (folder key = name + '/'); to
+    // address a folder, append '/' to mLastName. Kept for ABI. No [[deprecated]] attribute: it
+    // fires on the implicit copy/move ctor and breaks every copy under -Werror on GCC.
+    std::optional<int> mLastType{};
     std::optional<MegaHandle> mLastHandle{};
 };
 
@@ -19400,18 +19403,21 @@ class MegaApi
         MegaNodeList* getChildren(MegaNodeList *parentNodes, int order = 1);
 
         /**
-         * @brief List child nodes ordered lexicographically by name.
+         * @brief List child nodes ordered lexicographically by S3 key.
          *
-         * Results are ordered by name, then node type (files before folders), then handle.
-         * This makes paging deterministic even when there are duplicate names.
+         * Results are ordered by each node's effective S3 key (a folder's key is its name + '/'),
+         * then by node handle. This matches S3 object-key ordering and makes paging deterministic
+         * even when there are duplicate names.
          *
          * @param parenthandle Parent node handle.
          * @param cancelToken Optional cancel token.
          * @param maxElements Maximum number of elements to return (0 means no limit).
          * @param offset Optional offset to resume from a previous page. Provide:
-         *  - mLastName to start strictly after all nodes with that name (regardless of type).
-         *  - mLastName + mLastType to start strictly after all nodes with that name and type.
-         *  - mLastName + mLastType + mLastHandle to resume after a specific node among duplicates.
+         *  - mLastName to start strictly after the node with that effective S3 key (for a folder,
+         *    pass name + '/').
+         *  - mLastName + mLastHandle to resume after a specific node among duplicates sharing that
+         *    key; mLastHandle = 0 makes the bound inclusive of mLastName.
+         *  mLastType is deprecated and ignored: the node type is folded into the effective S3 key.
          *
          * @return List with the MegaNode matching the query
          */

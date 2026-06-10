@@ -262,7 +262,6 @@ private:
 struct NodeSearchLexicographicalOffset
 {
     std::string mLastName;
-    std::optional<int> mLastType;
     std::optional<handle> mLastHandle;
 };
 

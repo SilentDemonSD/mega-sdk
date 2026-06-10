@@ -19028,7 +19028,9 @@ MegaNodeList* MegaApiImpl::listChildNodesLexicographically(
     const auto megaToNodeOffset =
         [](const MegaSearchLexicographicalOffset& off) -> NodeSearchLexicographicalOffset
     {
-        return {off.mLastName, off.mLastType, off.mLastHandle};
+        // Public off.mLastType is deprecated and ignored: node type is folded into the effective
+        // S3 key, so the internal offset carries no type field at all.
+        return {off.mLastName, off.mLastHandle};
     };
     SdkMutexGuard guard(sdkMutex);
     sharedNode_vector results =
