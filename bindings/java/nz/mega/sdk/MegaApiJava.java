@@ -3600,42 +3600,24 @@ public class MegaApiJava {
     }
 
     /**
-     * Get download URLs for a node
+     * Get downloads URLs for a node
      * <p>
-     * The associated request type with this request is MegaRequest::TYPE_GET_DOWNLOAD_URL
-     * Valid data in the MegaRequest object received on callbacks:
-     * - MegaRequest::getNodeHandle - Returns the handle of the node
-     * - MegaRequest::getFlag - Returns the singleUrl parameter
+     * The associated request type with this request is MegaRequest::TYPE_GET_DOWNLOAD_URLS
      * <p>
      * Valid data in the MegaRequest object received in onRequestFinish when the error code
      * is MegaError::API_OK:
-     * - MegaRequest::getLink - Returns the download URL
+     * - MegaRequest::getName - Returns semicolon-separated download URL(s) to the file
+     * - MegaRequest::getLink - Returns semicolon-separated IPv4 of the server in the URL(s)
+     * - MegaRequest::getText - Returns semicolon-separated IPv6 of the server in the URL(s)
+     * - MegaRequest::getMegaStringMap - Returns a {node handle, file handle} pair for the given file node
      *
-     * @param node      Node to get the download URL
-     * @param singleUrl True to get a single URL, false to get multiple URLs for chunked downloads
+     * @param node      Node to get the downloads URLs
+     * @param singleUrl Always return one URL (even for raided files)
+     * @param forceSSL  Enforce getting a https URL
      * @param listener  MegaRequestListener to track this request
      */
-    public void getDownloadUrl(MegaNode node, boolean singleUrl, MegaRequestListenerInterface listener) {
-        megaApi.getDownloadUrl(node, singleUrl, createDelegateRequestListener(listener));
-    }
-
-    /**
-     * Get download URLs for a node
-     * <p>
-     * The associated request type with this request is MegaRequest::TYPE_GET_DOWNLOAD_URL
-     * Valid data in the MegaRequest object received on callbacks:
-     * - MegaRequest::getNodeHandle - Returns the handle of the node
-     * - MegaRequest::getFlag - Returns the singleUrl parameter
-     * <p>
-     * Valid data in the MegaRequest object received in onRequestFinish when the error code
-     * is MegaError::API_OK:
-     * - MegaRequest::getLink - Returns the download URL
-     *
-     * @param node      Node to get the download URL
-     * @param singleUrl True to get a single URL, false to get multiple URLs for chunked downloads
-     */
-    public void getDownloadUrl(MegaNode node, boolean singleUrl) {
-        megaApi.getDownloadUrl(node, singleUrl);
+    public void getDownloadUrl(MegaNode node, boolean singleUrl, boolean forceSSL, MegaRequestListenerInterface listener) {
+        megaApi.getDownloadUrl(node, singleUrl, forceSSL, createDelegateRequestListener(listener));
     }
 
     /**
