@@ -34170,6 +34170,25 @@ void StreamingBuffer::freeData(size_t len)
     free += len;
 }
 
+uv_buf_t StreamingBuffer::nextWriteBuffer(size_t maxLen)
+{
+    if (!buffer || !free)
+        return uv_buf_init(nullptr, 0);
+
+    // Contiguous space from inpos to end of backing array (no wrap-around)
+    const size_t contiguous = std::min(free, capacity - inpos);
+    const size_t len = std::min(contiguous, maxLen);
+    return uv_buf_init(buffer + inpos, static_cast<unsigned int>(len));
+}
+
+void StreamingBuffer::commitWrite(size_t bytesWritten)
+{
+    assert(bytesWritten <= free);
+    inpos = (inpos + bytesWritten) % capacity;
+    size += bytesWritten;
+    free -= bytesWritten;
+}
+
 void StreamingBuffer::setMaxBufferSize(unsigned int bufferSize)
 {
     LOG_debug << getLogName()
@@ -35278,7 +35297,6 @@ struct ReadContext
 {
     uv_fs_t read_req{};
     uv_buf_t iov{};
-    std::unique_ptr<char[]> buffer;
     std::weak_ptr<MegaHTTPContext> ctx;
 };
 
@@ -35311,11 +35329,10 @@ static void onReadComplete(uv_fs_t* req)
     }
     else if (readSize > 0)
     {
+        assert(ctx->iov.len >= static_cast<size_t>(readSize));
         uv_mutex_lock(&httpctx->mutex);
-        const auto appendedBytes =
-            httpctx->streamingBuffer.append(static_cast<const char*>(ctx->buffer.get()),
-                                            static_cast<size_t>(readSize));
-        httpctx->mCacheFile.mConsumedBytes += appendedBytes;
+        httpctx->streamingBuffer.commitWrite(static_cast<size_t>(readSize));
+        httpctx->mCacheFile.mConsumedBytes += static_cast<size_t>(readSize);
         uv_mutex_unlock(&httpctx->mutex);
     }
 
@@ -35328,12 +35345,13 @@ static void readCacheFile(MegaHTTPContext* httpctx)
     uv_mutex_lock(&httpctx->mutex);
     const auto availableBytes = httpctx->mCacheFile.mAvailableBytes;
     const auto consumedBytes = httpctx->mCacheFile.mConsumedBytes;
-    const auto freeSpace = httpctx->streamingBuffer.availableSpace();
     const auto fd = httpctx->mCacheFile.mFd.get();
+    constexpr unsigned int MAX_READ_SIZE = 2 * 1024 * 1024;
+    const auto iov = httpctx->streamingBuffer.nextWriteBuffer(MAX_READ_SIZE);
     uv_mutex_unlock(&httpctx->mutex);
 
     // Cannot read more from fd to stream buffer
-    if (fd < 0 || availableBytes <= consumedBytes || freeSpace <= 0)
+    if (fd < 0 || availableBytes <= consumedBytes || !iov.base || !iov.len)
         return;
 
     // Another is reading
@@ -35343,26 +35361,17 @@ static void readCacheFile(MegaHTTPContext* httpctx)
         return;
     }
 
-    constexpr unsigned int MAX_BUFFER_SIZE = 4 * 1024 * 1024;
-    auto minOfThree = [](unsigned int a, unsigned int b, unsigned int c)
-    {
-        return std::min(a, std::min(b, c));
-    };
+    const auto length = std::min(static_cast<unsigned int>(iov.len),
+                                 static_cast<unsigned int>(availableBytes - consumedBytes));
     const auto offset = httpctx->mCacheFile.mOffset + consumedBytes;
-    const auto length = minOfThree(MAX_BUFFER_SIZE,
-                                   static_cast<unsigned int>(availableBytes - consumedBytes),
-                                   static_cast<unsigned int>(freeSpace));
 
     LOG_verbose << httpctx->getLogName() << "[Streaming] Read more from file: " << offset << ", "
                 << length;
 
     auto ctx = std::make_unique<ReadContext>();
-    {
-        ctx->buffer = std::make_unique<char[]>(length);
-        ctx->read_req.data = ctx.get();
-        ctx->ctx = httpctx->weak_from_this();
-        ctx->iov = uv_buf_init(ctx->buffer.get(), length);
-    }
+    ctx->read_req.data = ctx.get();
+    ctx->ctx = httpctx->weak_from_this();
+    ctx->iov = uv_buf_init(iov.base, length);
 
     const int r = uv_fs_read(httpctx->server->loop(), /* Loop */
                              &ctx->read_req, /* Request object */

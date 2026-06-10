@@ -5646,6 +5646,10 @@ public:
     uv_buf_t nextBuffer();
     // Increase the free data counter
     void freeData(size_t len);
+    // Get a writable uv_buf_t into the contiguous free space up to the wrap-around point
+    uv_buf_t nextWriteBuffer(size_t maxLen);
+    // Advance the write position after a direct write of bytesWritten bytes
+    void commitWrite(size_t bytesWritten);
     // Set upper bound limit for capacity
     void setMaxBufferSize(unsigned int bufferSize);
     // Set upper bound limit for chunk size to write to the consumer
