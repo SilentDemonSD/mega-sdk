@@ -5107,23 +5107,31 @@ bool SyncController::deferUpload(const LocalPath&) const
 
 void Syncs::injectSyncSensitiveData(SyncSensitiveData data)
 {
-    syncRun([data = std::move(data), this]() {
-        // Nothing should've been injected yet.
-        assert(SymmCipher::isZeroKey(syncKey.key, sizeof(syncKey.key)));
-        assert(!mSyncConfigIOContext);
-        assert(!mSyncConfigStore);
+    syncRun(
+        [data = std::move(data), this]()
+        {
+            if (mSyncConfigIOContext)
+            {
+                LOG_warn << "Sync sensitive data already injected, ignoring duplicate "
+                            "injectSyncSensitiveData request";
+                return;
+            }
 
-        // Inject state cache key (sync key.)
-        syncKey.setkey(reinterpret_cast<const byte*>(data.stateCacheKey.data()));
+            // Nothing should've been injected yet.
+            assert(SymmCipher::isZeroKey(syncKey.key, sizeof(syncKey.key)));
+            assert(!mSyncConfigStore);
 
-        // Construct IO context.
-        mSyncConfigIOContext.reset(
-          new SyncConfigIOContext(*fsaccess,
-                                  data.jscData.authenticationKey,
-                                  data.jscData.cipherKey,
-                                  data.jscData.fileName,
-                                  rng));
-    }, __func__);
+            // Inject state cache key (sync key.)
+            syncKey.setkey(reinterpret_cast<const byte*>(data.stateCacheKey.data()));
+
+            // Construct IO context.
+            mSyncConfigIOContext.reset(new SyncConfigIOContext(*fsaccess,
+                                                               data.jscData.authenticationKey,
+                                                               data.jscData.cipherKey,
+                                                               data.jscData.fileName,
+                                                               rng));
+        },
+        __func__);
 }
 
 SyncConfigVector Syncs::getConfigs(bool onlyActive) const
