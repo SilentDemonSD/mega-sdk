@@ -3,7 +3,7 @@
 #include "mega/auto_file.h"
 #include "mega/types.h"
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 #else
 #include <unistd.h>
