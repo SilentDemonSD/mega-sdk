@@ -35295,6 +35295,7 @@ using file_service::FileStreamFDResult;
  */
 struct ReadContext
 {
+    static constexpr unsigned int MAX_READ_SIZE = 2 * 1024 * 1024;
     uv_fs_t read_req{};
     uv_buf_t iov{};
     std::weak_ptr<MegaHTTPContext> ctx;
@@ -35330,8 +35331,9 @@ static void onReadComplete(uv_fs_t* req)
     }
     else if (readSize == 0)
     {
+        // It may happen if cache file is modified
         httpctx->failed = true;
-        LOG_fatal << "Unexpected EOF in cache file at offset";
+        LOG_err << "Unexpected EOF in cache file";
     }
     else if (readSize > 0)
     {
@@ -35352,8 +35354,7 @@ static void readCacheFile(MegaHTTPContext* httpctx)
     const auto availableBytes = httpctx->mCacheFile.mAvailableBytes;
     const auto consumedBytes = httpctx->mCacheFile.mConsumedBytes;
     const auto fd = httpctx->mCacheFile.mFd.get();
-    constexpr unsigned int MAX_READ_SIZE = 2 * 1024 * 1024;
-    const auto iov = httpctx->streamingBuffer.nextWriteBuffer(MAX_READ_SIZE);
+    const auto iov = httpctx->streamingBuffer.nextWriteBuffer(ReadContext::MAX_READ_SIZE);
     uv_mutex_unlock(&httpctx->mutex);
 
     // Cannot read more from fd to stream buffer
