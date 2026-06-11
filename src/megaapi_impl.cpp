@@ -35394,6 +35394,7 @@ static void readCacheFile(MegaHTTPContext* httpctx)
     {
         LOG_err << httpctx->getLogName()
                 << "[Streaming] Failed to initiate read: " << uv_strerror(r);
+        httpctx->failed = true;
         uv_fs_req_cleanup(&ctx->read_req);
     }
     else
