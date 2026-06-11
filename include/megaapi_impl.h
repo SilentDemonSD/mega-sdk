@@ -5943,11 +5943,6 @@ public:
     void removeAllowedHandle(MegaHandle handle);
 
     void readData(MegaTCPContext* tcpctx);
-
-    uv_loop_t* loop()
-    {
-        return &uv_loop;
-    };
 };
 
 class PublicNodeCache

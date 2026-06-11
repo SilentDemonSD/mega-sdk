@@ -35380,7 +35380,7 @@ static void readCacheFile(MegaHTTPContext* httpctx)
     ctx->ctx = httpctx->weak_from_this();
     ctx->iov = uv_buf_init(iov.base, length);
 
-    const int r = uv_fs_read(httpctx->server->loop(), /* Loop */
+    const int r = uv_fs_read(httpctx->server->getUvLoop(), /* Loop */
                              &ctx->read_req, /* Request object */
                              httpctx->mCacheFile.mFd.get(), /* File descriptor */
                              &ctx->iov, /* Pointer to an array of buffers */
