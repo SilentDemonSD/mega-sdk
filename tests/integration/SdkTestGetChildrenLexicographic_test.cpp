@@ -31,6 +31,12 @@ class SdkTestGetChildrenLexicographic: public SdkTestNodesSetUp
 
             FileNodeInfo("ab"),
             FileNodeInfo("aB"),
+
+            // Regression cluster: a folder plus prefix-sibling files whose next byte is below
+            // '/'(0x2f), so in S3-key order the files sort before the folder key "c/".
+            DirNodeInfo("c"),
+            FileNodeInfo("c-archive"), // '-' = 0x2d
+            FileNodeInfo("c.bak"), // '.' = 0x2e
         };
         return ELEMENTS;
     }
@@ -62,6 +68,9 @@ public:
             "ab"sv,
             "b"sv,
             "b/"sv,
+            "c-archive"sv, // sorts before the folder key "c/" ('-' < '/')
+            "c.bak"sv, // '.' < '/'
+            "c/"sv,
         };
         return expected;
     }
@@ -104,22 +113,37 @@ TEST_F(SdkTestGetChildrenLexicographic, CommonCases)
     }
 
     {
-        // Validate offset alone
-        MegaSearchLexicographicalOffset offset{"a"}; // With no type should start at a1
+        // Validate offset alone. Ordering is by S3 key (a folder's key is name + '/'), so the bare
+        // name "a" seeks strictly past the file "a" and the listing starts at the folder key "a/";
+        // an offset of "a/" seeks past the folder and starts at "a1".
+        MegaSearchLexicographicalOffset offset{"a"};
 
         auto searchResults =
             megaApi[0]->listChildNodesLexicographically(getRootDirHandle(), nullptr, 0, offset);
         EXPECT_THAT(
             toNamesVectorWithSlashForDirs(searchResults),
-            ElementsAreArray(std::find(begin(expected), end(expected), "a1"sv), expected.end()));
+            ElementsAreArray(std::find(begin(expected), end(expected), "a/"sv), expected.end()));
 
-        offset.mLastType = MegaNode::TYPE_FILE; // Now a/ should be contained
+        offset.mLastName = "a/"; // strictly after the folder key "a/"
 
         searchResults =
             megaApi[0]->listChildNodesLexicographically(getRootDirHandle(), nullptr, 0, offset);
         EXPECT_THAT(
             toNamesVectorWithSlashForDirs(searchResults),
-            ElementsAreArray(std::find(begin(expected), end(expected), "a/"sv), expected.end()));
+            ElementsAreArray(std::find(begin(expected), end(expected), "a1"sv), expected.end()));
+    }
+
+    {
+        // Inclusive lower bound: mLastHandle = 0 includes the node whose key == mLastName, so the
+        // file "a" is returned rather than skipped (the bare-name offset above seeks past it).
+        MegaSearchLexicographicalOffset offset{"a"};
+        offset.mLastHandle = 0;
+
+        const auto searchResults =
+            megaApi[0]->listChildNodesLexicographically(getRootDirHandle(), nullptr, 0, offset);
+        EXPECT_THAT(
+            toNamesVectorWithSlashForDirs(searchResults),
+            ElementsAreArray(std::find(begin(expected), end(expected), "a"sv), expected.end()));
     }
 
     {
@@ -134,9 +158,13 @@ TEST_F(SdkTestGetChildrenLexicographic, CommonCases)
 
         // Rest
         auto* lastNode = searchResults->get(searchResults->size() - 1);
-        MegaSearchLexicographicalOffset offset{lastNode->getName(),
-                                               lastNode->getType(),
-                                               lastNode->getHandle()};
+        MegaSearchLexicographicalOffset offset;
+        // Resume strictly after the last node, addressed by its effective S3 key (folder = name +
+        // '/').
+        offset.mLastName = lastNode->getType() == MegaNode::TYPE_FOLDER ?
+                               lastNode->getName() + "/"s :
+                               lastNode->getName();
+        offset.mLastHandle = lastNode->getHandle();
         searchResults =
             megaApi[0]->listChildNodesLexicographically(getRootDirHandle(), nullptr, 0, offset);
         EXPECT_THAT(toNamesVectorWithSlashForDirs(searchResults),
