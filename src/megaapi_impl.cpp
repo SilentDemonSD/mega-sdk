@@ -35322,7 +35322,7 @@ static void onReadComplete(uv_fs_t* req)
     if (!httpctx)
         return;
 
-    httpctx->mCacheFile.mIsReading = false;
+    httpctx->mCacheFile.setReading(false);
 
     if (httpctx->finished)
         return;
@@ -35343,7 +35343,7 @@ static void onReadComplete(uv_fs_t* req)
         assert(ctx->iov.len >= static_cast<size_t>(readSize));
         uv_mutex_lock(&httpctx->mutex);
         httpctx->streamingBuffer.commitWrite(static_cast<size_t>(readSize));
-        httpctx->mCacheFile.mConsumedBytes += static_cast<size_t>(readSize);
+        httpctx->mCacheFile.addConsumedBytes(readSize);
         uv_mutex_unlock(&httpctx->mutex);
     }
 
@@ -35354,9 +35354,10 @@ static void onReadComplete(uv_fs_t* req)
 static void readCacheFile(MegaHTTPContext* httpctx)
 {
     uv_mutex_lock(&httpctx->mutex);
-    const auto availableBytes = httpctx->mCacheFile.mAvailableBytes;
-    const auto consumedBytes = httpctx->mCacheFile.mConsumedBytes;
-    const auto fd = httpctx->mCacheFile.mFd.get();
+    const auto availableBytes = httpctx->mCacheFile.availableBytes();
+    const auto consumedBytes = httpctx->mCacheFile.consumedBytes();
+    const auto fd = httpctx->mCacheFile.fd();
+    const auto offset = httpctx->mCacheFile.offset();
     const auto iov = httpctx->streamingBuffer.nextWriteBuffer(ReadContext::MAX_READ_SIZE);
     uv_mutex_unlock(&httpctx->mutex);
 
@@ -35365,30 +35366,30 @@ static void readCacheFile(MegaHTTPContext* httpctx)
         return;
 
     // Another is reading
-    if (httpctx->mCacheFile.mIsReading)
+    if (httpctx->mCacheFile.isReading())
     {
         LOG_verbose << httpctx->getLogName() << "[Streaming] Skip reading, another is reading";
         return;
     }
 
-    const auto length = std::min(static_cast<unsigned int>(iov.len),
-                                 static_cast<unsigned int>(availableBytes - consumedBytes));
-    const auto offset = httpctx->mCacheFile.mOffset + consumedBytes;
+    const auto readLength = std::min(static_cast<unsigned int>(iov.len),
+                                     static_cast<unsigned int>(availableBytes - consumedBytes));
+    const auto readOffset = offset + consumedBytes;
 
-    HTTP_verbose_timed << httpctx->getLogName() << "[Streaming] Read more from file: " << offset
-                       << ", " << length;
+    HTTP_verbose_timed << httpctx->getLogName() << "[Streaming] Read more from file: " << readOffset
+                       << ", " << readLength;
 
     auto ctx = std::make_unique<ReadContext>();
     ctx->read_req.data = ctx.get();
     ctx->ctx = httpctx->weak_from_this();
-    ctx->iov = uv_buf_init(iov.base, length);
+    ctx->iov = uv_buf_init(iov.base, readLength);
 
     const int r = uv_fs_read(httpctx->server->getUvLoop(), /* Loop */
                              &ctx->read_req, /* Request object */
-                             httpctx->mCacheFile.mFd.get(), /* File descriptor */
+                             fd, /* File descriptor */
                              &ctx->iov, /* Pointer to an array of buffers */
                              1, /* Number of buffers in the array */
-                             offset, /* Offset in the file */
+                             readOffset, /* Offset in the file */
                              onReadComplete);
     if (r < 0)
     {
@@ -35399,7 +35400,7 @@ static void readCacheFile(MegaHTTPContext* httpctx)
     }
     else
     {
-        httpctx->mCacheFile.mIsReading = true;
+        httpctx->mCacheFile.setReading(true);
         // Ownership belongs to the onReadComplete
         std::ignore = ctx.release();
     }
@@ -37128,15 +37129,13 @@ bool MegaHTTPServer::startStream(MegaHTTPContext* httpctx,
         return false;
     }
 
-    httpctx->mCacheFile.mFd = dupUVFile(*file);
-    if (!httpctx->mCacheFile.mFd)
+    auto f = dupUVFile(*file);
+    if (!f)
     {
         return false;
     }
+    httpctx->mCacheFile.init(std::move(f), static_cast<m_off_t>(offset));
 
-    httpctx->mCacheFile.mOffset = static_cast<m_off_t>(offset);
-    httpctx->mCacheFile.mAvailableBytes = 0;
-    httpctx->mCacheFile.mConsumedBytes = 0;
     auto callback =
         [logName = httpctx->getLogName(), ctx = httpctx->weak_from_this(), offset, length](
             FileResultOr<FileStreamFDResult> result)
@@ -37179,8 +37178,10 @@ bool MegaHTTPServer::startStream(MegaHTTPContext* httpctx,
 
         // More data available in the cached file
         uv_mutex_lock(&ctxPtr->mutex);
-        if (receivedOffset !=
-            static_cast<uint64_t>(ctxPtr->mCacheFile.mOffset + ctxPtr->mCacheFile.mAvailableBytes))
+        if (const auto newAvailableBytes =
+                ctxPtr->mCacheFile.onReceived(static_cast<m_off_t>(receivedOffset),
+                                              static_cast<m_off_t>(receivedLength));
+            !newAvailableBytes)
         {
             // Must be a bug
             assert(false);
@@ -37189,8 +37190,7 @@ bool MegaHTTPServer::startStream(MegaHTTPContext* httpctx,
         }
         else
         {
-            ctxPtr->mCacheFile.mAvailableBytes += receivedLength;
-            assert(ctxPtr->mCacheFile.mAvailableBytes <= static_cast<m_off_t>(length));
+            assert(*newAvailableBytes <= static_cast<m_off_t>(length));
         }
         uv_mutex_unlock(&ctxPtr->mutex);
 
@@ -37622,6 +37622,64 @@ void PublicNodeCache::put(handle h, const std::shared_ptr<MegaNode> ptr)
 {
     const std::lock_guard l{mMutex};
     mNodes.put(h, std::move(ptr));
+}
+
+m_off_t MegaHTTPContext::CacheFile::availableBytes() const
+{
+    return mAvailableBytes;
+}
+
+m_off_t MegaHTTPContext::CacheFile::consumedBytes() const
+{
+    return mConsumedBytes;
+}
+
+uv_file MegaHTTPContext::CacheFile::fd() const
+{
+    return mFd.get();
+}
+
+void MegaHTTPContext::CacheFile::init(AutoUVFile&& fd, m_off_t offset)
+{
+    assert(fd);
+
+    mAvailableBytes = 0;
+    mConsumedBytes = 0;
+    mFd = std::move(fd);
+    mReading = false;
+    mOffset = offset;
+}
+
+m_off_t MegaHTTPContext::CacheFile::offset() const
+{
+    return mOffset;
+}
+
+void MegaHTTPContext::CacheFile::addConsumedBytes(m_off_t size)
+{
+    mConsumedBytes += size;
+}
+
+std::optional<m_off_t> MegaHTTPContext::CacheFile::onReceived(m_off_t receivedOffset,
+                                                              m_off_t receivedLength)
+{
+    if (receivedOffset != mOffset + mAvailableBytes)
+    {
+        return std::nullopt;
+    }
+
+    mAvailableBytes += receivedLength;
+    return mAvailableBytes;
+}
+
+bool MegaHTTPContext::CacheFile::isReading() const
+{
+    return mReading;
+}
+
+void MegaHTTPContext::CacheFile::setReading(bool value)
+{
+    mReading = value;
 }
 
 MegaHTTPContext::MegaHTTPContext():

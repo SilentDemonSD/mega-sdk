@@ -5983,6 +5983,38 @@ private:
     std::string logname;
 
 public:
+    class CacheFile
+    {
+        m_off_t mAvailableBytes{0};
+
+        m_off_t mConsumedBytes{0};
+
+        AutoUVFile mFd;
+
+        bool mReading{false};
+
+        m_off_t mOffset{0};
+
+    public:
+        m_off_t availableBytes() const;
+
+        m_off_t consumedBytes() const;
+
+        uv_file fd() const;
+
+        void init(AutoUVFile&& fd, m_off_t offset);
+
+        m_off_t offset() const;
+
+        void addConsumedBytes(m_off_t size);
+
+        std::optional<m_off_t> onReceived(m_off_t receivedOffset, m_off_t receivedLength);
+
+        bool isReading() const;
+
+        void setReading(bool value);
+    };
+
     MegaHTTPContext();
     ~MegaHTTPContext();
 
@@ -5999,16 +6031,6 @@ public:
 
     bool nodereceived;
     std::atomic_bool failed{false};
-
-    // Cached file related
-    struct CacheFile
-    {
-        AutoUVFile mFd;
-        m_off_t mOffset{0};
-        m_off_t mAvailableBytes{0};
-        m_off_t mConsumedBytes{0};
-        bool mIsReading{false};
-    };
 
     CacheFile mCacheFile{};
 
