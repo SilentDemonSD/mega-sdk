@@ -6807,7 +6807,7 @@ public:
      *   This event uses multiple getNumber keys:
      *     - getNumber("ts") returns the Unix timestamp of the purge.
      *     - getNumber("reason") returns the purge reason code (see the PurgeReason enum).
-     *     - getNumber("warningTs") returns the Unix timestamp of the final inactivity warning,
+     *     - getNumber("warningTs") returns the Unix timestamp of the first inactivity warning,
      *       present only for PURGE_REASON_INACTIVE when warning history is available.
      *     - getNumber("lastActiveTs") returns the Unix timestamp of the user's last activity
      *       prior to the warning, present only alongside warningTs.

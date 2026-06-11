@@ -17139,8 +17139,10 @@ void MegaApiImpl::nodes_current()
 
 void MegaApiImpl::checkLastPurgeNotification()
 {
-    // Only inactivity purges are surfaced; other reasons have their own flows.
-    if (client->mLastPurge.reason != PURGE_REASON_INACTIVE)
+    // Only surface an inactivity purge that carries a last-active time. The server zeroes
+    // lastActiveTs to suppress (e.g. the user is active on another session) while keeping reason,
+    // so reason alone isn't enough; (now - lastActiveTs) is the inactivity period the app shows.
+    if (client->mLastPurge.reason != PURGE_REASON_INACTIVE || client->mLastPurge.lastActiveTs == 0)
     {
         return;
     }

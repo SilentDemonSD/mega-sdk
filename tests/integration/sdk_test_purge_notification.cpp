@@ -28,6 +28,12 @@ constexpr int64_t TEST_PURGE_TS = 1756332687;
 // creation time newer than this, so it is used to exercise the "no node newer than X" branch.
 constexpr int64_t FUTURE_PURGE_TS = 4102444800;
 
+// Non-zero warning/last-active offsets so the default injected purge is a notifiable inactivity
+// purge: the SDK gates on lastActiveTs != 0. Ordered lastActive < warning < purge, as the server
+// sends them.
+constexpr int64_t DEFAULT_WARNING_TS = 1700001000;
+constexpr int64_t DEFAULT_LAST_ACTIVE_TS = 1700000000;
+
 // Build the ^!devopt value that makes the server inject lastpurge into ug.
 // The server expects the raw JSON string; putua handles the wire encoding.
 // warningTs/lastActiveTs are the optional trailing offsets, emitted only when > 0.
@@ -183,8 +189,8 @@ protected:
     // Inject lastpurge into ug response via ^!devopt (staging API test hook).
     void injectLastPurge(int64_t ts,
                          int reason = ::mega::PURGE_REASON_INACTIVE,
-                         int64_t warningTs = 0,
-                         int64_t lastActiveTs = 0)
+                         int64_t warningTs = DEFAULT_WARNING_TS,
+                         int64_t lastActiveTs = DEFAULT_LAST_ACTIVE_TS)
     {
         RequestTracker tracker(megaApi[0].get());
         megaApi[0]->setUserAttribute(
@@ -308,12 +314,12 @@ TEST_F(PurgeNotificationTest, EventCarriesWarningAndLastActiveForInactive)
 }
 
 /**
- * @brief EVENT_LAST_PURGE is only raised for inactivity purges; other reasons are ignored.
+ * @brief A non-inactivity purge carries no lastActiveTs, so the event is not raised.
  */
 TEST_F(PurgeNotificationTest, EventSuppressedForNonInactiveReason)
 {
-    // FUTURE_PURGE_TS so the newer-node rule can never suppress; only the reason gate should.
-    ASSERT_NO_FATAL_FAILURE(injectLastPurge(FUTURE_PURGE_TS, ::mega::PURGE_REASON_BLOCKED));
+    // Other reasons (here BLOCKED) come without the inactivity offsets -> lastActiveTs == 0.
+    ASSERT_NO_FATAL_FAILURE(injectLastPurge(FUTURE_PURGE_TS, ::mega::PURGE_REASON_BLOCKED, 0, 0));
 
     mApi[0].resetlastEvent();
     ASSERT_NO_FATAL_FAILURE(refreshUserData());
@@ -325,7 +331,28 @@ TEST_F(PurgeNotificationTest, EventSuppressedForNonInactiveReason)
         },
         3000);
     EXPECT_FALSE(mApi[0].lastEventsContain(MegaEvent::EVENT_LAST_PURGE))
-        << "Event should not fire for a non-inactivity purge reason";
+        << "Event should not fire when lastActiveTs is absent (non-inactivity purge)";
+}
+
+/**
+ * @brief Even for an inactivity purge, a zero lastActiveTs (server suppressed it because the user
+ *        is active on another session, or no warning history) must not raise the event.
+ */
+TEST_F(PurgeNotificationTest, EventSuppressedWhenInactiveWithoutLastActive)
+{
+    ASSERT_NO_FATAL_FAILURE(injectLastPurge(FUTURE_PURGE_TS, ::mega::PURGE_REASON_INACTIVE, 0, 0));
+
+    mApi[0].resetlastEvent();
+    ASSERT_NO_FATAL_FAILURE(refreshUserData());
+
+    WaitFor(
+        [this]()
+        {
+            return mApi[0].lastEventsContain(MegaEvent::EVENT_LAST_PURGE);
+        },
+        3000);
+    EXPECT_FALSE(mApi[0].lastEventsContain(MegaEvent::EVENT_LAST_PURGE))
+        << "Event should not fire for an inactivity purge with lastActiveTs == 0";
 }
 
 /**

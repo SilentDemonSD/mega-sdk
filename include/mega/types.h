@@ -882,7 +882,7 @@ struct LastPurgeInfo
     PurgeReason reason = PURGE_REASON_UNKNOWN;
     // Only present when reason is PURGE_REASON_INACTIVE and warning history is available; 0 =
     // absent
-    m_time_t warningTs = 0; // timestamp of the final inactivity warning
+    m_time_t warningTs = 0; // timestamp of the first inactivity warning
     m_time_t lastActiveTs = 0; // last activity prior to the warning
 };
 
