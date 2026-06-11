@@ -11,7 +11,7 @@ namespace mega
 
 void UVFileTraits::close(UVFileTraits::Type h)
 {
-#ifdef WIN32
+#ifdef _WIN32
     _close(h);
 #else
     ::close(h);
