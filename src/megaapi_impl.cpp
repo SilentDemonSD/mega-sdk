@@ -37168,16 +37168,27 @@ bool MegaHTTPServer::startStream(MegaHTTPContext* httpctx,
 
         // More data available in the cached file
         uv_mutex_lock(&ctxPtr->mutex);
-        assert(static_cast<m_off_t>(receivedOffset) ==
-               ctxPtr->mCacheFile.mOffset + ctxPtr->mCacheFile.mAvailableBytes);
-        ctxPtr->mCacheFile.mAvailableBytes += receivedLength;
-        assert(ctxPtr->mCacheFile.mAvailableBytes <= static_cast<m_off_t>(length));
+        if (receivedOffset !=
+            static_cast<uint64_t>(ctxPtr->mCacheFile.mOffset + ctxPtr->mCacheFile.mAvailableBytes))
+        {
+            // Must be a bug
+            assert(false);
+            LOG_fatal << ctxPtr->logname << "[Streaming] callback: out of order read";
+            ctxPtr->failed = true;
+        }
+        else
+        {
+            ctxPtr->mCacheFile.mAvailableBytes += receivedLength;
+            assert(ctxPtr->mCacheFile.mAvailableBytes <= static_cast<m_off_t>(length));
+        }
         uv_mutex_unlock(&ctxPtr->mutex);
 
-        // notify the HTTP server
+        // Notify the HTTP server
         uv_async_send(&ctxPtr->asynchandle);
 
-        result->mContinue(receivedLength);
+        // Continue to read if there is no error
+        if (!ctxPtr->failed)
+            result->mContinue(receivedLength);
     };
 
     file_service::stream(FileStreamFDCallback{std::move(callback)},
