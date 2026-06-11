@@ -2,6 +2,7 @@
 
 #include <mega/file_service/avl_tree.h>
 #include <mega/file_service/file_range.h>
+#include <mega/file_service/file_range_tree_forward.h>
 #include <mega/file_service/file_range_tree_traits.h>
 #include <mega/file_service/type_traits.h>
 
@@ -123,6 +124,15 @@ public:
 
     FileRangeTree() = default;
 
+    template<typename Iterator>
+    FileRangeTree(Iterator begin, Iterator end):
+        mByRangeEnd(),
+        mByRangeBegin()
+    {
+        for (; begin != end; ++begin)
+            add(*begin);
+    }
+
     FileRangeTree(FileRangeTree&& other) = default;
 
     ~FileRangeTree()
@@ -213,15 +223,37 @@ public:
         return mByRangeBegin.begin();
     }
 
-    // Find the first range that begins at or after position.
+    // Find the first range that begins after position.
     Iterator beginsAfter(std::uint64_t position)
     {
-        return mByRangeBegin.lower_bound(position);
+        return mByRangeBegin.upper_bound(position);
     }
 
     ConstIterator beginsAfter(std::uint64_t position) const
     {
         return const_cast<FileRangeTree&>(*this).beginsAfter(position);
+    }
+
+    // Find the range that begins at position.
+    Iterator beginsAt(std::uint64_t position)
+    {
+        return mByRangeBegin.find(position);
+    }
+
+    ConstIterator beginsAt(std::uint64_t position) const
+    {
+        return const_cast<FileRangeTree&>(*this).beginsAt(position);
+    }
+
+    // Find the first range that begins at or after position.
+    Iterator beginsAtOrAfter(std::uint64_t position)
+    {
+        return mByRangeBegin.lower_bound(position);
+    }
+
+    ConstIterator beginsAtOrAfter(std::uint64_t position) const
+    {
+        return const_cast<FileRangeTree&>(*this).beginsAtOrAfter(position);
     }
 
     // Return an iterator to the first node in the tree.
@@ -241,6 +273,32 @@ public:
     ConstIterator cend() const
     {
         return end();
+    }
+
+    // Return an iterator to the node that contains position, if any.
+    Iterator contains(std::uint64_t position)
+    {
+        // Does any range end after position?
+        auto iterator = endsAfter(position);
+
+        // No range ends after position.
+        if (!iterator)
+            return {};
+
+        // Convenience.
+        KeyFunctionType key;
+
+        // Range begins after position.
+        if (key(*iterator).mBegin > position)
+            return {};
+
+        // Range contains position.
+        return iterator.nodePointer();
+    }
+
+    ConstIterator contains(std::uint64_t position) const
+    {
+        return const_cast<FileRangeTree&>(*this).contains(position);
     }
 
     // Return a reverse iterator to the last node in the tree.
@@ -272,15 +330,37 @@ public:
         return mByRangeBegin.end();
     }
 
-    // Find the first range that ends at or after position.
+    // Find the first range that ends after position.
     Iterator endsAfter(std::uint64_t position)
+    {
+        return mByRangeEnd.upper_bound(position).nodePointer();
+    }
+
+    ConstIterator endsAfter(std::uint64_t position) const
+    {
+        return const_cast<FileRangeTree&>(*this).endsAfter(position);
+    }
+
+    // Find the range that ends at position.
+    Iterator endsAt(std::uint64_t position)
+    {
+        return mByRangeEnd.find(position).nodePointer();
+    }
+
+    ConstIterator endsAt(std::uint64_t position) const
+    {
+        return const_cast<FileRangeTree&>(*this).endsAt(position);
+    }
+
+    // Find the first range that ends at or after position.
+    Iterator endsAtOrAfter(std::uint64_t position)
     {
         return mByRangeEnd.lower_bound(position).nodePointer();
     }
 
-    auto endsAfter(std::uint64_t position) const
+    auto endsAtOrAfter(std::uint64_t position) const
     {
-        return const_cast<FileRangeTree&>(*this).endsAfter(position);
+        return const_cast<FileRangeTree&>(*this).endsAtOrAfter(position);
     }
 
     // Return an iterator to the last range in the tree.

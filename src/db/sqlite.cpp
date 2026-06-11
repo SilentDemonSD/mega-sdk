@@ -456,12 +456,14 @@ void SqliteDbAccess::removeDBFiles(FileSystemAccess& fsAccess, mega::LocalPath& 
     fsAccess.unlinklocal(dbPath);
 
 #if !(TARGET_OS_IPHONE)
+    auto suffix = LocalPath::fromRelativePath("-shm");
     auto fileToRemove = dbPath;
-    fileToRemove.insertFilenameSuffix("-shm");
+    fileToRemove.append(suffix);
     fsAccess.unlinklocal(fileToRemove);
 
+    suffix = LocalPath::fromRelativePath("-wal");
     fileToRemove = dbPath;
-    fileToRemove.insertFilenameSuffix("-wal");
+    fileToRemove.append(suffix);
     fsAccess.unlinklocal(fileToRemove);
 #else
     // iOS doesn't use WAL mode, but Journal
@@ -482,16 +484,55 @@ bool SqliteDbAccess::addAndPopulateColumns(sqlite3* db, vector<NewColumn>&& newC
         return false;
     }
 
+    // Fast path: nothing to migrate, no transaction needed.
+    if (newCols.empty())
+    {
+        return true;
+    }
+
+    // Single outer txn makes ALTER + populate atomic against crash. SDK-6155.
+    // IMMEDIATE acquires the write lock up front so SQLITE_BUSY fails fast.
+    if (sqlite3_exec(db, "BEGIN IMMEDIATE", nullptr, nullptr, nullptr) != SQLITE_OK)
+    {
+        LOG_err << "Db error during migration BEGIN IMMEDIATE: " << sqlite3_errmsg(db);
+        return false;
+    }
+
+    // errmsg is only fresh for the ROLLBACK itself; callers log their own cause inline.
+    auto rollback = [db](const char* where) -> bool
+    {
+        LOG_err << "Db error during migration: rolling back at " << where
+                << " (see preceding error for cause)";
+        if (sqlite3_exec(db, "ROLLBACK", nullptr, nullptr, nullptr) != SQLITE_OK)
+        {
+            LOG_err << "Db error during migration ROLLBACK at " << where << ": "
+                    << sqlite3_errmsg(db);
+        }
+        return false;
+    };
+
     // add missing columns
     for (const auto& c : newCols)
     {
         if (!addColumn(db, c.name, c.type))
         {
-            return false;
+            return rollback("ALTER TABLE");
         }
     }
 
-    return migrateDataToColumns(db, std::move(newCols));
+    if (!migrateDataToColumns(db, std::move(newCols)))
+    {
+        return rollback("migrateDataToColumns");
+    }
+
+    if (sqlite3_exec(db, "COMMIT", nullptr, nullptr, nullptr) != SQLITE_OK)
+    {
+        // COMMIT failures aren't logged anywhere else, so capture errmsg here.
+        LOG_err << "Db error during migration COMMIT: " << sqlite3_errmsg(db);
+        return rollback("COMMIT");
+    }
+
+    return true;
 }
 
 bool SqliteDbAccess::stripExistingColumns(sqlite3* db, vector<NewColumn>& cols)
@@ -524,8 +565,11 @@ bool SqliteDbAccess::stripExistingColumns(sqlite3* db, vector<NewColumn>& cols)
     return true;
 }
 
+// Precondition: caller holds an open transaction (see addAndPopulateColumns, SDK-6155).
 bool SqliteDbAccess::addColumn(sqlite3* db, const string& name, const string& type)
 {
+    assert(sqlite3_get_autocommit(db) == 0 && "addColumn() requires an open transaction");
+
     string query("ALTER TABLE nodes ADD COLUMN '" + name + "' " + type);
     if (sqlite3_exec(db, query.c_str(), nullptr, nullptr, nullptr) != SQLITE_OK)
     {
@@ -536,8 +580,12 @@ bool SqliteDbAccess::addColumn(sqlite3* db, const string& name, const string& ty
     return true;
 }
 
+// Precondition: caller holds an open transaction (see addAndPopulateColumns, SDK-6155).
 bool SqliteDbAccess::migrateDataToColumns(sqlite3* db, vector<NewColumn>&& cols)
 {
+    assert(sqlite3_get_autocommit(db) == 0 &&
+           "migrateDataToColumns() requires an open transaction");
+
     if (cols.empty()) return true;
 
     // identify data pieces to copy to new columns
@@ -611,12 +659,6 @@ bool SqliteDbAccess::migrateDataToColumns(sqlite3* db, vector<NewColumn>&& cols)
         dataToMigrate[c.migrationId] = ++bindIdx;
     }
 
-    if (sqlite3_exec(db, "BEGIN", nullptr, nullptr, nullptr) != SQLITE_OK)
-    {
-        LOG_debug << "Db error during migration for " << "BEGIN: " << sqlite3_errmsg(db);
-        return false;
-    }
-
     // build update query
     string query{"UPDATE nodes SET "};
     for (const NewColumn& c : cols)
@@ -658,12 +700,6 @@ bool SqliteDbAccess::migrateDataToColumns(sqlite3* db, vector<NewColumn>&& cols)
     }
 
     sqlite3_finalize(stmt);
-
-    if (sqlite3_exec(db, "COMMIT", nullptr, nullptr, nullptr) != SQLITE_OK)
-    {
-        LOG_debug << "Db error during migration for " << "COMMIT: " << sqlite3_errmsg(db);
-        return false;
-    }
 
     return true;
 }

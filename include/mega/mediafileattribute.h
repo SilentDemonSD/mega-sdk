@@ -22,10 +22,13 @@
 #ifndef MEGA_MEDIAFILEATTRIBUTE_H
 #define MEGA_MEDIAFILEATTRIBUTE_H 1
 
-#include "types.h"
-#include "json.h"
 #include "filesystem.h"
+#include "json.h"
+#include "types.h"
+
+#include <optional>
 #include <string>
+#include <type_traits>
 
 namespace mega {
 
@@ -40,6 +43,31 @@ struct MEGA_API FileSystemAccess;
 struct MEGA_API MediaProperties
 {
     enum { UNKNOWN_FORMAT = 254, NOT_IDENTIFIED_FORMAT = 255 };
+
+    // Check if T is a pointer to one of our properties.
+    template<typename T>
+    struct IsPropertySelector: std::false_type
+    {}; // IsPropertySelector<T>
+
+    template<typename T>
+    struct IsPropertySelector<T MediaProperties::*>: std::true_type
+    {}; // IsPropertySelector<T MediaProperties::*>
+
+    template<typename T>
+    static constexpr auto IsPropertySelectorV = IsPropertySelector<T>::value;
+
+    // What kind of property does PropertySelector reference?
+    template<typename PropertySelector>
+    struct PropertyType;
+
+    template<typename T>
+    struct PropertyType<T MediaProperties::*>
+    {
+        using Type = T;
+    }; // PropertyType<T MediaProperties::*>
+
+    template<typename T>
+    using PropertyTypeT = typename PropertyType<T>::Type;
 
     byte shortformat;
     uint32_t width;
@@ -68,7 +96,38 @@ struct MEGA_API MediaProperties
     static std::string encodeMediaPropertiesAttributes(MediaProperties vp, uint32_t filekey[4]);
 
     // extract structure members back out of attributes
-    static MediaProperties decodeMediaPropertiesAttributes(const std::string& attrs, uint32_t filekey[4]);
+    static auto decodeMediaPropertiesAttributes(const std::string& attributes, uint32_t fileKey[4])
+        -> std::optional<MediaProperties>;
+
+    // decode file attributes and return the value of a specified media property.
+    template<typename PropertySelector>
+    static auto getMediaProperty(const std::string& attributes,
+                                 uint32_t fileKey[4],
+                                 PropertySelector selector)
+        -> std::enable_if_t<IsPropertySelectorV<PropertySelector>,
+                            std::optional<PropertyTypeT<PropertySelector>>>
+    {
+        // Sanity: selector should never be null.
+        assert(selector);
+
+        // selector actually is null.
+        if (!selector)
+            return std::nullopt;
+
+        // Try and decode media properties.
+        auto properties = decodeMediaPropertiesAttributes(attributes, fileKey);
+
+        // Couldn't decode media properties.
+        if (!properties)
+            return std::nullopt;
+
+        // MediaInfo couldn't process the file or file has no information.
+        if (properties->shortformat >= 254)
+            return std::nullopt;
+
+        // Return specified property to our caller.
+        return (*properties.*selector);
+    }
 
 #ifdef USE_MEDIAINFO
     static const char* supportedformatsMediaInfoAudio();

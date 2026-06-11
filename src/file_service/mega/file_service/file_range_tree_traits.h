@@ -3,8 +3,8 @@
 #include <mega/file_service/avl_tree.h>
 #include <mega/file_service/file_range_forward.h>
 #include <mega/file_service/file_range_traits.h>
+#include <mega/file_service/file_range_tree_forward.h>
 #include <mega/file_service/file_range_tree_node.h>
-#include <mega/file_service/file_range_tree_traits.h>
 
 #include <functional>
 
@@ -12,8 +12,33 @@ namespace mega
 {
 namespace file_service
 {
+
+template<typename T>
+struct IsFileRangeTree: std::false_type
+{}; // IsFileRangeTree<T>
+
+template<typename KT, typename VT, auto Compare, auto Copy>
+struct IsFileRangeTree<FileRangeTree<KT, VT, Compare, Copy>>: std::true_type
+{}; // IsFileRangeTree<FileRangeTree<KT, VT, Compare, Copy>>
+
+template<typename T>
+constexpr auto IsFileRangeTreeV = IsFileRangeTree<T>::value;
+
 namespace detail
 {
+
+template<typename T>
+struct GetKeyFunctionType
+{}; // GetKeyFunctionType<T>
+
+template<typename KT, typename VT, auto Compare, auto Copy>
+struct GetKeyFunctionType<FileRangeTree<KT, VT, Compare, Copy>>
+{
+    using Type = KT;
+}; // GetKeyFunctionType<FileRangeTree<KT, VT, Compare, Copy>
+
+template<typename T>
+using GetKeyFunctionTypeT = typename GetKeyFunctionType<T>::Type;
 
 template<typename KeyFunction, typename ValueType>
 using IsValidKeyFunction = std::is_invocable_r<const FileRange&, KeyFunction, const ValueType&>;

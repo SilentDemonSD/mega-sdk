@@ -218,17 +218,24 @@ TEST_P(SdkTestScChannel, ProcessSidError)
 
     mNetworkListener.clear();
 
+    // Force SC channel catchup to trigger the hook
+    megaApi[0]->catchup();
+
+    // Make sure SC request is sent
+    EXPECT_TRUE(waitForNetworkEvents({{MegaEvent::SC, MegaEvent::REQUEST_SENT, API_OK}},
+                                     defaultTimeoutMs,
+                                     false))
+        << "Not SC REEQUEST_SENT event received";
+
+    mNetworkListener.clear();
+
     installErrorResponseHook(API_ESID);
 
     // Prepare to detect the logout triggered by request_error(API_ESID)
     mApi[0].requestFlags[MegaRequest::TYPE_LOGOUT] = false;
 
-    // Force SC channel catchup to trigger the hook
-    megaApi[0]->catchup();
-
     // Verify events
-    EXPECT_TRUE(waitForNetworkEvents({{MegaEvent::SC, MegaEvent::REQUEST_SENT, API_OK},
-                                      {MegaEvent::SC, MegaEvent::REQUEST_RECEIVED, API_ESID}},
+    EXPECT_TRUE(waitForNetworkEvents({{MegaEvent::SC, MegaEvent::REQUEST_RECEIVED, API_ESID}},
                                      defaultTimeoutMs))
         << "Not expected events received";
 
@@ -268,16 +275,24 @@ TEST_P(SdkTestScChannel, ProcessNoEntryErrorInFolderLink)
     LOG_info << "Clear network events";
     mNetworkListener.clear();
 
-    installErrorResponseHook(API_ENOENT);
-
-    mApi[0].requestFlags[MegaRequest::TYPE_LOGOUT] = false;
-
     // Force SC channel catchup to trigger the hook
     megaApi[0]->catchup();
 
+    // Make sure SC request is sent
+    EXPECT_TRUE(waitForNetworkEvents({{MegaEvent::SC, MegaEvent::REQUEST_SENT, API_OK}},
+                                     defaultTimeoutMs,
+                                     false))
+        << "Not SC REEQUEST_SENT event received";
+
+    mNetworkListener.clear();
+
+    installErrorResponseHook(API_ENOENT);
+
+    // Prepare to detect the logout triggered by request_error(API_ENOENT)
+    mApi[0].requestFlags[MegaRequest::TYPE_LOGOUT] = false;
+
     // Verify events
-    EXPECT_TRUE(waitForNetworkEvents({{MegaEvent::SC, MegaEvent::REQUEST_SENT, API_OK},
-                                      {MegaEvent::SC, MegaEvent::REQUEST_RECEIVED, API_ENOENT}},
+    EXPECT_TRUE(waitForNetworkEvents({{MegaEvent::SC, MegaEvent::REQUEST_RECEIVED, API_ENOENT}},
                                      defaultTimeoutMs))
         << "Not expected events received";
 
@@ -297,14 +312,21 @@ TEST_P(SdkTestScChannel, ProcessTooManyError)
     mNetworkListener.clear();
     mApi[0].resetlastEvent();
 
-    installErrorResponseHook(API_ETOOMANY);
-
     // Force SC channel catchup to trigger the hook
     megaApi[0]->catchup();
 
+    // Make sure SC request is sent
+    EXPECT_TRUE(waitForNetworkEvents({{MegaEvent::SC, MegaEvent::REQUEST_SENT, API_OK}},
+                                     defaultTimeoutMs,
+                                     false))
+        << "Not SC REEQUEST_SENT event received";
+
+    mNetworkListener.clear();
+
+    installErrorResponseHook(API_ETOOMANY);
+
     // Verify events
-    EXPECT_TRUE(waitForNetworkEvents({{MegaEvent::SC, MegaEvent::REQUEST_SENT, API_OK},
-                                      {MegaEvent::SC, MegaEvent::REQUEST_RECEIVED, API_ETOOMANY}},
+    EXPECT_TRUE(waitForNetworkEvents({{MegaEvent::SC, MegaEvent::REQUEST_RECEIVED, API_ETOOMANY}},
                                      defaultTimeoutMs))
         << "Not expected events received";
 
@@ -328,16 +350,23 @@ TEST_P(SdkTestScChannel, ProcessAgainError)
 
     mNetworkListener.clear();
 
-    installErrorResponseHook(API_EAGAIN);
-
     // Force SC channel catchup to trigger the hook
     megaApi[0]->catchup();
+
+    // Make sure SC request is sent
+    EXPECT_TRUE(waitForNetworkEvents({{MegaEvent::SC, MegaEvent::REQUEST_SENT, API_OK}},
+                                     defaultTimeoutMs,
+                                     false))
+        << "Not SC REEQUEST_SENT event received";
+
+    mNetworkListener.clear();
+
+    installErrorResponseHook(API_EAGAIN);
 
     // Verify events
     // The subsequent SC request could trigger another network event, so can't expect the network
     // events number here.
-    EXPECT_TRUE(waitForNetworkEvents({{MegaEvent::SC, MegaEvent::REQUEST_SENT, API_OK},
-                                      {MegaEvent::SC, MegaEvent::REQUEST_RECEIVED, API_EAGAIN}},
+    EXPECT_TRUE(waitForNetworkEvents({{MegaEvent::SC, MegaEvent::REQUEST_RECEIVED, API_EAGAIN}},
                                      defaultTimeoutMs,
                                      false))
         << "Not expected events received";
@@ -354,16 +383,23 @@ TEST_P(SdkTestScChannel, ProcessRateLimitError)
 
     mNetworkListener.clear();
 
-    installErrorResponseHook(API_ERATELIMIT);
-
     // Force SC channel catchup to trigger the hook
     megaApi[0]->catchup();
+
+    // Make sure SC request is sent
+    EXPECT_TRUE(waitForNetworkEvents({{MegaEvent::SC, MegaEvent::REQUEST_SENT, API_OK}},
+                                     defaultTimeoutMs,
+                                     false))
+        << "Not SC REEQUEST_SENT event received";
+
+    mNetworkListener.clear();
+
+    installErrorResponseHook(API_ERATELIMIT);
 
     // Verify events
     // The subsequent SC request could trigger another network event, so can't expect the network
     // events number here.
-    EXPECT_TRUE(waitForNetworkEvents({{MegaEvent::SC, MegaEvent::REQUEST_SENT, API_OK},
-                                      {MegaEvent::SC, MegaEvent::REQUEST_RECEIVED, API_ERATELIMIT}},
+    EXPECT_TRUE(waitForNetworkEvents({{MegaEvent::SC, MegaEvent::REQUEST_RECEIVED, API_ERATELIMIT}},
                                      defaultTimeoutMs,
                                      false))
         << "Not expected events received";
@@ -380,16 +416,23 @@ TEST_P(SdkTestScChannel, ProcessBlockedError)
 
     mNetworkListener.clear();
 
-    installErrorResponseHook(API_EBLOCKED);
-
     // Force SC channel catchup to trigger the hook
     megaApi[0]->catchup();
+
+    // Make sure SC request is sent
+    EXPECT_TRUE(waitForNetworkEvents({{MegaEvent::SC, MegaEvent::REQUEST_SENT, API_OK}},
+                                     defaultTimeoutMs,
+                                     false))
+        << "Not SC REEQUEST_SENT event received";
+
+    mNetworkListener.clear();
+
+    installErrorResponseHook(API_EBLOCKED);
 
     // Verify events
     // The subsequent SC request could trigger another network event, so can't expect the network
     // events number here.
-    EXPECT_TRUE(waitForNetworkEvents({{MegaEvent::SC, MegaEvent::REQUEST_SENT, API_OK},
-                                      {MegaEvent::SC, MegaEvent::REQUEST_RECEIVED, API_EBLOCKED}},
+    EXPECT_TRUE(waitForNetworkEvents({{MegaEvent::SC, MegaEvent::REQUEST_RECEIVED, API_EBLOCKED}},
                                      defaultTimeoutMs,
                                      false))
         << "Not expected events received";
@@ -410,15 +453,22 @@ TEST_P(SdkTestScChannel, ProcessUnexpectedError)
 
     mNetworkListener.clear();
 
-    installErrorResponseHook(1);
-
     // Force SC channel catchup to trigger the hook
     megaApi[0]->catchup();
 
+    // Make sure SC request is sent
+    EXPECT_TRUE(waitForNetworkEvents({{MegaEvent::SC, MegaEvent::REQUEST_SENT, API_OK}},
+                                     defaultTimeoutMs,
+                                     false))
+        << "Not SC REEQUEST_SENT event received";
+
+    mNetworkListener.clear();
+
+    installErrorResponseHook(1);
+
     // Verify events
-    EXPECT_TRUE(waitForNetworkEvents({{MegaEvent::SC, MegaEvent::REQUEST_SENT, API_OK},
-                                      {MegaEvent::SC, MegaEvent::REQUEST_ERROR, 1}},
-                                     defaultTimeoutMs))
+    EXPECT_TRUE(
+        waitForNetworkEvents({{MegaEvent::SC, MegaEvent::REQUEST_ERROR, 1}}, defaultTimeoutMs))
         << "Not expected events received";
 
     EXPECT_TRUE(megaApi[0]->getClient()->scsn.stopped()) << "Expected SCSN to be stopped";
@@ -438,14 +488,21 @@ TEST_P(SdkTestScChannel, ProcessSslFailureWithoutRetry)
 
     mNetworkListener.clear();
 
-    installSslFailureHook();
-
     // Force SC channel catchup to trigger the hook
     megaApi[0]->catchup();
 
+    // Make sure SC request is sent
+    EXPECT_TRUE(waitForNetworkEvents({{MegaEvent::SC, MegaEvent::REQUEST_SENT, API_OK}},
+                                     defaultTimeoutMs,
+                                     false))
+        << "Not SC REEQUEST_SENT event received";
+
+    mNetworkListener.clear();
+
+    installSslFailureHook();
+
     // Verify events
-    EXPECT_TRUE(waitForNetworkEvents({{MegaEvent::SC, MegaEvent::REQUEST_SENT, API_OK},
-                                      {MegaEvent::SC, MegaEvent::REQUEST_ERROR, API_ESSL}},
+    EXPECT_TRUE(waitForNetworkEvents({{MegaEvent::SC, MegaEvent::REQUEST_ERROR, API_ESSL}},
                                      defaultTimeoutMs))
         << "Not expected events received";
 
@@ -471,16 +528,23 @@ TEST_P(SdkTestScChannel, ProcessSslFailureWithRetry)
 
     mNetworkListener.clear();
 
-    installSslFailureHook();
-
     // Force SC channel catchup to trigger the hook
     megaApi[0]->catchup();
+
+    // Make sure SC request is sent
+    EXPECT_TRUE(waitForNetworkEvents({{MegaEvent::SC, MegaEvent::REQUEST_SENT, API_OK}},
+                                     defaultTimeoutMs,
+                                     false))
+        << "Not SC REEQUEST_SENT event received";
+
+    mNetworkListener.clear();
+
+    installSslFailureHook();
 
     // Verify events
     // The subsequent SC request could trigger another network event, so can't expect the network
     // events number here.
-    EXPECT_TRUE(waitForNetworkEvents({{MegaEvent::SC, MegaEvent::REQUEST_SENT, API_OK},
-                                      {MegaEvent::SC, MegaEvent::REQUEST_RECEIVED, 500}},
+    EXPECT_TRUE(waitForNetworkEvents({{MegaEvent::SC, MegaEvent::REQUEST_RECEIVED, 500}},
                                      defaultTimeoutMs,
                                      false))
         << "Not expected events received";
@@ -503,16 +567,23 @@ TEST_P(SdkTestScChannel, ProcessDnsFailure)
 
     mNetworkListener.clear();
 
-    installDnsFailureHook();
-
     // Force SC channel catchup to trigger the hook
     megaApi[0]->catchup();
+
+    // Make sure SC request is sent
+    EXPECT_TRUE(waitForNetworkEvents({{MegaEvent::SC, MegaEvent::REQUEST_SENT, API_OK}},
+                                     defaultTimeoutMs,
+                                     false))
+        << "Not SC REEQUEST_SENT event received";
+
+    mNetworkListener.clear();
+
+    installDnsFailureHook();
 
     // Verify events
     // The subsequent SC request could trigger another network event, so can't expect the network
     // events number here.
-    EXPECT_TRUE(waitForNetworkEvents({{MegaEvent::SC, MegaEvent::REQUEST_SENT, API_OK},
-                                      {MegaEvent::SC, MegaEvent::REQUEST_SENT, LOCAL_ENETWORK}},
+    EXPECT_TRUE(waitForNetworkEvents({{MegaEvent::SC, MegaEvent::REQUEST_SENT, LOCAL_ENETWORK}},
                                      defaultTimeoutMs,
                                      false))
         << "Not expected events received";

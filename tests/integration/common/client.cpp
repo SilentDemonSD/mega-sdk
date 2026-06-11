@@ -521,6 +521,24 @@ catch (...)
     return unexpected(API_EFAILED);
 }
 
+ErrorOr<NodeHandle> Client::upload(std::uint64_t length, const std::string& name, CloudPath parent)
+try
+{
+    // Find out where we can create temporary files.
+    auto temporaryPath = fs::temp_directory_path();
+
+    // Create a temporary file for us to upload.
+    File temporary(length, name, temporaryPath);
+
+    // Upload the file to the cloud.
+    return upload(name, std::move(parent), temporary.path());
+}
+
+catch (...)
+{
+    return unexpected(API_EFAILED);
+}
+
 ErrorOr<NodeHandle> Client::upload(CloudPath parent, const Path& path)
 {
     return upload(path.localPath().leafName().toPath(false), parent, path);

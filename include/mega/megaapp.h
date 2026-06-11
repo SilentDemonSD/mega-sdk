@@ -488,6 +488,9 @@ struct MEGA_API MegaApp
                                          int /* networkActivityType */,
                                          int /* code */)
     {}
+
+    // cached transfers resumed; uniqueIds are Cacheable::dbid of each resumed transfer
+    virtual void notify_transfers_resumed(const std::vector<uint32_t>& /*uniqueIds*/) {}
 };
 } // namespace
 

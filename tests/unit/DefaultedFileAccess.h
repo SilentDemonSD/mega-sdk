@@ -122,6 +122,12 @@ public:
     {
         throw NotImplemented{__func__};
     }
+
+    virtual mega::AutoFileHandle dupFileDescriptor() override
+    {
+        throw NotImplemented{__func__};
+        return mega::INVALID_OS_FD;
+    }
 };
 
 } // mt

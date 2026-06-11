@@ -31,6 +31,7 @@
 
 #include <algorithm>
 #include <array>
+#include <limits>
 #include <vector>
 
 namespace
@@ -51,6 +52,12 @@ constexpr bool expectedTrailingDotEscapeFor(mega::FileSystemType fsType)
     }
 #endif
 }
+
+class TestCurlHttpIO: public mega::CurlHttpIO
+{
+public:
+    using mega::CurlHttpIO::seek_data;
+};
 } // anonymous namespace
 
 TEST(utils, readLines)
@@ -2068,4 +2075,88 @@ TEST(DNS, cache_resolved_urls_succeeds)
 
     // Make sure the bad URI wasn't added to the cache.
     EXPECT_EQ(expected, io.getCachedDNSEntries());
+}
+
+TEST(CurlHttpIO, seek_data_supports_large_payload_sizes)
+{
+    if constexpr (sizeof(size_t) < sizeof(uint64_t) || sizeof(curl_off_t) < sizeof(uint64_t))
+    {
+        GTEST_SKIP() << "Large payload seek test requires 64-bit size_t and curl_off_t";
+    }
+    else
+    {
+        ::mega::HttpReq req;
+        ::mega::CurlHttpContext httpctx{};
+        char payload = 0;
+        // Use 64-bit shift to avoid MSVC C4293 on 32-bit even though this branch is discarded.
+        const uint64_t payloadSize64 = uint64_t{1} << 33; // 8 GiB
+        const size_t payloadSize = static_cast<size_t>(payloadSize64);
+
+        httpctx.req = &req;
+        httpctx.data = &payload;
+        httpctx.len = payloadSize;
+        req.httpiohandle = &httpctx;
+
+        EXPECT_EQ(
+            TestCurlHttpIO::seek_data(&req, static_cast<curl_off_t>(payloadSize - 1), SEEK_SET),
+            CURL_SEEKFUNC_OK);
+        EXPECT_EQ(req.outpos, payloadSize - 1);
+
+        EXPECT_EQ(TestCurlHttpIO::seek_data(&req, static_cast<curl_off_t>(payloadSize), SEEK_SET),
+                  CURL_SEEKFUNC_OK);
+        EXPECT_EQ(req.outpos, payloadSize);
+
+        EXPECT_EQ(
+            TestCurlHttpIO::seek_data(&req, static_cast<curl_off_t>(payloadSize) + 1, SEEK_SET),
+            CURL_SEEKFUNC_FAIL);
+
+        EXPECT_EQ(TestCurlHttpIO::seek_data(&req, -1, SEEK_SET), CURL_SEEKFUNC_FAIL);
+
+        EXPECT_EQ(TestCurlHttpIO::seek_data(&req, -1, SEEK_END), CURL_SEEKFUNC_OK);
+        EXPECT_EQ(req.outpos, payloadSize - 1);
+    }
+}
+
+TEST(CurlHttpIO, seek_data_fails_when_payload_exceeds_curl_off_t_range)
+{
+    if constexpr (sizeof(size_t) <= sizeof(curl_off_t))
+    {
+        GTEST_SKIP() << "Test requires size_t wider than curl_off_t";
+    }
+    else if constexpr (static_cast<uint64_t>(std::numeric_limits<curl_off_t>::max()) >=
+                       static_cast<uint64_t>(std::numeric_limits<size_t>::max()))
+    {
+        GTEST_SKIP() << "Test requires payload size not representable by curl_off_t";
+    }
+    else
+    {
+        ::mega::HttpReq req;
+        ::mega::CurlHttpContext httpctx{};
+        char payload = 0;
+        const size_t payloadSize = static_cast<size_t>(std::numeric_limits<curl_off_t>::max()) + 1;
+
+        httpctx.req = &req;
+        httpctx.data = &payload;
+        httpctx.len = payloadSize;
+        req.httpiohandle = &httpctx;
+
+        EXPECT_EQ(TestCurlHttpIO::seek_data(&req, 0, SEEK_SET), CURL_SEEKFUNC_FAIL);
+    }
+}
+
+TEST(HttpReq, put_clips_large_lengths_to_remaining_fixed_buffer_capacity)
+{
+    ::mega::HttpReq req(true);
+    const ::mega::byte payload = 0x5A;
+    const size_t oversizedLength =
+        static_cast<size_t>(std::numeric_limits<unsigned>::max()) + 10ULL;
+
+    req.buf = new ::mega::byte[4]{0, 0, 0, 0};
+    req.buflen = 4;
+    req.bufpos = 3;
+
+    req.put(const_cast<::mega::byte*>(&payload), oversizedLength, true);
+
+    EXPECT_EQ(req.bufpos, 4);
+    EXPECT_EQ(req.buf[3], payload);
 }

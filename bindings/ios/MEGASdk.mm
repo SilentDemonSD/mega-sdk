@@ -51,6 +51,8 @@
 #import "MEGACancelToken+init.h"
 #import "MEGAPushNotificationSettings+init.h"
 #import "MEGACancelSubscriptionReasonList+init.h"
+#import "MEGAFileServiceReclaimOptions+init.h"
+#import "MEGAFileServiceStorageInfo+init.h"
 
 #import <set>
 #import <pthread.h>
@@ -3597,6 +3599,17 @@ using namespace mega;
     return (NSInteger)self.megaApi->httpServerGetMaxOutputSize();
 }
 
+- (void)httpServerSetThrottleBitrate:(unsigned long long)bitrateBps {
+    if (self.megaApi) {
+        self.megaApi->httpServerSetThrottleBitrate(bitrateBps);
+    }
+}
+
+- (unsigned long long)httpServerGetThrottleBitrate {
+    if (self.megaApi == nil) return 0;
+    return self.megaApi->httpServerGetThrottleBitrate();
+}
+
 #endif
 
 + (NSString *)mimeTypeByExtension:(NSString *)extension {
@@ -4326,6 +4339,32 @@ using namespace mega;
     if (self.megaApi) {
         self.megaApi->getRecentActionById(bucketId.UTF8String, excludeSensitives, [self createDelegateMEGARequestListener:delegate singleListener:YES]);
     }
+}
+
+#pragma mark - File Service
+
+- (MEGAFileServiceStorageInfo *)fileServiceStorageInfoWithOptions:(MEGAFileServiceReclaimOptions *)options {
+    if (self.megaApi == nil) {
+        return nil;
+    }
+    MegaFileServiceStorageInfo *cInfo = self.megaApi->fileServiceGetStorageInfo(options ? [options getCPtr] : nullptr);
+    if (cInfo == nullptr) {
+        return nil;
+    }
+    return [[MEGAFileServiceStorageInfo alloc] initWithMegaFileServiceStorageInfo:cInfo cMemoryOwn:YES];
+}
+
+- (void)fileServiceReclaimWithOptions:(MEGAFileServiceReclaimOptions *)options delegate:(id<MEGARequestDelegate>)delegate {
+    if (self.megaApi != nil) {
+        self.megaApi->fileServiceReclaim(options ? [options getCPtr] : nullptr, [self createDelegateMEGARequestListener:delegate singleListener:YES]);
+    }
+}
+
+- (void)setFileServiceReclaimOptions:(MEGAFileServiceReclaimOptions *)options {
+    if (self.megaApi == nil || options == nil) {
+        return;
+    }
+    self.megaApi->fileServiceSetReclaimOptions([options getCPtr]);
 }
 
 @end

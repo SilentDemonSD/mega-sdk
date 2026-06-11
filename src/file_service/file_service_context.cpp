@@ -20,11 +20,14 @@
 #include <mega/file_service/file_range.h>
 #include <mega/file_service/file_remove_event.h>
 #include <mega/file_service/file_result.h>
+#include <mega/file_service/file_service.h>
 #include <mega/file_service/file_service_context.h>
 #include <mega/file_service/file_service_result.h>
 #include <mega/file_service/file_service_result_or.h>
 #include <mega/file_service/logging.h>
 #include <mega/filesystem.h>
+#include <mega/mediafileattribute.h>
+#include <mega/scoped_helpers.h>
 
 #include <chrono>
 #include <stdexcept>
@@ -163,12 +166,15 @@ public:
     void queue(ReclaimCallback callback);
 
     // Reclaim zero or more files.
-    void reclaim(ReclaimContextPtr context);
+    void reclaim(ReclaimContextPtr context, const ReclaimOptions& reclaimOptions);
 }; // ReclaimContext
 
 static Database createDatabase(const LocalPath& databasePath);
 
-static bool reclamationEnabled(const FileServiceOptions& options);
+static std::optional<std::uint32_t> extractDuration(const std::string& attributes,
+                                                    const NodeKeyData& keyData);
+
+static bool reclamationEnabled(const ReclaimOptions& options);
 
 template<typename Lock>
 FileID FileServiceContext::allocateID([[maybe_unused]] Lock&& lock, Transaction& transaction)
@@ -221,6 +227,37 @@ FileID FileServiceContext::allocateID([[maybe_unused]] Lock&& lock, Transaction&
     return FileID::from(id);
 }
 
+void FileServiceContext::cleanCache()
+try
+{
+    FSDebug1("Cleaning cache...");
+
+    // No lock should be necessary as we're called during destruction.
+    auto transaction = mDatabase.transaction();
+    auto query = transaction.query(mQueries.mGetFileIDs);
+
+    query.param(":dirty").set(false);
+
+    // Remove each unmodified file from the disk.
+    for (query.execute(); query; ++query)
+        mStorage.removeFile(query.field("id").get<FileID>(), std::nothrow);
+
+    // Remove unmodified files from the database.
+    query = transaction.query(mQueries.mRemoveFiles);
+
+    query.param(":dirty").set(false);
+    query.execute();
+
+    // Persist database changes.
+    transaction.commit();
+
+    FSDebug1("Cache cleaned");
+}
+catch (std::runtime_error& exception)
+{
+    FSErrorF("Unable to clean cache: %s", exception.what());
+}
+
 template<typename Lock>
 void FileServiceContext::deallocateID(FileID id,
                                       [[maybe_unused]] Lock&& lock,
@@ -261,6 +298,23 @@ auto FileServiceContext::fileContextFromCloud(FileID id) -> FileServiceResultOr<
     if (node->mIsDirectory)
         return unexpected(FILE_SERVICE_FILE_IS_A_DIRECTORY);
 
+    // Try and retrieve the node's key data.
+    auto keyData = mClient.keyData(node->mHandle, false);
+
+    // Couldn't get our hands on the nodes's key data.
+    if (!keyData)
+        return unexpected(FILE_SERVICE_UNEXPECTED);
+
+    // Try and retrieve the node's file attributes.
+    auto attributes = mClient.fileAttributes(node->mHandle);
+
+    // Couldn't get our hands on the node's file attributes.
+    if (!attributes)
+        return unexpected(FILE_SERVICE_UNEXPECTED);
+
+    // Try and extract the node's duration.
+    auto duration = extractDuration(*attributes, *keyData);
+
     // Make sure no one's changing our indexes.
     UniqueLock lockContexts(mLock);
 
@@ -298,6 +352,17 @@ auto FileServiceContext::fileContextFromCloud(FileID id) -> FileServiceResultOr<
 
     query.execute();
 
+    // Add the file's duration to the database.
+    if (duration && *duration)
+    {
+        query = transaction.query(mQueries.mAddFileDuration);
+
+        query.param(":duration").set(*duration);
+        query.param(":id").set(id);
+
+        query.execute();
+    }
+
     // Add the file to storage.
     auto file = mStorage.addFile(id);
 
@@ -315,6 +380,7 @@ auto FileServiceContext::fileContextFromCloud(FileID id) -> FileServiceResultOr<
                                                   mActivities.begin(),
                                                   allocatedSize,
                                                   dirty,
+                                                  duration,
                                                   node->mHandle,
                                                   id,
                                                   location,
@@ -331,7 +397,7 @@ auto FileServiceContext::fileContextFromCloud(FileID id) -> FileServiceResultOr<
                                                  std::move(file),
                                                  std::move(info),
                                                  std::nullopt,
-                                                 FileRangeVector(),
+                                                 FileRangeSet(),
                                                  *this);
 
     // Make sure the file is in our index.
@@ -376,7 +442,7 @@ auto FileServiceContext::fileContextFromDatabase(FileID id) -> FileServiceResult
 
     // Retrieve this file's key data and ranges from the database.
     std::optional<NodeKeyData> keyData;
-    FileRangeVector ranges;
+    FileRangeSet ranges;
 
     {
         // Acquire database lock.
@@ -507,11 +573,23 @@ auto FileServiceContext::infoContextFromDatabase(FileID id) -> FileInfoContextPt
     if (name && parent)
         location = FileLocation{std::move(*name), *parent};
 
+    // Load the file's duration, if any.
+    std::optional<std::uint32_t> duration;
+
+    query = transaction.query(mQueries.mGetFileDuration);
+
+    query.param(":id").set(id);
+
+    // File has a duration.
+    if (query.execute())
+        duration = query.field("duration").get<std::uint32_t>();
+
     // Instantiate a context to represent this file's information.
     info = std::make_shared<FileInfoContext>(accessed,
                                              mActivities.begin(),
                                              allocatedSize,
                                              dirty,
+                                             duration,
                                              handle,
                                              id,
                                              std::move(location),
@@ -580,12 +658,12 @@ auto FileServiceContext::keyData(FileID id, Transaction&& transaction) -> std::o
 }
 
 template<typename Transaction>
-auto FileServiceContext::ranges(FileID id, Transaction&& transaction) -> FileRangeVector
+auto FileServiceContext::ranges(FileID id, Transaction&& transaction) -> FileRangeSet
 {
     assert(transaction.inProgress());
 
     auto query = transaction.query(mQueries.mGetFileRanges);
-    auto ranges = FileRangeVector();
+    auto ranges = FileRangeSet();
 
     query.param(":id").set(id);
 
@@ -594,7 +672,7 @@ auto FileServiceContext::ranges(FileID id, Transaction&& transaction) -> FileRan
         auto begin = query.field("begin").template get<std::uint64_t>();
         auto end = query.field("end").template get<std::uint64_t>();
 
-        ranges.emplace_back(begin, end);
+        ranges.add(FileRange(begin, end));
     }
 
     return ranges;
@@ -604,35 +682,46 @@ void FileServiceContext::reclaimTaskCallback(Activity& activity,
                                              steady_clock::time_point when,
                                              const Task& task)
 {
+    FSInfo1("reclaim task callback");
+
     // Exchange mReclaimTask with task.
-    auto exchange = [this](Task task)
+    auto exchange = [oldTask = task, this](Task task)
     {
         // Acquire task lock.
         std::lock_guard guard(mReclaimTaskLock);
 
-        // For ADL lookup.
-        using std::swap;
+        // We've been superceded by another task.
+        if (oldTask != mReclaimTask)
+            return;
 
-        // Exchange the task.
-        swap(mReclaimTask, task);
+        // Update the context's reclamation task.
+        mReclaimTask = std::move(task);
     }; // exchange
 
     // Client's shutting down or reclamation has been disabled.
     if (task.aborted())
+    {
+        FSInfo1("reclaim task is aborted");
         return exchange(Task());
+    }
 
     // Schedule another reclamation in the future.
     auto reschedule = [activity = std::move(activity), exchange, this]()
     {
         // Get the service's current options.
-        auto options = this->options();
+        const auto reclaimOptions = this->reclaimOptions();
 
         // Reclamation has been disabled.
-        if (!reclamationEnabled(options))
+        if (!reclamationEnabled(reclaimOptions))
+        {
+            FSInfo1("reclaim task is disabled");
             return exchange(Task());
+        }
 
         // When should the next reclamation occur?
-        auto when = steady_clock::now() + options.mReclaimPeriod;
+        const auto when = steady_clock::now() + reclaimOptions.mPeriod;
+
+        FSInfoF("reclaim task is scheduled in %d seconds", reclaimOptions.mPeriod.count());
 
         // Keep exchange below simple.
         auto callback = std::bind(&FileServiceContext::reclaimTaskCallback,
@@ -657,20 +746,19 @@ void FileServiceContext::reclaimTaskCallback(Activity& activity,
     }; // reclaimed
 
     // Try and reclaim storage.
-    reclaim(std::move(reclaimed));
+    reclaim(std::move(reclaimed), reclaimOptions());
 }
 
-auto FileServiceContext::reclaimable() -> FileServiceResultOr<FileIDVector>
+auto FileServiceContext::reclaimable(const ReclaimOptions& reclaimOptions)
+    -> FileServiceResultOr<FileIDVector>
 try
 {
-    // Get our hands on our current options.
-    auto options = this->options();
-
     // Convenience.
-    auto sizeThreshold = options.mReclaimSizeThreshold;
+    const auto reclaimThreshold = reclaimOptions.mReclaimThreshold;
+    const auto reclaimTarget = reclaimOptions.mReclaimTarget;
 
     // No quota? No need to reclaim anything.
-    if (!sizeThreshold)
+    if (!reclaimThreshold)
         return FileIDVector();
 
     // So we have exclusive access to the database.
@@ -683,14 +771,14 @@ try
     auto used = storageUsed(lock, transaction);
 
     // No need to reclaim any storage.
-    if (sizeThreshold >= used)
+    if (reclaimThreshold.value() >= used)
         return FileIDVector();
 
     // Get the allocated size and ID of all files in storage.
     auto query = transaction.query(mQueries.mGetReclaimableFiles);
 
     // Retrieve access time threshold.
-    auto threshold = options.mReclaimAgeThreshold;
+    auto threshold = reclaimOptions.mAgeThreshold;
 
     // Compute maximum reclaimable access time.
     auto accessed = system_clock::now() - threshold;
@@ -701,8 +789,9 @@ try
     // Tracks the IDs of the files we can reclaim.
     FileIDVector ids;
 
-    // Collect as many IDs for reclamation as necessary.
-    for (query.execute(); query && used > sizeThreshold; ++query)
+    // Collect as many IDs for reclamation as necessary until we are no longer above our target
+    // storage usage. Condition should be aligned with the one in mGetStorageInfo.
+    for (query.execute(); query && used > reclaimTarget; ++query)
     {
         // Latch the file's ID and allocated size.
         auto id = query.field("id").get<FileID>();
@@ -851,6 +940,44 @@ bool FileServiceContext::removeFromIndex(FileID id, FromFileIDMap<T>& map)
 }
 
 template<typename Lock, typename Transaction>
+auto FileServiceContext::storageInfo([[maybe_unused]] Lock&& lock,
+                                     const ReclaimOptions& options,
+                                     Transaction&& transaction) -> StorageInfo
+{
+    // Sanity.
+    assert(lock.mutex() == &mDatabase);
+    assert(lock.owns_lock());
+    assert(transaction.inProgress());
+
+    // Convenience.
+    const auto ageThreshold = options.mAgeThreshold;
+    const auto reclaimTarget = options.mReclaimTarget;
+
+    // Compute the storage used by all files in storage.
+    auto query = transaction.query(mQueries.mGetStorageInfo);
+
+    // Compute maximum reclaimable access time.
+    auto accessed = system_clock::to_time_t(system_clock::now() - ageThreshold);
+    query.param(":accessed").set(accessed);
+
+    query.param(":target_remaining_size").set(reclaimTarget);
+
+    query.execute();
+
+    // Sanity.
+    assert(query);
+
+    // Populate values
+    StorageInfo storageInfo;
+    storageInfo.mReclaimableSize = query.field("size_to_reclaim").template get<std::uint64_t>();
+    storageInfo.mAllocatedSize = query.field("total_allocated_size").template get<std::uint64_t>();
+    storageInfo.mReportedSize = query.field("total_reported_size").template get<std::uint64_t>();
+    storageInfo.mTotalSize = query.field("total_size").template get<std::uint64_t>();
+
+    return storageInfo;
+}
+
+template<typename Lock, typename Transaction>
 auto FileServiceContext::storageUsed([[maybe_unused]] Lock&& lock, Transaction&& transaction)
     -> std::uint64_t
 {
@@ -877,24 +1004,26 @@ void FileServiceContext::updated(NodeEventQueue& events)
     EventProcessor (*this)(events);
 }
 
-FileServiceContext::FileServiceContext(Client& client, const FileServiceOptions& options):
+FileServiceContext::FileServiceContext(Client& client,
+                                       FileService& service,
+                                       const UserStoragePath& userStoragePath):
     NodeEventObserver(),
-    FileEventEmitter(),
     mInstanceLogger("FileServiceContext", *this, logger()),
     mClient(client),
-    mStorage(mClient),
+    mStorage(userStoragePath),
     mDatabase(createDatabase(mStorage.databasePath())),
     mQueries(mDatabase),
+    mCacheCleaner(),
     mFileContexts(),
     mInfoContextRemoved(),
     mInfoContexts(),
     mLock(),
-    mOptions(options),
-    mOptionsLock(),
     mReclaimContext(),
     mReclaimContextLock(),
     mReclaimTask(),
     mReclaimTaskLock(),
+    mEventEmitter(),
+    mService(service),
     mActivities(),
     mExecutor(TaskExecutorFlags(), logger())
 {
@@ -904,16 +1033,19 @@ FileServiceContext::FileServiceContext(Client& client, const FileServiceOptions&
     // Purge any lingering removed files.
     purgeRemovedFiles();
 
+    // Get our hands on the service's reclamation options.
+    auto options = service.reclaimOptions();
+
     // User hasn't specified any storage quota.
-    if (!mOptions.mReclaimSizeThreshold)
+    if (!options.mReclaimThreshold)
         return;
 
     // Assume user's specified an initial reclamation delay.
-    auto delay = mOptions.mReclaimDelay;
+    auto delay = options.mDelay;
 
     // User hasn't specified an initial reclamation delay.
     if (!delay.count())
-        delay = mOptions.mReclaimPeriod;
+        delay = options.mPeriod;
 
     // User hasn't specified a reclamation period.
     if (!delay.count())
@@ -921,6 +1053,8 @@ FileServiceContext::FileServiceContext(Client& client, const FileServiceOptions&
 
     // When should we perform the reclamation?
     auto when = steady_clock::now() + delay;
+
+    FSInfoF("reclaim task is scheduled in %d seconds", delay.count());
 
     // Schedule initial reclamation for later execution.
     mReclaimTask = mExecutor.execute(std::bind(&FileServiceContext::reclaimTaskCallback,
@@ -934,12 +1068,36 @@ FileServiceContext::FileServiceContext(Client& client, const FileServiceOptions&
 
 FileServiceContext::~FileServiceContext()
 {
+    // Cancel in-memory pins that might be keeping contexts alive.
+    {
+        // So we can safely iterate over mFileContexts.
+        std::lock_guard guard(mLock);
+
+        // Cancel any in-memory pins present on our contexts.
+        for (auto i = mFileContexts.begin(); i != mFileContexts.end();)
+        {
+            // Eagerly move to the next context, if any.
+            auto context = i++->second.lock();
+
+            // Context has already been purged from memory.
+            if (!context)
+                continue;
+
+            // Some time in the distant past.
+            auto when = std::chrono::steady_clock::time_point::min();
+
+            // Cancel any in-memory pins on the context.
+            context->pinUntil(when);
+        }
+    }
+
     // Let the client know we're no longer interested in node events.
     mClient.removeEventObserver(*this);
 }
 
-auto FileServiceContext::add(NodeHandle handle, const NodeKeyData& keyData, std::size_t size)
-    -> FileServiceResultOr<FileID>
+auto FileServiceContext::add(NodeHandle handle,
+                             const NodeKeyData& keyData,
+                             std::uint64_t size) -> FileServiceResultOr<FileID>
 try
 {
     // Caller's given us a bogus key.
@@ -1012,6 +1170,24 @@ catch (std::runtime_error& exception)
     FSErrorF("Unable to add foreign file to service: %s", exception.what());
 
     return unexpected(FILE_SERVICE_UNEXPECTED);
+}
+
+FileEventObserverID FileServiceContext::addObserver(FileEventObserver observer)
+{
+    return mEventEmitter.addObserver(std::move(observer));
+}
+
+FileEventObserverID FileServiceContext::addObserver(FileID id, FileEventObserver observer)
+{
+    return mEventEmitter.addObserver(id, std::move(observer));
+}
+
+void FileServiceContext::cleanCacheOnDestruction()
+{
+    mCacheCleaner = [this]()
+    {
+        cleanCache();
+    };
 }
 
 Client& FileServiceContext::client()
@@ -1092,6 +1268,7 @@ try
     // Clarity.
     auto allocatedSize = 0u;
     auto dirty = true;
+    auto duration = std::nullopt;
     auto location = FileLocation{name, parent};
     auto reportedSize = 0u;
     auto size = 0u;
@@ -1101,6 +1278,7 @@ try
                                                   mActivities.begin(),
                                                   allocatedSize,
                                                   dirty,
+                                                  duration,
                                                   NodeHandle(),
                                                   id,
                                                   location,
@@ -1114,7 +1292,7 @@ try
                                               mStorage.addFile(id),
                                               info,
                                               std::nullopt,
-                                              FileRangeVector(),
+                                              FileRangeSet(),
                                               *this);
 
     // Persist our changes.
@@ -1140,9 +1318,14 @@ Database& FileServiceContext::database()
     return mDatabase;
 }
 
-auto FileServiceContext::execute(std::function<void(const Task&)> function) -> Task
+LocalPath FileServiceContext::databasePath() const
 {
-    return mExecutor.execute(std::move(function), true);
+    return mStorage.databasePath();
+}
+
+TaskExecutor& FileServiceContext::executor()
+{
+    return mExecutor;
 }
 
 auto FileServiceContext::info(FileID id) -> FileServiceResultOr<FileInfo>
@@ -1177,6 +1360,11 @@ catch (std::runtime_error& exception)
     FSErrorF("Unable to get file information: %s: %s", toString(id).c_str(), exception.what());
 
     return unexpected(FILE_SERVICE_UNEXPECTED);
+}
+
+void FileServiceContext::notify(const FileEvent& event)
+{
+    mEventEmitter.notify(event);
 }
 
 auto FileServiceContext::open(NodeHandle parent, const std::string& name)
@@ -1282,71 +1470,6 @@ catch (std::runtime_error& exception)
     return unexpected(FILE_SERVICE_UNEXPECTED);
 }
 
-void FileServiceContext::options(const FileServiceOptions& options)
-{
-    // Set later to prevent modification to our options.
-    SharedLock readLock(mOptionsLock, std::defer_lock);
-
-    // Keeps track of our original reclamation period.
-    seconds oldPeriod;
-
-    // Update our options.
-    {
-        // Make sure no one else is modifying our options.
-        UniqueLock writeLock(mOptionsLock);
-
-        // Latch current reclamation period.
-        oldPeriod = mOptions.mReclaimPeriod;
-
-        // Update our options.
-        mOptions = options;
-
-        // Let other threads read our options.
-        readLock = writeLock.to_shared_lock();
-    }
-
-    // Acquire task lock.
-    UniqueLock taskLock(mReclaimTaskLock);
-
-    // Caller wants to disable periodic reclamation.
-    if (!reclamationEnabled(options))
-        return mReclaimTask.abort(), void();
-
-    // Convenience.
-    auto newPeriod = options.mReclaimPeriod;
-
-    // Caller isn't changing reclamation period.
-    if (newPeriod == oldPeriod)
-        return;
-
-    // Periodic reclamation is already scheduled.
-    //
-    // Send it a cancellation so it reschedules itself.
-    if (mReclaimTask)
-        return mReclaimTask.cancel(), void();
-
-    // When should we perform the reclamation?
-    auto when = steady_clock::now() + newPeriod;
-
-    // Schedule a reclamation for some time in the future.
-    mReclaimTask = mExecutor.execute(std::bind(&FileServiceContext::reclaimTaskCallback,
-                                               this,
-                                               mActivities.begin(),
-                                               when,
-                                               std::placeholders::_1),
-                                     when,
-                                     true);
-}
-
-FileServiceOptions FileServiceContext::options()
-{
-    // Make sure no one else is modifying our options.
-    SharedLock guard(mOptionsLock);
-
-    // Return current options to our caller.
-    return mOptions;
-}
-
 LocalPath FileServiceContext::path(FileID id) const
 {
     return mStorage.userFilePath(id);
@@ -1415,7 +1538,7 @@ catch (std::runtime_error& exception)
     return FILE_SERVICE_UNEXPECTED;
 }
 
-void FileServiceContext::reclaim(ReclaimCallback callback)
+void FileServiceContext::reclaim(ReclaimCallback callback, const ReclaimOptions& reclaimOptions)
 {
     // Acquire reclaim context lock.
     std::unique_lock lock(mReclaimContextLock);
@@ -1437,7 +1560,63 @@ void FileServiceContext::reclaim(ReclaimCallback callback)
     lock.unlock();
 
     // Reclaim storage space.
-    mReclaimContext->reclaim(mReclaimContext);
+    mReclaimContext->reclaim(mReclaimContext, reclaimOptions);
+}
+
+void FileServiceContext::removeObserver(FileEventObserverID id)
+{
+    mEventEmitter.removeObserver(id);
+}
+
+void FileServiceContext::removeObserver(FileID id, FileEventObserverID observerID)
+{
+    mEventEmitter.removeObserver(id, observerID);
+}
+
+ReclaimOptions FileServiceContext::reclaimOptions()
+{
+    return mService.reclaimOptions();
+}
+
+void FileServiceContext::reclaimOptionsChanged(const ReclaimOptions& newOptions)
+{
+    // Acquire task lock.
+    UniqueLock taskLock(mReclaimTaskLock);
+
+    // Caller wants to disable periodic reclamation.
+    if (!reclamationEnabled(newOptions))
+    {
+        FSInfo1("Aborting reclaim task as reclamation disabled");
+
+        return mReclaimTask.abort(), void();
+    }
+
+    // Periodic reclamation is already scheduled.
+    if (mReclaimTask && !mReclaimTask.completed())
+    {
+        // Leave a trail so we know what we've done.
+        FSInfo1("Aborting reclaim task");
+
+        // Abort it
+        mReclaimTask.abort();
+    }
+
+    // Convenience.
+    auto delay = newOptions.mDelay;
+
+    // When should we perform the reclamation?
+    auto when = steady_clock::now() + delay;
+
+    FSInfoF("Reclaim task is scheduled to execute in %d seconds", delay.count());
+
+    // Schedule a reclamation for some time in the future.
+    mReclaimTask = mExecutor.execute(std::bind(&FileServiceContext::reclaimTaskCallback,
+                                               this,
+                                               mActivities.begin(),
+                                               when,
+                                               std::placeholders::_1),
+                                     when,
+                                     true);
 }
 
 void FileServiceContext::removeFromIndex(FileContextBadge, FileID id)
@@ -1457,6 +1636,9 @@ try
     // mInfoContexts contains a distinct info instance for this file.
     if (!removeFromIndex(id, lockContexts, mInfoContexts))
         return;
+
+    // Remove all observers who were watching this file.
+    mEventEmitter.removeObservers(id);
 
     // Make sure we have exclusive access to mDatabase.
     UniqueLock lockDatabase(mDatabase);
@@ -1498,6 +1680,34 @@ catch (std::runtime_error& exception)
                exception.what());
 }
 
+ServiceOptions FileServiceContext::serviceOptions()
+{
+    return mService.serviceOptions();
+}
+
+auto FileServiceContext::storageInfo(const ReclaimOptions* options)
+    -> FileServiceResultOr<StorageInfo>
+try
+{
+    // Make sure no one else is changing the database.
+    UniqueLock lock(mDatabase);
+
+    // So we can safely access the database.
+    auto transaction = mDatabase.transaction();
+
+    // Let the caller know how much storage space we're using.
+    if (options)
+        return storageInfo(lock, *options, transaction);
+    else
+        return storageInfo(lock, this->reclaimOptions(), transaction);
+}
+catch (std::runtime_error& exception)
+{
+    FSErrorF("Unable to determine detailed storage size: %s", exception.what());
+
+    return unexpected(FILE_SERVICE_UNEXPECTED);
+}
+
 auto FileServiceContext::storageUsed() -> FileServiceResultOr<std::uint64_t>
 try
 {
@@ -1515,6 +1725,11 @@ catch (std::runtime_error& exception)
     FSErrorF("Unable to determine storage footprint: %s", exception.what());
 
     return unexpected(FILE_SERVICE_UNEXPECTED);
+}
+
+LocalPath FileServiceContext::userFilePath(FileID id) const
+{
+    return mStorage.userFilePath(id);
 }
 
 FileServiceContext::EventProcessor::EventProcessor(FileServiceContext& service):
@@ -1792,6 +2007,8 @@ catch (std::runtime_error& exception)
 
 void FileServiceContext::ReclaimContext::reclaim(ReclaimContextPtr context, FileID id)
 {
+    FSInfoF("Reclaim file started: %s", id.toString().c_str());
+
     // Sanity.
     assert(context);
 
@@ -1820,7 +2037,7 @@ void FileServiceContext::ReclaimContext::reclaimBatch(ReclaimContextPtr context,
     assert(lock.owns_lock());
 
     // There are no files left to reclaim.
-    if (mIDs.empty())
+    if (mIDs.empty() && mNumPending == 0)
     {
         // We were able to reclaim some space or encountered no failures.
         if (mReclaimed || mResult == FILE_SERVICE_SUCCESS)
@@ -1831,7 +2048,7 @@ void FileServiceContext::ReclaimContext::reclaimBatch(ReclaimContextPtr context,
     }
 
     // How many files should we reclaim at once?
-    auto batchSize = mService.options().mReclaimBatchSize;
+    auto batchSize = mService.reclaimOptions().mBatchSize;
 
     // Reclaim one or more files.
     while (mNumPending < batchSize && !mIDs.empty())
@@ -1852,6 +2069,8 @@ void FileServiceContext::ReclaimContext::reclaimBatch(ReclaimContextPtr context,
 void FileServiceContext::ReclaimContext::reclaimed(ReclaimContextPtr context,
                                                    FileResultOr<std::uint64_t> result)
 {
+    FSInfoF("Reclaim file result: %d, %" PRIu64, result.errorOr(FILE_SUCCESS), result.valueOr(0));
+
     // Make sure no one else changes our members.
     std::unique_lock lock(mLock);
 
@@ -1869,12 +2088,12 @@ void FileServiceContext::ReclaimContext::reclaimed(ReclaimContextPtr context,
     if (!result)
         mResult = FILE_SERVICE_UNEXPECTED;
 
-    // Reclaim remaning files if any.
+    // Reclaim remaining files if any.
     reclaimBatch(std::move(context), std::move(lock));
 }
 
 FileServiceContext::ReclaimContext::ReclaimContext(FileServiceContext& service):
-    mInstanceLogger("ReclaimContext", *this, logger()),
+    mInstanceLogger("FileServiceContext::ReclaimContext", *this, logger()),
     mActivity(service.mActivities.begin()),
     mCallbacks(),
     mIDs(),
@@ -1903,14 +2122,17 @@ void FileServiceContext::ReclaimContext::queue(ReclaimCallback callback)
     mCallbacks.emplace_back(std::move(callback));
 }
 
-void FileServiceContext::ReclaimContext::reclaim(ReclaimContextPtr context)
+void FileServiceContext::ReclaimContext::reclaim(ReclaimContextPtr context,
+                                                 const ReclaimOptions& reclaimOptions)
 {
     // Try and figure out what files we can reclaim.
-    auto ids = mService.reclaimable();
+    auto ids = mService.reclaimable(reclaimOptions);
 
     // Couldn't determine how many files to reclaim.
     if (!ids)
         return completed(ids.error());
+
+    FSInfoF("reclaim task is started: %d files", ids->size());
 
     // Remember what file's we're reclaiming.
     mIDs = std::move(*ids);
@@ -1928,10 +2150,43 @@ Database createDatabase(const LocalPath& databasePath)
     return database;
 }
 
-bool reclamationEnabled(const FileServiceOptions& options)
+std::optional<std::uint32_t> extractDuration(const std::string& attributes,
+                                             const NodeKeyData& keyData)
 {
-    return options.mReclaimBatchSize && options.mReclaimPeriod.count() &&
-           options.mReclaimSizeThreshold;
+    // No attributes? No duration.
+    if (attributes.empty())
+        return std::nullopt;
+
+    // Sanity: key data should always be valid.
+    assert(keyData.mKeyAndIV.size() == FILENODEKEYLENGTH);
+
+    // Caller's passed us invalid key data.
+    if (keyData.mKeyAndIV.size() != FILENODEKEYLENGTH)
+        return std::nullopt;
+
+    // Necessary as getMediaProperty(...) requires a mutable file key.
+    auto temp = keyData.mKeyAndIV.substr(FILENODEKEYLENGTH / 2);
+
+    // Necessary as getMediaProperty(...) wants the file key as u32s.
+    auto fileKey = reinterpret_cast<std::uint32_t*>(temp.data());
+
+    // Keeps line below simple.
+    auto selector = &MediaProperties::playtime;
+
+    // Try and extract the node's file duration.
+    auto duration = MediaProperties::getMediaProperty(attributes, fileKey, selector);
+
+    // Duration exists and is nonzero.
+    if (duration && *duration)
+        return duration;
+
+    // Duration doesn't exist or is zero.
+    return std::nullopt;
+}
+
+bool reclamationEnabled(const ReclaimOptions& options)
+{
+    return options.mBatchSize && options.mPeriod.count() && options.mReclaimThreshold;
 }
 
 } // file_service

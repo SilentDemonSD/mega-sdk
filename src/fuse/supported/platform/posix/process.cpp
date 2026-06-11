@@ -4,6 +4,7 @@
 #include <sys/wait.h>
 
 #include <cassert>
+#include <signal.h>
 #include <unistd.h>
 
 namespace mega

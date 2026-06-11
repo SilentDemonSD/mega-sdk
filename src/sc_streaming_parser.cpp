@@ -71,6 +71,9 @@ void ScStreamingParser::init()
 
                          mActionName = json->getnameid(json->pos + 1);
 
+                         // A new share should be followed by a "t" packet
+                         assert(mIsNewSharesMerged || mActionName == makeNameid("t"));
+
                          if (mActionName == makeNameid("t"))
                          {
                              mTreeFilters.start(mFiltersChain,
@@ -134,6 +137,7 @@ void ScStreamingParser::init()
                          {
                              mTreeFilters.end(mFiltersChain);
                              mLastAPDeletedNode.reset();
+                             mIsNewSharesMerged = true;
                          }
                          else
                          {
@@ -141,7 +145,8 @@ void ScStreamingParser::init()
                              mLastAPDeletedNode =
                                  mClient.sc_procActionPacketWithoutCommonTags(*json,
                                                                               mActionName,
-                                                                              mIsSelfOriginating);
+                                                                              mIsSelfOriginating,
+                                                                              &mIsNewSharesMerged);
                          }
 
                          if (mInterimSn != UNDEF && isnCanBeProcessed())
@@ -270,6 +275,7 @@ void ScStreamingParser::clear()
 {
     if (mNeedToPurge)
     {
+        mClient.sc_procTerm(isDuringMoveOperation());
         mClient.sc_purgeAndCommit();
     }
 
@@ -284,6 +290,7 @@ void ScStreamingParser::clear()
     mJsonSplitter.clear();
     mLast = false;
     mLastAPDeletedNode = nullptr;
+    mIsNewSharesMerged = true;
 
     mInterimSn = UNDEF;
 
@@ -339,9 +346,15 @@ void ScStreamingParser::checkActionPacket()
 
 bool ScStreamingParser::isnCanBeProcessed()
 {
-    // In move operation ("d" + "t" packets), isn is received in "d" packet, but is processed only
-    // after the whole "t" packet is processed.
-    return mLastAPDeletedNode == nullptr;
+    // In below combo operations, isn is received in the first packet, but is processed only after
+    // the last packet is processed.
+    //   - Move ("d" + "t" packets)
+    //   - New shares ("s" + "t" packets)
+    return !isDuringMoveOperation() && mIsNewSharesMerged;
 }
 
+bool ScStreamingParser::isDuringMoveOperation()
+{
+    return mLastAPDeletedNode != nullptr;
+}
 } // namespace

@@ -29,9 +29,22 @@
 #include "megaapi_impl.h"
 
 #include "mega/canceller.h"
+#include "mega/common/node_key_data.h"
+#include "mega/common/utility.h"
+#include "mega/file_service/file.h"
+#include "mega/file_service/file_callbacks.h"
+#include "mega/file_service/file_id.h"
+#include "mega/file_service/file_info.h"
+#include "mega/file_service/file_service_context.h"
+#include "mega/file_service/file_service_options.h"
+#include "mega/file_service/file_service_result.h"
+#include "mega/file_service/file_stream_result.h"
+#include "mega/file_service/utility.h"
+#include "mega/logging.h"
 #include "mega/mediafileattribute.h"
 #include "mega/scoped_helpers.h"
 #include "mega/tlv.h"
+#include "mega/types.h"
 #include "mega/user_attribute.h"
 #include "mega/utils_optional.h"
 #include "megaapi.h"
@@ -783,19 +796,34 @@ const char *MegaNodePrivate::getOfficialAttr(const char *attrName) const
     return getAttrFrom(attrName, mOfficialAttrs.get());
 }
 
+template<typename PropertySelector>
+auto MegaNodePrivate::getMediaProperty(PropertySelector selector)
+    -> std::enable_if_t<MediaProperties::IsPropertySelectorV<PropertySelector>,
+                        std::optional<MediaProperties::PropertyTypeT<PropertySelector>>>
+{
+    // Node isn't a file.
+    if (type != MegaNode::TYPE_FILE)
+        return std::nullopt;
+
+    // Node hasn't been decrypted.
+    if (nodekey.size() != FILENODEKEYLENGTH)
+        return std::nullopt;
+
+    // Node doesnt have any file attributes.
+    if (fileattrstring.empty())
+        return std::nullopt;
+
+    // Convenience.
+    auto fileKey = reinterpret_cast<std::uint32_t*>(nodekey.data() + FILENODEKEYLENGTH / 2);
+
+    // Try and retrieve the specified property.
+    return MediaProperties::getMediaProperty(fileattrstring, fileKey, selector);
+}
+
 int MegaNodePrivate::getDuration()
 {
-    if (type == MegaNode::TYPE_FILE && nodekey.size() == FILENODEKEYLENGTH && fileattrstring.size())
-    {
-        uint32_t* attrKey = (uint32_t*)(nodekey.data() + FILENODEKEYLENGTH / 2);
-        MediaProperties mediaProperties = MediaProperties::decodeMediaPropertiesAttributes(fileattrstring, attrKey);
-        if (mediaProperties.shortformat != 255 // 255 = MediaInfo failed processing the file
-                && mediaProperties.shortformat != 254 // 254 = No information available
-                && mediaProperties.playtime > 0)
-        {
-            return static_cast<int>(mediaProperties.playtime);
-        }
-    }
+    if (auto playtime = getMediaProperty(&MediaProperties::playtime); playtime && *playtime)
+        return static_cast<int>(*playtime);
 
     return duration;
 }
@@ -817,80 +845,44 @@ int MegaNodePrivate::getLabel()
 
 int MegaNodePrivate::getWidth()
 {
-    if (width == -1)    // not initialized yet, or not available
-    {
-        if (type == MegaNode::TYPE_FILE && nodekey.size() == FILENODEKEYLENGTH && fileattrstring.size())
-        {
-            uint32_t* attrKey = (uint32_t*)(nodekey.data() + FILENODEKEYLENGTH / 2);
-            MediaProperties mediaProperties = MediaProperties::decodeMediaPropertiesAttributes(fileattrstring, attrKey);
-            if (mediaProperties.shortformat != 255 // 255 = MediaInfo failed processing the file
-                    && mediaProperties.shortformat != 254 // 254 = No information available
-                    && mediaProperties.width > 0)
-            {
-                width = static_cast<int>(mediaProperties.width);
-            }
-        }
-    }
+    if (width >= 0)
+        return width;
+
+    if (auto w = getMediaProperty(&MediaProperties::width); w && *w)
+        width = static_cast<int>(*w);
 
     return width;
 }
 
 int MegaNodePrivate::getHeight()
 {
-    if (height == -1)    // not initialized yet, or not available
-    {
-        if (type == MegaNode::TYPE_FILE && nodekey.size() == FILENODEKEYLENGTH && fileattrstring.size())
-        {
-            uint32_t* attrKey = (uint32_t*)(nodekey.data() + FILENODEKEYLENGTH / 2);
-            MediaProperties mediaProperties = MediaProperties::decodeMediaPropertiesAttributes(fileattrstring, attrKey);
-            if (mediaProperties.shortformat != 255 // 255 = MediaInfo failed processing the file
-                    && mediaProperties.shortformat != 254 // 254 = No information available
-                    && mediaProperties.height > 0)
-            {
-                height = static_cast<int>(mediaProperties.height);
-            }
-        }
-    }
+    if (height >= 0)
+        return height;
+
+    if (auto h = getMediaProperty(&MediaProperties::height); h && *h)
+        height = static_cast<int>(*h);
 
     return height;
 }
 
 int MegaNodePrivate::getShortformat()
 {
-    if (shortformat == -1)    // not initialized yet, or not available
-    {
-        if (type == MegaNode::TYPE_FILE && nodekey.size() == FILENODEKEYLENGTH && fileattrstring.size())
-        {
-            uint32_t* attrKey = (uint32_t*)(nodekey.data() + FILENODEKEYLENGTH / 2);
-            MediaProperties mediaProperties = MediaProperties::decodeMediaPropertiesAttributes(fileattrstring, attrKey);
-            if (mediaProperties.shortformat != 255 // 255 = MediaInfo failed processing the file
-                && mediaProperties.shortformat != 254 // 254 = No information available
-                && mediaProperties.shortformat > 0)
-            {
-                shortformat = mediaProperties.shortformat;
-            }
-        }
-    }
+    if (shortformat >= 0)
+        return shortformat;
+
+    if (auto sf = getMediaProperty(&MediaProperties::shortformat); sf)
+        shortformat = *sf;
 
     return shortformat;
 }
 
 int MegaNodePrivate::getVideocodecid()
 {
-    if (videocodecid == -1)    // not initialized yet, or not available
-    {
-        if (type == MegaNode::TYPE_FILE && nodekey.size() == FILENODEKEYLENGTH && fileattrstring.size())
-        {
-            uint32_t* attrKey = (uint32_t*)(nodekey.data() + FILENODEKEYLENGTH / 2);
-            MediaProperties mediaProperties = MediaProperties::decodeMediaPropertiesAttributes(fileattrstring, attrKey);
-            if (mediaProperties.shortformat != 255 // 255 = MediaInfo failed processing the file
-                && mediaProperties.shortformat != 254 // 254 = No information available
-                && mediaProperties.videocodecid > 0)
-            {
-                videocodecid = static_cast<int>(mediaProperties.videocodecid);
-            }
-        }
-    }
+    if (videocodecid >= 0)
+        return videocodecid;
+
+    if (auto vc = getMediaProperty(&MediaProperties::videocodecid); vc && *vc)
+        videocodecid = static_cast<int>(*vc);
 
     return videocodecid;
 }
@@ -1346,26 +1338,34 @@ EncryptFilePieceByChunks::EncryptFilePieceByChunks(FileAccess *cFain, m_off_t cI
 {
 }
 
-byte *EncryptFilePieceByChunks::nextbuffer(unsigned bufsize)
+byte* EncryptFilePieceByChunks::nextbuffer(size_t bufsize)
 {
     if (lastsize)
     {
         // write the last encrypted chunk
-        if (!faout->fwrite((byte*)buffer.data(), lastsize, outpos))
+        if (!faout->fwrite((byte*)buffer.data(),
+                           // EncryptByChunks writes one chunk at a time, bounded by ChunkedHash.
+                           static_cast<unsigned>(lastsize),
+                           outpos))
         {
             return NULL;
         }
-        outpos += lastsize;
+        outpos += static_cast<m_off_t>(lastsize);
     }
 
     buffer.resize(bufsize + SymmCipher::BLOCKSIZE);
     memset((void*)(buffer.data() + bufsize), 0, SymmCipher::BLOCKSIZE);
-    if (!fain->frawread((byte*)buffer.data(), bufsize, inpos, false, FSLogging::logOnError))
+    if (!fain->frawread((byte*)buffer.data(),
+                        // EncryptByChunks reads one chunk at a time, bounded by ChunkedHash.
+                        static_cast<unsigned>(bufsize),
+                        inpos,
+                        false,
+                        FSLogging::logOnError))
     {
         return NULL;
     }
     lastsize = bufsize;
-    inpos += bufsize;
+    inpos += static_cast<m_off_t>(bufsize);
     return (byte*)buffer.data();
 }
 
@@ -4467,6 +4467,9 @@ MegaRequestPrivate::MegaRequestPrivate(MegaRequestPrivate *request)
         request->mMegaDiscountCodeList ? request->mMegaDiscountCodeList->copy() : nullptr);
     this->mMegaDiscountCodeInfo.reset(
         request->mMegaDiscountCodeInfo ? request->mMegaDiscountCodeInfo->copy() : nullptr);
+    this->mMegaFileServiceReclaimOptions.reset(request->mMegaFileServiceReclaimOptions ?
+                                                   request->mMegaFileServiceReclaimOptions->copy() :
+                                                   nullptr);
 }
 
 std::shared_ptr<AccountDetails> MegaRequestPrivate::getAccountDetails() const
@@ -5471,6 +5474,16 @@ void MegaRequestPrivate::setMegaDiscountCodeInfo(
     std::unique_ptr<MegaDiscountCodeInfo> discountCodeInfo)
 {
     mMegaDiscountCodeInfo = std::move(discountCodeInfo);
+}
+
+const MegaFileServiceReclaimOptions* MegaRequestPrivate::getMegaFileServiceReclaimOptions() const
+{
+    return mMegaFileServiceReclaimOptions.get();
+}
+
+void MegaRequestPrivate::setMegaFileServiceReclaimOptions(MegaFileServiceReclaimOptions* options)
+{
+    mMegaFileServiceReclaimOptions.reset(options);
 }
 
 bool MegaRequestPrivate::causesLocklessRequest(const int type)
@@ -7093,6 +7106,7 @@ void MegaApiImpl::init(MegaApi* publicApi,
     httpServer = NULL;
     httpServerMaxBufferSize = 0;
     httpServerMaxOutputSize = 0;
+    httpServerThrottleBitrateBps = 0;
     httpServerEnableFiles = true;
     httpServerEnableFolders = false;
     httpServerOfflineAttributeEnabled = false;
@@ -10710,7 +10724,11 @@ int MegaApiImpl::syncPathState(string* platformEncoded)
                 SyncConfig sc;
                 if (mc->syncs.getSyncStateForLocalPath(p, ts, nt, sc))
                 {
-                    mc->app->syncupdate_treestate(sc, p, ts, nt);
+                    mc->syncs.queueClient(
+                        [sc = std::move(sc), p, ts, nt](MegaClient& mc, TransferDbCommitter&)
+                        {
+                            mc.app->syncupdate_treestate(sc, p, ts, nt);
+                        });
                 }
             }
             LOG_verbose << "Completed updates for OS path icon ovelays for . " << tmp->size() << " paths";
@@ -11480,6 +11498,20 @@ int MegaApiImpl::httpServerGetMaxOutputSize()
     }
 }
 
+void MegaApiImpl::httpServerSetThrottleBitrate(unsigned long long bitrateBps)
+{
+    LOG_debug << "[Throttle] httpServerSetThrottleBitrate: " << httpServerThrottleBitrateBps
+              << " -> " << bitrateBps << " bps"
+              << " (" << (bitrateBps / 8 / 1024 / 1024) << " MB/s)";
+
+    httpServerThrottleBitrateBps = bitrateBps;
+}
+
+unsigned long long MegaApiImpl::httpServerGetThrottleBitrate()
+{
+    return httpServerThrottleBitrateBps;
+}
+
 void MegaApiImpl::httpServerEnableFileServer(bool enable)
 {
     SdkMutexGuard g(sdkMutex);
@@ -11572,57 +11604,6 @@ bool MegaApiImpl::httpServerIsLocalOnly()
         localOnly = httpServer->isLocalOnly();
     }
     return localOnly;
-}
-
-void MegaApiImpl::httpServerAddListener(MegaTransferListener *listener)
-{
-    if (!listener)
-    {
-        return;
-    }
-
-    SdkMutexGuard g(sdkMutex);
-    httpServerListeners.insert(listener);
-}
-
-void MegaApiImpl::httpServerRemoveListener(MegaTransferListener *listener)
-{
-    if (!listener)
-    {
-        return;
-    }
-
-    SdkMutexGuard g(sdkMutex);
-    httpServerListeners.erase(listener);
-}
-
-void MegaApiImpl::fireOnStreamingStart(MegaTransferPrivate *transfer)
-{
-    for(set<MegaTransferListener *>::iterator it = httpServerListeners.begin(); it != httpServerListeners.end() ; it++)
-        (*it)->onTransferStart(api, transfer);
-}
-
-void MegaApiImpl::fireOnStreamingTemporaryError(MegaTransferPrivate *transfer, unique_ptr<MegaErrorPrivate> e)
-{
-    for(set<MegaTransferListener *>::iterator it = httpServerListeners.begin(); it != httpServerListeners.end() ; it++)
-        (*it)->onTransferTemporaryError(api, transfer, e.get());
-}
-
-void MegaApiImpl::fireOnStreamingFinish(MegaTransferPrivate *transfer, unique_ptr<MegaErrorPrivate> e)
-{
-    if(e->getErrorCode())
-    {
-        LOG_warn << "Streaming request finished with error: " << e->getErrorString();
-    }
-    else
-    {
-        LOG_info << "Streaming request finished";
-    }
-
-    for(set<MegaTransferListener *>::iterator it = httpServerListeners.begin(); it != httpServerListeners.end() ; it++)
-        (*it)->onTransferFinish(api, transfer, e.get());
-
-    delete transfer;
 }
 
 bool MegaApiImpl::ftpServerStart(bool localOnly, int port, int dataportBegin, int dataPortEnd, bool useTLS, const char *certificatepath, const char *keypath)
@@ -14905,6 +14886,7 @@ std::unique_ptr<MegaPushNotificationSettingsPrivate> MegaApiImpl::getMegaPushNot
 
 MegaSyncPrivate* MegaApiImpl::cachedMegaSyncPrivateByBackupId(const SyncConfig& config)
 {
+    ensureIsMegaApiImplThread();
     if (mCachedMegaSyncPrivate && config.mBackupId == mCachedMegaSyncPrivate->getBackupId())
     {
         return mCachedMegaSyncPrivate.get();
@@ -14916,6 +14898,7 @@ MegaSyncPrivate* MegaApiImpl::cachedMegaSyncPrivateByBackupId(const SyncConfig& 
 
 void MegaApiImpl::syncupdate_stateconfig(const SyncConfig& config)
 {
+    ensureIsMegaApiImplThread();
     mCachedMegaSyncPrivate.reset();
 
     mRecentlyNotifiedOverlayIconPaths.clear();
@@ -14929,30 +14912,35 @@ void MegaApiImpl::syncupdate_stateconfig(const SyncConfig& config)
 
 void MegaApiImpl::syncupdate_stats(handle backupId, const PerSyncStats& stats)
 {
+    ensureIsMegaApiImplThread();
     MegaSyncStatsPrivate msp(backupId, stats);
     fireOnSyncStatsUpdated(&msp);
 }
 
 void MegaApiImpl::syncupdate_scanning(bool scanning)
 {
+    ensureIsMegaApiImplThread();
     receivedScanningStateFlag.store(scanning);
     fireOnGlobalSyncStateChanged();
 }
 
 void MegaApiImpl::syncupdate_stalled(bool stalled)
 {
+    ensureIsMegaApiImplThread();
     receivedStallFlag.store(stalled);
     fireOnGlobalSyncStateChanged();
 }
 
 void MegaApiImpl::syncupdate_conflicts(bool conflicts)
 {
+    ensureIsMegaApiImplThread();
     receivedNameConflictsFlag.store(conflicts);
     fireOnGlobalSyncStateChanged();
 }
 
 void MegaApiImpl::syncupdate_totalstalls(bool totalstalls)
 {
+    ensureIsMegaApiImplThread();
     receivedTotalStallsFlag.store(totalstalls);
     if (totalstalls)
     {
@@ -14962,6 +14950,7 @@ void MegaApiImpl::syncupdate_totalstalls(bool totalstalls)
 
 void MegaApiImpl::syncupdate_totalconflicts(bool totalconflicts)
 {
+    ensureIsMegaApiImplThread();
     receivedTotalNameConflictsFlag.store(totalconflicts);
     if (totalconflicts)
     {
@@ -14971,12 +14960,14 @@ void MegaApiImpl::syncupdate_totalconflicts(bool totalconflicts)
 
 void MegaApiImpl::syncupdate_syncing(bool syncing)
 {
+    ensureIsMegaApiImplThread();
     receivedSyncingStateFlag.store(syncing);
     fireOnGlobalSyncStateChanged();
 }
 
 void MegaApiImpl::syncupdate_treestate(const SyncConfig &config, const LocalPath& lp, treestate_t ts, nodetype_t)
 {
+    ensureIsMegaApiImplThread();
     mRecentlyNotifiedOverlayIconPaths.addOrUpdate(lp, ts);
     mRecentlyRequestedOverlayIconPaths.overwriteExisting(lp, ts);
 
@@ -14991,6 +14982,7 @@ void MegaApiImpl::syncupdate_treestate(const SyncConfig &config, const LocalPath
 
 void MegaApiImpl::sync_removed(const SyncConfig& config)
 {
+    ensureIsMegaApiImplThread();
     mRecentlyNotifiedOverlayIconPaths.clear();
     mRecentlyRequestedOverlayIconPaths.clear();
 
@@ -15000,6 +14992,7 @@ void MegaApiImpl::sync_removed(const SyncConfig& config)
 
 void MegaApiImpl::sync_added(const SyncConfig& config)
 {
+    ensureIsMegaApiImplThread();
     mCachedMegaSyncPrivate.reset();
 
     auto megaSync = cachedMegaSyncPrivateByBackupId(config);
@@ -15009,6 +15002,7 @@ void MegaApiImpl::sync_added(const SyncConfig& config)
 
 void MegaApiImpl::syncupdate_remote_root_changed(const SyncConfig &config)
 {
+    ensureIsMegaApiImplThread();
     mCachedMegaSyncPrivate.reset();
 
     if (auto megaSync = cachedMegaSyncPrivateByBackupId(config))
@@ -15019,6 +15013,7 @@ void MegaApiImpl::syncupdate_remote_root_changed(const SyncConfig &config)
 
 void MegaApiImpl::syncs_restored(SyncError syncError)
 {
+    ensureIsMegaApiImplThread();
     mCachedMegaSyncPrivate.reset();
     MegaEventPrivate *event = new MegaEventPrivate(MegaEvent::EVENT_SYNCS_RESTORED);
     event->setNumber(syncError);
@@ -15027,6 +15022,7 @@ void MegaApiImpl::syncs_restored(SyncError syncError)
 
 void MegaApiImpl::syncs_disabled(SyncError syncError)
 {
+    ensureIsMegaApiImplThread();
     mCachedMegaSyncPrivate.reset();
     MegaEventPrivate *event = new MegaEventPrivate(MegaEvent::EVENT_SYNCS_DISABLED);
     event->setNumber(syncError);
@@ -15870,6 +15866,7 @@ void MegaApiImpl::copysession_result(string *session, error e)
 void MegaApiImpl::clearing()
 {
 #ifdef ENABLE_SYNC
+    ensureIsMegaApiImplThread();
     mCachedMegaSyncPrivate.reset();
 #endif
 }
@@ -16196,6 +16193,7 @@ void MegaApiImpl::login_result(error result)
 
 void MegaApiImpl::logout_result(error e, MegaRequestPrivate* request)
 {
+    ensureIsMegaApiImplThread();
     if(!e || e == API_ESID)
     {
         requestMap.erase(request->getTag());
@@ -17795,12 +17793,9 @@ void MegaApiImpl::fireOnRequestStart(MegaRequestPrivate *request)
 
 void MegaApiImpl::fireOnRequestFinish(MegaRequestPrivate* request,
                                       unique_ptr<MegaErrorPrivate> e,
-                                      [[maybe_unused]] bool callbackIsFromSyncThread)
+                                      [[maybe_unused]] bool callbackIsFromOtherThread)
 {
-    assert(callbackIsFromSyncThread || threadId == std::this_thread::get_id());
-#ifdef ENABLE_SYNC
-    assert(!callbackIsFromSyncThread || client->syncs.onSyncThread());
-#endif
+    assert(callbackIsFromOtherThread || threadId == std::this_thread::get_id());
 
     // call from other threads like sync thread. Push to requestQueue with performFireOnRequestFinish assigned,
     // all fireOneRequestFinish is therefore handled in sendPendingRequests processed by a single thread.
@@ -18195,7 +18190,6 @@ void MegaApiImpl::fireOnEvent(MegaEventPrivate *event)
 void MegaApiImpl::fireOnSyncStateChanged(MegaSyncPrivate *sync)
 {
     assert(sync->getBackupId() != INVALID_HANDLE);
-    assert(client->syncs.onSyncThread());
     for(set<MegaListener *>::iterator it = listeners.begin(); it != listeners.end() ;)
     {
         (*it++)->onSyncStateChanged(api, sync);
@@ -18205,7 +18199,6 @@ void MegaApiImpl::fireOnSyncStateChanged(MegaSyncPrivate *sync)
 void MegaApiImpl::fireOnSyncStatsUpdated(MegaSyncStatsPrivate *stats)
 {
     assert(stats->getBackupId() != INVALID_HANDLE);
-    assert(client->syncs.onSyncThread());
     for(set<MegaListener *>::iterator it = listeners.begin(); it != listeners.end() ;)
     {
         (*it++)->onSyncStatsUpdated(api, stats);
@@ -18215,7 +18208,6 @@ void MegaApiImpl::fireOnSyncStatsUpdated(MegaSyncStatsPrivate *stats)
 void MegaApiImpl::fireOnSyncAdded(MegaSyncPrivate *sync)
 {
     assert(sync->getBackupId() != INVALID_HANDLE);
-    assert(client->syncs.onSyncThread());
     for(set<MegaListener *>::iterator it = listeners.begin(); it != listeners.end() ;)
     {
         (*it++)->onSyncAdded(api, sync);
@@ -18225,7 +18217,6 @@ void MegaApiImpl::fireOnSyncAdded(MegaSyncPrivate *sync)
 void MegaApiImpl::fireOnSyncRemoteRootChanged(MegaSyncPrivate* sync)
 {
     assert(sync->getBackupId() != INVALID_HANDLE);
-    assert(client->syncs.onSyncThread());
     for (set<MegaListener*>::iterator it = listeners.begin(); it != listeners.end();)
     {
         (*it++)->onSyncRemoteRootChanged(api, sync);
@@ -18235,7 +18226,6 @@ void MegaApiImpl::fireOnSyncRemoteRootChanged(MegaSyncPrivate* sync)
 void MegaApiImpl::fireOnSyncDeleted(MegaSyncPrivate *sync)
 {
     assert(sync->getBackupId() != INVALID_HANDLE);
-    assert(client->syncs.onSyncThread());
     for(set<MegaListener *>::iterator it = listeners.begin(); it != listeners.end() ;)
     {
         (*it++)->onSyncDeleted(api, sync);
@@ -18244,7 +18234,6 @@ void MegaApiImpl::fireOnSyncDeleted(MegaSyncPrivate *sync)
 
 void MegaApiImpl::fireOnGlobalSyncStateChanged()
 {
-    assert(client->syncs.onSyncThread());
     for(set<MegaListener *>::iterator it = listeners.begin(); it != listeners.end() ;)
     {
         (*it++)->onGlobalSyncStateChanged(api);
@@ -18259,7 +18248,6 @@ void MegaApiImpl::fireOnGlobalSyncStateChanged()
 void MegaApiImpl::fireOnFileSyncStateChanged(MegaSyncPrivate *sync, string *localPath, int newState)
 {
     assert(sync->getBackupId() != INVALID_HANDLE);
-    assert(client->syncs.onSyncThread());
     for(set<MegaListener *>::iterator it = listeners.begin(); it != listeners.end() ;)
     {
         (*it++)->onSyncFileStateChanged(api, sync, localPath, newState);
@@ -29697,6 +29685,113 @@ void MegaApiImpl::getDiscountCodeInformation(const char* discountCode,
     waiter->notify();
 }
 
+MegaFileServiceReclaimOptions* MegaApiImpl::fileServiceGetReclaimOptions()
+{
+    const auto options = client->mFileService.reclaimOptions();
+
+    return new MegaFileServiceReclaimOptionsPrivate(options);
+}
+
+void MegaApiImpl::fileServiceSetReclaimOptions(const MegaFileServiceReclaimOptions* options)
+{
+    if (!options)
+        return;
+
+    auto* optionsImpl = dynamic_cast<const MegaFileServiceReclaimOptionsPrivate*>(options);
+
+    assert(optionsImpl);
+
+    if (!optionsImpl)
+        return;
+
+    client->mFileService.reclaimOptions(optionsImpl->getOptions());
+}
+
+static file_service::ReclaimOptions
+    toReclaimOptions(const MegaFileServiceReclaimOptions* inputOptions)
+{
+    assert(inputOptions);
+    file_service::ReclaimOptions reclaimOptions;
+    reclaimOptions.mAgeThreshold = std::chrono::minutes(inputOptions->getAgeThreshold());
+    reclaimOptions.mBatchSize = inputOptions->getBatchSize();
+    reclaimOptions.mDelay = std::chrono::seconds(inputOptions->getDelay());
+    reclaimOptions.mPeriod = std::chrono::seconds(inputOptions->getPeriod());
+
+    if (const auto reclaimThreshold = inputOptions->getReclaimThreshold(); reclaimThreshold >= 0)
+        reclaimOptions.mReclaimThreshold = static_cast<uint64_t>(reclaimThreshold);
+    else
+        reclaimOptions.mReclaimThreshold = std::nullopt;
+
+    reclaimOptions.mReclaimTarget = inputOptions->getReclaimTarget();
+    return reclaimOptions;
+}
+
+void MegaApiImpl::fileServiceReclaim(const MegaFileServiceReclaimOptions* options,
+                                     MegaRequestListener* listener)
+{
+    auto request =
+        std::make_unique<MegaRequestPrivate>(MegaRequest::TYPE_FILE_SERVICE_RECLAIM, listener);
+
+    if (options)
+        request->setMegaFileServiceReclaimOptions(options->copy());
+
+    // Reclaim result callback
+    auto callback =
+        [this, r = request.get()](file_service::FileServiceResultOr<std::uint64_t> result)
+    {
+        auto error = std::make_unique<MegaErrorPrivate>(result ? API_OK : API_EINTERNAL);
+        r->setTotalBytes(static_cast<long long>(result.valueOr(0)));
+        this->fireOnRequestFinish(r, std::move(error), true);
+    };
+
+    request->performRequest = [this, callback = std::move(callback), request = request.get()]()
+    {
+        file_service::ReclaimOptions reclaimOptions;
+        if (auto* inputOptions = request->getMegaFileServiceReclaimOptions())
+        {
+            // Use input options
+            reclaimOptions = toReclaimOptions(inputOptions);
+        }
+        else
+        {
+            // Use current file service options
+            reclaimOptions = client->mFileService.reclaimOptions();
+
+            // Set and let reclaim can run immediately by set mReclaimThreshold to 0
+            reclaimOptions.mReclaimThreshold = 0;
+        }
+
+        // Start a reclaim task
+        const auto ret = this->client->mFileService.reclaim(std::move(callback), reclaimOptions);
+        // Started successfully or not
+        return ret == file_service::FILE_SERVICE_SUCCESS ? API_OK : API_EINTERNAL;
+    };
+
+    requestQueue.push(std::move(request));
+    waiter->notify();
+}
+
+MegaFileServiceStorageInfo*
+    MegaApiImpl::fileServiceGetStorageInfo(const MegaFileServiceReclaimOptions* options)
+{
+    // Default
+    file_service::ReclaimOptions* reclaimOptionsPtr = nullptr;
+
+    // There is input options
+    file_service::ReclaimOptions reclaimOptions;
+    if (options)
+    {
+        reclaimOptions = toReclaimOptions(options);
+        reclaimOptionsPtr = &reclaimOptions;
+    }
+
+    const auto storageInfo = client->mFileService.storageInfo(reclaimOptionsPtr);
+    if (!storageInfo)
+        return nullptr;
+
+    return new MegaFileServiceStorageInfoPrivate(*storageInfo);
+}
+
 /* END MEGAAPIIMPL */
 
 int TransferQueue::getLastPushedTag() const
@@ -30608,6 +30703,28 @@ bool mega::MegaPricingPrivate::hasMobileOfferUat(int productIndex) const
     return {};
 }
 
+std::string mega::MegaPricingPrivate::getMobileOfferLabel(int productIndex) const
+{
+    if (auto index = static_cast<size_t>(productIndex);
+        index < products.size() && products[index].mobileOffer.has_value())
+    {
+        return products[index].mobileOffer->label;
+    }
+
+    return {};
+}
+
+int mega::MegaPricingPrivate::getMobileOfferDiscountPercentage(int productIndex) const
+{
+    if (auto index = static_cast<size_t>(productIndex);
+        index < products.size() && products[index].mobileOffer.has_value())
+    {
+        return products[index].mobileOffer->discountPercentage;
+    }
+
+    return 0;
+}
+
 const char *MegaPricingPrivate::getDescription(int productIndex)
 {
     if (productIndex >= 0 && static_cast<unsigned int>(productIndex) < products.size())
@@ -30816,7 +30933,7 @@ int MegaPricingPrivate::getGBPerTransfer(int productIndex)
 
 MegaStringIntegerMap* MegaPricingPrivate::getFeatures(int productIndex) const
 {
-    if ((unsigned)productIndex > products.size())
+    if ((unsigned)productIndex >= products.size())
     {
         return nullptr;
     }
@@ -33731,6 +33848,8 @@ void StreamingBuffer::calcMaxBufferAndMaxOutputSize()
     maxBufferSize = (std::max(maxBufferSize, minNeededBufferSize) / maxReadChunkSize) * maxReadChunkSize;
     // Set max outputSize depending on maxDeliveryChunksPerByteRate. Limit is maxBufferSize.
     maxOutputSize = std::min(maxDeliveryChunksPerByteRate * maxReadChunkSize, maxBufferSize);
+    // Limit single TCP write size to 128KB for throttled delivery
+    maxOutputSize = std::min(maxOutputSize, static_cast<size_t>(1u << 17));
 }
 
 void StreamingBuffer::reset(bool freeData, size_t sizeToReset)
@@ -34275,6 +34394,11 @@ int MegaTCPServer::getPort()
     return port;
 }
 
+uv_loop_t* MegaTCPServer::getUvLoop()
+{
+    return &uv_loop;
+}
+
 bool MegaTCPServer::isLocalOnly()
 {
     return localOnly;
@@ -34485,12 +34609,9 @@ void MegaTCPServer::onNewClient_tls(uv_stream_t *server_handle, int status)
     }
 
     // Create an object to save context information
-    MegaTCPContext* tcpctx = ((MegaTCPServer *)server_handle->data)->initializeContext(server_handle);
+    auto tcpctx = ((MegaTCPServer*)server_handle->data)->initializeContext(server_handle);
 
     LOG_debug << "Connection received at port " << tcpctx->server->port << " ! " << tcpctx->server->connections.size();
-
-    // Mutex to protect the data buffer
-    uv_mutex_init(&tcpctx->mutex);
 
     // Async handle to perform writes
     uv_async_init(&tcpctx->server->uv_loop, &tcpctx->asynchandle, onAsyncEvent);
@@ -34506,7 +34627,7 @@ void MegaTCPServer::onNewClient_tls(uv_stream_t *server_handle, int status)
 
     tcpctx->evt_tls = evt_ctx_get_tls(&tcpctx->server->evtctx);
     assert(tcpctx->evt_tls != NULL);
-    tcpctx->evt_tls->data = tcpctx;
+    tcpctx->evt_tls->data = tcpctx.get();
     if (evt_tls_accept(tcpctx->evt_tls, on_hd_complete))
     {
         LOG_err << "evt_tls_accept failed";
@@ -34514,9 +34635,9 @@ void MegaTCPServer::onNewClient_tls(uv_stream_t *server_handle, int status)
         return;
     }
 
-    tcpctx->server->connections.push_back(tcpctx);
+    tcpctx->server->connections.add(tcpctx);
 
-    tcpctx->server->readData(tcpctx);
+    tcpctx->server->readData(tcpctx.get());
 }
 #endif
 
@@ -34544,12 +34665,10 @@ void MegaTCPServer::onNewClient(uv_stream_t* server_handle, int status)
     }
 
     // Create an object to save context information
-    MegaTCPContext* tcpctx = ((MegaTCPServer *)server_handle->data)->initializeContext(server_handle);
+    auto tcpctx = ((MegaTCPServer*)server_handle->data)->initializeContext(server_handle);
 
-    LOG_debug << "Connection received at port " << tcpctx->server->port << "! " << tcpctx->server->connections.size() << " tcpctx = " << tcpctx;
-
-    // Mutex to protect the data buffer
-    uv_mutex_init(&tcpctx->mutex);
+    LOG_debug << "Connection received at port " << tcpctx->server->port << "! "
+              << tcpctx->server->connections.size() << " tcpctx = " << tcpctx.get();
 
     // Async handle to perform writes
     uv_async_init(&tcpctx->server->uv_loop, &tcpctx->asynchandle, onAsyncEvent);
@@ -34563,11 +34682,18 @@ void MegaTCPServer::onNewClient(uv_stream_t* server_handle, int status)
         return;
     }
 
-    tcpctx->server->connections.push_back(tcpctx);
-    if (tcpctx->server->respondNewConnection(tcpctx))
+    if (!tcpctx->server->connections.add(tcpctx))
+    {
+        assert(false); // Shouldn't happen. It is usually a bug.
+        LOG_err << "Adding tcpctx to connections failed";
+        onClose((uv_handle_t*)&tcpctx->tcphandle);
+        return;
+    }
+
+    if (tcpctx->server->respondNewConnection(tcpctx.get()))
     {
         // Start reading
-        tcpctx->server->readData(tcpctx);
+        tcpctx->server->readData(tcpctx.get());
     }
 }
 
@@ -34626,7 +34752,12 @@ void MegaTCPServer::onClose(uv_handle_t* handle)
     tcpctx->megaApi->removeTransferListener(tcpctx);
     tcpctx->megaApi->removeRequestListener(tcpctx);
 
-    tcpctx->server->connections.remove(tcpctx);
+    // Move from connections to closingConnections to keep tcpctx alive until onAsyncEventClose
+    if (auto tcpCtxPtr = tcpctx->server->connections.release(tcpctx); tcpCtxPtr)
+    {
+        tcpctx->server->closingConnections[tcpctx] = std::move(tcpCtxPtr);
+    }
+
     LOG_debug << "Connection closed: " << tcpctx->server->connections.size() << " port = " << tcpctx->server->port << " closing async handle";
     uv_close((uv_handle_t *)&tcpctx->asynchandle, onAsyncEventClose);
 }
@@ -34649,9 +34780,10 @@ void MegaTCPServer::onAsyncEventClose(uv_handle_t *handle)
         uv_sem_post(&tcpctx->server->semaphoreEnd);
     }
 
-    uv_mutex_destroy(&tcpctx->mutex);
-    delete tcpctx;
-    LOG_debug << "Connection deleted, port = " << port;
+    // Now it's safe to release the shared_ptr - this will destroy tcpctx if it's the last reference
+    tcpctx->server->closingConnections.erase(tcpctx);
+
+    LOG_debug << "Connection cleanup completed, port = " << port;
 }
 
 #ifdef ENABLE_EVT_TLS
@@ -34739,10 +34871,15 @@ MegaTCPContext::MegaTCPContext()
 #endif
     server = NULL;
     megaApi = NULL;
+
+    // Mutex to protect the data buffer
+    uv_mutex_init(&mutex);
 }
 
 MegaTCPContext::~MegaTCPContext()
 {
+    uv_mutex_destroy(&mutex);
+
 #ifdef ENABLE_EVT_TLS
     if (evt_tls)
     {
@@ -34750,7 +34887,7 @@ MegaTCPContext::~MegaTCPContext()
     }
 #endif
 
-    if(!finished) // Set listener pointers to NULL upon premature destruction
+    if (!finished && megaApi) // Set listener pointers to NULL upon premature destruction
     {
         megaApi->removeTransferListener(this);
         megaApi->removeRequestListener(this);
@@ -34796,9 +34933,8 @@ void MegaTCPServer::onCloseRequested(uv_async_t *handle)
 
     tcpServer->closing = true;
 
-    for (list<MegaTCPContext*>::iterator it = tcpServer->connections.begin(); it != tcpServer->connections.end(); it++)
+    for (auto& tcpctx: tcpServer->connections.copy())
     {
-        MegaTCPContext *tcpctx = (*it);
         closeTCPConnection(tcpctx);
     }
 
@@ -34881,9 +35017,9 @@ MegaHTTPServer::MegaHTTPServer(MegaApiImpl *megaApi, string basePath, bool useTL
     this->subtitlesSupportEnabled = false;
 }
 
-MegaTCPContext * MegaHTTPServer::initializeContext(uv_stream_t *server_handle)
+MegaTCPContextPtr MegaHTTPServer::initializeContext(uv_stream_t* server_handle)
 {
-    MegaHTTPContext* httpctx = new MegaHTTPContext();
+    shared_ptr<MegaHTTPContext> httpctx = std::make_shared<MegaHTTPContext>();
 
     // Initialize the parser
     http_parser_init(&httpctx->parser, HTTP_REQUEST);
@@ -34893,9 +35029,9 @@ MegaTCPContext * MegaHTTPServer::initializeContext(uv_stream_t *server_handle)
 
     httpctx->server = httpServer;
     httpctx->megaApi = httpServer->megaApi;
-    httpctx->parser.data = httpctx;
-    httpctx->tcphandle.data = httpctx;
-    httpctx->asynchandle.data = httpctx;
+    httpctx->parser.data = httpctx.get();
+    httpctx->tcphandle.data = httpctx.get();
+    httpctx->asynchandle.data = httpctx.get();
 
     return httpctx;
 }
@@ -34934,6 +35070,34 @@ void MegaHTTPServer::processReceivedData(MegaTCPContext *tcpctx, ssize_t nread, 
     }
 }
 
+using file_service::FileID;
+using file_service::FileResultOr;
+using file_service::FileStreamDataCallback;
+using file_service::FileStreamResult;
+
+// A work continue stream for uv_work_queue, as it may take times
+// Only when all result data has been consumed
+static void continueStream(uv_work_t* req)
+{
+    assert(req->data);
+
+    if (!req->data)
+        return;
+
+    auto result = (FileStreamResult*)req->data;
+    if (result->mContinue)
+        result->mContinue(result->mLength);
+}
+
+// Callback for the work continue stream
+static void afterContinueStream(uv_work_t* req, int)
+{
+    if (req->data)
+        delete (FileStreamResult*)req->data;
+
+    delete req;
+}
+
 void MegaHTTPServer::processWriteFinished(MegaTCPContext* tcpctx, int status)
 {
     MegaHTTPContext* httpctx = dynamic_cast<MegaHTTPContext *>(tcpctx);
@@ -34948,6 +35112,7 @@ void MegaHTTPServer::processWriteFinished(MegaTCPContext* tcpctx, int status)
                 << " Remaining: " << (httpctx->size - httpctx->bytesWritten);
     httpctx->lastBuffer = NULL;
 
+    assert(httpctx->size >= httpctx->bytesWritten);
     if (status < 0 || httpctx->size == httpctx->bytesWritten)
     {
         if (status < 0)
@@ -34971,25 +35136,19 @@ void MegaHTTPServer::processWriteFinished(MegaTCPContext* tcpctx, int status)
     if (httpctx->lastBufferLen)
     {
         httpctx->streamingBuffer.freeData(httpctx->lastBufferLen);
+        httpctx->lastBufferLen = 0;
     }
 
-    if (httpctx->pause)
-    {
-        if (httpctx->streamingBuffer.availableSpace() >= DirectReadSlot::MAX_DELIVERY_CHUNK)
-        {
-            httpctx->pause = false;
-            m_off_t start = httpctx->rangeStart + httpctx->rangeWritten +
-                            static_cast<m_off_t>(httpctx->streamingBuffer.availableData());
-            m_off_t len = httpctx->rangeEnd - httpctx->rangeStart - httpctx->rangeWritten -
-                          static_cast<m_off_t>(httpctx->streamingBuffer.availableData());
+    // Or Streaming via file service may have pending result, check if we can process
+    std::unique_ptr<uv_work_t> continueWork = httpctx->processFileStreamResult();
 
-            LOG_debug << httpctx->getLogName() << "[Streaming] Resuming streaming from " << start
-                      << " len: " << len << " " << httpctx->streamingBuffer.bufferStatus();
-            httpctx->megaApi->startStreaming(httpctx->node, start, len, httpctx);
-        }
-    }
-    httpctx->lastBufferLen = 0;
     uv_mutex_unlock(&httpctx->mutex);
+
+    // Continue stream is slow operation, do it as a work
+    if (continueWork)
+    {
+        uv_queue_work(&uv_loop, continueWork.release(), &continueStream, &afterContinueStream);
+    }
 
     uv_async_send(&httpctx->asynchandle);
 }
@@ -35001,12 +35160,6 @@ void MegaHTTPServer::processOnAsyncEventClose(MegaTCPContext* tcpctx)
     if (httpctx->resultCode == API_EINTERNAL)
     {
         httpctx->resultCode = API_EINCOMPLETE;
-    }
-
-    if (httpctx->transfer)
-    {
-        httpctx->megaApi->cancelTransfer(httpctx->transfer.get());
-        httpctx->megaApi->fireOnStreamingFinish(httpctx->transfer.release(), std::make_unique<MegaErrorPrivate>(httpctx->resultCode)); // transfer will be deleted in fireOnStreamingFinish
     }
 
     delete httpctx->node;
@@ -35929,11 +36082,7 @@ int MegaHTTPServer::onMessageComplete(http_parser *parser)
                                           httpctx->nodekey.c_str());
             LOG_debug << httpctx->getLogName() << "Getting public link: " << link;
             httpctx->megaApi->getPublicNode(link.c_str(), httpctx);
-            httpctx->transfer.reset(new MegaTransferPrivate(MegaTransfer::TYPE_LOCAL_TCP_DOWNLOAD));
-            httpctx->transfer->setPath(httpctx->path.c_str());
-            httpctx->transfer->setFileName(httpctx->nodename.c_str());
-            httpctx->transfer->setNodeHandle(MegaApi::base64ToHandle(httpctx->nodehandle.c_str()));
-            httpctx->transfer->setStartTime(Waiter::ds);
+            // getPublicNode result is processed inside httpctx onRequestFinish
             return 0;
         }
     }
@@ -36564,24 +36713,165 @@ int MegaHTTPServer::onMessageComplete(http_parser *parser)
             return 0;
         }
 
-        httpctx->transfer.reset(new MegaTransferPrivate(MegaTransfer::TYPE_LOCAL_TCP_DOWNLOAD));
-        httpctx->transfer->setPath(httpctx->path.c_str());
-        if (httpctx->nodename.size())
-        {
-            httpctx->transfer->setFileName(httpctx->nodename.c_str());
-        }
-        if (httpctx->nodehandle.size())
-        {
-            httpctx->transfer->setNodeHandle(MegaApi::base64ToHandle(httpctx->nodehandle.c_str()));
-        }
-        httpctx->transfer->setStartTime(Waiter::ds);
-
         delete httpctx->node;
         httpctx->node = node;
         streamNode(httpctx);
     }
     delete baseNode;
     return 0;
+}
+
+bool MegaHTTPServer::startStream(MegaHTTPContext* httpctx,
+                                 std::uint64_t offset,
+                                 std::uint64_t length)
+{
+    // Sanity: node should never be null.
+    assert(httpctx->node);
+
+    // Convenience.
+    using file_service::FILE_SERVICE_FILE_DOESNT_EXIST;
+
+    auto& node = static_cast<MegaNodePrivate&>(*httpctx->node);
+    auto& service = httpctx->megaApi->getMegaClient()->mFileService;
+
+    // True if this file isn't owned directly by us.
+    auto external = node.isForeign() || node.isPublic();
+
+    // Assume the file's already known to the service.
+    auto handle = NodeHandle().set6byte(node.getHandle());
+    auto id = FileID::from(handle);
+
+    // Try and open the file for reading.
+    auto file = service.open(id);
+
+    // Couldn't open the file because it hasn't been added to the service.
+    if (external && !file && file.error() == FILE_SERVICE_FILE_DOESNT_EXIST)
+    {
+        // Convenience.
+        using common::fromCharPointer;
+        using common::fromStringPointer;
+        using common::NodeKeyData;
+        using file_service::FILE_SERVICE_FILE_ALREADY_EXISTS;
+
+        // Populate node key data.
+        NodeKeyData keyData;
+
+        // Populate authentication tokens.
+        keyData.mChatAuth = fromCharPointer(node.getChatAuth());
+        keyData.mPrivateAuth = fromStringPointer(node.getPrivateAuth());
+        keyData.mPublicAuth = fromStringPointer(node.getPublicAuth());
+
+        // Populate node key material.
+        if (auto* keyAndIV = node.getNodeKey(); !keyAndIV->empty())
+            keyData.mKeyAndIV = *keyAndIV;
+
+        // Remember whether the node is public or not.
+        keyData.mIsPublicHandle = node.isPublic();
+
+        // Sanity: size should never be negative.
+        assert(node.getSize() >= 0);
+
+        // Convenience.
+        auto size = static_cast<std::uint64_t>(node.getSize());
+
+        // Try and add the node to the service.
+        auto added = service.add(handle, keyData, size);
+
+        // Couldn't add the node to the service.
+        if (!added && added.error() != FILE_SERVICE_FILE_ALREADY_EXISTS)
+        {
+            LOG_err << "Failed to add file " << toNodeHandle(handle)
+                    << " to the service: " << toString(added.error());
+
+            return false;
+        }
+
+        // Try and open the file for reading.
+        file = service.open(*added);
+    }
+
+    // Couldn't open the file for reading.
+    if (!file)
+    {
+        LOG_err << "Failed to open file " << toNodeHandle(handle)
+                << " for streaming: " << toString(file.error());
+
+        return false;
+    }
+
+    auto callback =
+        [logName = httpctx->getLogName(), ctx = httpctx->weak_from_this(), offset, length](
+            FileResultOr<FileStreamResult> result)
+    {
+        auto ctxPtr = ctx.lock();
+        if (!ctxPtr)
+        {
+            LOG_warn << logName << "[Streaming] callback: httpctx has closed";
+            return;
+        }
+
+        // This check is nice to have, as the uv loop can change it after checking
+        if (ctxPtr->finished)
+        {
+            LOG_verbose << ctxPtr->logname << "[Streaming] callback: finished";
+            return;
+        }
+
+        if (!result)
+        {
+            LOG_info << ctxPtr->logname
+                     << "[Streaming] callback: stream return error: " << result.error();
+            ctxPtr->failed = true;
+            uv_async_send(&ctxPtr->asynchandle);
+            return;
+        }
+
+        const auto receivedLength = result->mLength;
+
+        LOG_verbose << ctxPtr->logname << "[Streaming] callback: requested [" << offset << ","
+                    << length << "] received " << receivedLength;
+
+        // All requested has been delivered
+        if (receivedLength == 0)
+        {
+            return;
+        }
+
+        // append the data to the buffer
+        uv_mutex_lock(&ctxPtr->mutex);
+        const auto consumedLength =
+            ctxPtr->streamingBuffer.append(static_cast<const char*>(result->mBuffer),
+                                           static_cast<size_t>(receivedLength));
+
+        bool hasMore = consumedLength < receivedLength;
+        if (hasMore)
+        {
+            LOG_verbose << ctxPtr->logname << "[Streaming] callback: consumed " << consumedLength
+                        << "," << receivedLength << " , pending";
+            assert(!ctxPtr->mFileStreamResultConsumption.mValue);
+            ctxPtr->mFileStreamResultConsumption.mValue =
+                FileStreamResultConsumption::Value{std::move(*result), consumedLength};
+        }
+        uv_mutex_unlock(&ctxPtr->mutex);
+
+        // notify the HTTP server
+        uv_async_send(&ctxPtr->asynchandle);
+
+        // All has been stored, continue streaming continue streaming
+        // Continue can take long time, do here
+        if (!hasMore)
+        {
+            LOG_verbose << ctxPtr->logname << "[Streaming] callback: consumed " << consumedLength
+                        << "," << receivedLength << " , calling mContinue";
+            result->mContinue(receivedLength);
+        }
+    };
+
+    file_service::stream(FileStreamDataCallback{std::move(callback)},
+                         std::move(*file),
+                         offset,
+                         length);
+    return true;
 }
 
 int MegaHTTPServer::streamNode(MegaHTTPContext *httpctx)
@@ -36612,9 +36902,11 @@ int MegaHTTPServer::streamNode(MegaHTTPContext *httpctx)
     m_off_t totalSize = node->getSize();
     m_off_t start = 0;
     m_off_t end = totalSize - 1;
+    bool rangeRequested = false;
     if (httpctx->rangeStart >= 0)
     {
         start = httpctx->rangeStart;
+        rangeRequested = true;
     }
     httpctx->rangeStart = start;
 
@@ -36623,8 +36915,6 @@ int MegaHTTPServer::streamNode(MegaHTTPContext *httpctx)
         end = std::min(totalSize - 1, httpctx->rangeEnd);
     }
     httpctx->rangeEnd = end + 1;
-
-    bool rangeRequested = (httpctx->rangeEnd - httpctx->rangeStart) != totalSize;
 
     m_off_t len = end - start + 1;
     if (totalSize && (start < 0 || start >= totalSize || end < 0 || end >= totalSize || len <= 0 || len > totalSize) )
@@ -36661,15 +36951,9 @@ int MegaHTTPServer::streamNode(MegaHTTPContext *httpctx)
         << "Accept-Ranges: bytes\r\n"
         << "\r\n";
 
-    delete [] mimeType;
-    httpctx->pause = false;
+    delete[] mimeType;
     httpctx->lastBuffer = NULL;
     httpctx->lastBufferLen = 0;
-    if (httpctx->transfer)
-    {
-        httpctx->transfer->setStartPos(start);
-        httpctx->transfer->setEndPos(end);
-    }
 
     httpctx->streamingBuffer.setFileSize(totalSize);
     httpctx->streamingBuffer.setDuration(httpctx->node->getDuration());
@@ -36697,7 +36981,11 @@ int MegaHTTPServer::streamNode(MegaHTTPContext *httpctx)
     if (start || len)
     {
         httpctx->streamingBuffer.reset(!httpctx->lastBufferLen, resstr.size());
-        httpctx->megaApi->startStreaming(node, start, len, httpctx);
+        if (!startStream(httpctx, static_cast<uint64_t>(start), static_cast<uint64_t>(len)))
+        {
+            LOG_err << httpctx->getLogName() << "Finishing due to an error of startStream";
+            closeConnection(httpctx);
+        }
     }
     else
     {
@@ -36716,12 +37004,6 @@ void MegaHTTPServer::sendHeaders(MegaHTTPContext *httpctx, string *headers)
     httpctx->size += headers->size();
     httpctx->lastBuffer = resbuf.base;
     httpctx->lastBufferLen = resbuf.len;
-
-    if (httpctx->transfer)
-    {
-        httpctx->transfer->setTotalBytes(httpctx->size);
-        httpctx->megaApi->fireOnStreamingStart(httpctx->transfer.get());
-    }
 
 #ifdef ENABLE_EVT_TLS
     if (httpctx->server->useTLS)
@@ -36804,6 +37086,98 @@ void MegaHTTPServer::processAsyncEvent(MegaTCPContext* tcpctx)
     sendNextBytes(httpctx);
 }
 
+// Adaptive rate limiting at TCP output — only delay when data is delivered
+// faster than the throttle rate. Uses one-shot uv_timer to avoid blocking the event loop.
+// return false if rate limit is not needed, otherwise true.
+static bool rateLimiting(MegaHTTPContext& httpctx)
+{
+    using std::chrono::duration_cast;
+    using std::chrono::milliseconds;
+    using std::chrono::steady_clock;
+
+    const auto throttleBps = httpctx.megaApi->httpServerGetThrottleBitrate();
+
+    // Throttle Bps may changes for the following reasons:
+    // 1. a new playback
+    // 2. playback speed change such as from 1x to 2x
+    if (throttleBps != httpctx.throttleBps)
+    {
+        // Set to new
+        httpctx.throttleBps = throttleBps;
+
+        // Reset
+        httpctx.throttleLastChunkTime = std::nullopt;
+
+        // Remeber offset in this throttleBps started cycle
+        if (httpctx.rangeWritten > 0)
+        {
+            httpctx.throttleOffset = httpctx.rangeWritten;
+        }
+    }
+
+    // Disabled
+    if (throttleBps <= 0)
+        return false;
+
+    // Record start time on first throttled entry for this connection
+    if (!httpctx.throttleLastChunkTime)
+    {
+        httpctx.throttleLastChunkTime = steady_clock::now();
+    }
+
+    // No more data written yet
+    if (httpctx.rangeWritten <= 0 || httpctx.rangeWritten <= httpctx.throttleOffset)
+        return false;
+
+    const auto throttleWritten = httpctx.rangeWritten - httpctx.throttleOffset.value_or(0);
+    const auto now = steady_clock::now();
+    const int64_t bytesPerSec = static_cast<int64_t>(throttleBps) / 8;
+    const int64_t elapsedMs =
+        duration_cast<milliseconds>(now - *httpctx.throttleLastChunkTime).count();
+    const int64_t expectedMs = static_cast<int64_t>(throttleWritten * 1000 / bytesPerSec);
+    const int64_t delayMs = expectedMs - elapsedMs;
+
+    if (delayMs <= 1)
+        return false;
+
+    LOG_verbose_timed(milliseconds{120'000}, milliseconds{100})
+        << httpctx.getLogName() << "[Throttle] TCP delay " << delayMs
+        << "ms (expected=" << expectedMs << "ms, elapsed=" << elapsedMs
+        << "ms, written=" << throttleWritten << ", throttle=" << throttleBps << " bps)";
+
+    auto timerHandler = [](uv_timer_t* t)
+    {
+        auto* weakHandle = static_cast<std::weak_ptr<MegaHTTPContext>*>(t->data);
+
+        uv_timer_stop(t);
+
+        uv_close(reinterpret_cast<uv_handle_t*>(t),
+                 [](uv_handle_t* h)
+                 {
+                     delete reinterpret_cast<uv_timer_t*>(h);
+                 });
+
+        if (!weakHandle)
+            return;
+
+        auto ctx = weakHandle->lock();
+        if (!ctx || ctx->finished)
+            return;
+
+        uv_async_send(&ctx->asynchandle);
+    };
+
+    // Init a timer
+    auto* timer = new uv_timer_t();
+    uv_timer_init(httpctx.server->getUvLoop(), timer);
+    timer->data = new std::weak_ptr<MegaHTTPContext>{httpctx.weak_from_this()};
+
+    // start the timer and timer's ownership belongs to the timerHandler
+    uv_timer_start(timer, timerHandler, static_cast<uint64_t>(delayMs), 0);
+
+    return true;
+}
+
 void MegaHTTPServer::sendNextBytes(MegaHTTPContext *httpctx)
 {
     if (httpctx->finished)
@@ -36818,6 +37192,9 @@ void MegaHTTPServer::sendNextBytes(MegaHTTPContext *httpctx)
                     << "[Streaming] Skipping write due to another ongoing write";
         return;
     }
+
+    if (rateLimiting(*httpctx))
+        return;
 
     uv_mutex_lock(&httpctx->mutex);
     if (httpctx->lastBufferLen)
@@ -36844,7 +37221,6 @@ void MegaHTTPServer::sendNextBytes(MegaHTTPContext *httpctx)
         return;
     }
 
-    LOG_verbose << httpctx->getLogName() << "Writing " << resbuf.len << " bytes";
     httpctx->rangeWritten += resbuf.len;
     httpctx->lastBuffer = resbuf.base;
     httpctx->lastBufferLen = resbuf.len;
@@ -36893,7 +37269,6 @@ MegaHTTPContext::MegaHTTPContext():
     rangeWritten = -1;
     range = false;
     failed = false;
-    pause = false;
     nodereceived = false;
     resultCode = API_EINTERNAL;
     node = NULL;
@@ -36924,49 +37299,48 @@ MegaHTTPContext::~MegaHTTPContext()
     uv_mutex_destroy(&mutex_responses);
 }
 
-void MegaHTTPContext::onTransferStart(MegaApi*, MegaTransfer* httpTransfer)
+std::unique_ptr<uv_work_t> MegaHTTPContext::processFileStreamResult()
 {
-    if (transfer)
-    {
-        transfer->setTag(httpTransfer->getTag());
-    }
+    // No result or no space to process
+    if (!mFileStreamResultConsumption.mValue || streamingBuffer.availableSpace() <= 0)
+        return nullptr;
+
+    auto& consumption = mFileStreamResultConsumption.mValue.value();
+    const auto offset = consumption.mConsumedLength;
+    const auto len = static_cast<size_t>(consumption.mFileStreamResult.mLength - offset);
+    const char* buf = static_cast<const char*>(consumption.mFileStreamResult.mBuffer) + offset;
+
+    // Append to streaming buffer and update
+    const auto consumed = streamingBuffer.append(buf, len);
+    consumption.mConsumedLength += consumed;
+
+    assert(consumed <= len);
+    LOG_verbose << getLogName() << "[Streaming] consumed " << consumed << ","
+                << consumption.mConsumedLength << "," << consumption.mFileStreamResult.mLength;
+
+    // Not all consumed yet, return early
+    if (consumed < len)
+        return nullptr;
+
+    // Prepare continue work
+    std::unique_ptr<uv_work_t> continueWork{new uv_work_t()};
+    continueWork->data = new FileStreamResult(std::move(consumption.mFileStreamResult));
+
+    // Release current result
+    mFileStreamResultConsumption.mValue.reset();
+    return continueWork;
 }
 
-bool MegaHTTPContext::onTransferData(MegaApi*,
-                                     MegaTransfer* httpTransfer,
-                                     char* buffer,
-                                     size_t dataSize)
+void MegaHTTPContext::onTransferStart(MegaApi*, [[maybe_unused]] MegaTransfer* transfer)
 {
-    LOG_verbose << logname << "Streaming data received: " << httpTransfer->getTransferredBytes()
-                << " Size: " << dataSize << " Queued: " << this->tcphandle.write_queue_size << " "
-                << streamingBuffer.bufferStatus();
+    assert(transfer->getType() == MegaTransfer::TYPE_UPLOAD);
+}
 
-    if (finished)
-    {
-        LOG_info << logname << "Removing streaming transfer after "
-                 << httpTransfer->getTransferredBytes() << " bytes";
-        return false;
-    }
-
-    // append the data to the buffer
-    uv_mutex_lock(&mutex);
-    long long remaining = static_cast<long long>(dataSize) +
-                          (httpTransfer->getTotalBytes() - httpTransfer->getTransferredBytes());
-    long long availableSpace = static_cast<long long>(streamingBuffer.availableSpace());
-    if ((remaining > availableSpace) &&
-        ((availableSpace - static_cast<long long>(dataSize)) <
-         static_cast<long long>(DirectReadSlot::MAX_DELIVERY_CHUNK)))
-    {
-        LOG_debug << logname << "[Streaming] Buffer full: Pausing streaming. "
-                  << streamingBuffer.bufferStatus();
-        pause = true;
-    }
-    streamingBuffer.append(buffer, dataSize);
-    uv_mutex_unlock(&mutex);
-
-    // notify the HTTP server
-    uv_async_send(&asynchandle);
-    return !pause;
+bool MegaHTTPContext::onTransferData(MegaApi*, MegaTransfer*, char*, size_t)
+{
+    // Never be called
+    assert(false);
+    return false;
 }
 
 void MegaHTTPContext::onTransferFinish(MegaApi *, MegaTransfer *, MegaError *e)
@@ -37152,16 +37526,16 @@ MegaFTPServer::~MegaFTPServer()
     stop();
 }
 
-MegaTCPContext* MegaFTPServer::initializeContext(uv_stream_t *server_handle)
+MegaTCPContextPtr MegaFTPServer::initializeContext(uv_stream_t* server_handle)
 {
-    MegaFTPContext* ftpctx = new MegaFTPContext();
+    shared_ptr<MegaFTPContext> ftpctx = std::make_shared<MegaFTPContext>();
 
     // Set connection data
     MegaFTPServer* ftpServer = (MegaFTPServer*)(server_handle->data);
     ftpctx->server = ftpServer;
     ftpctx->megaApi = ftpServer->megaApi;
-    ftpctx->tcphandle.data = ftpctx;
-    ftpctx->asynchandle.data = ftpctx;
+    ftpctx->tcphandle.data = ftpctx.get();
+    ftpctx->asynchandle.data = ftpctx.get();
 
     return ftpctx;
 }
@@ -38938,16 +39312,16 @@ MegaFTPDataServer::~MegaFTPDataServer()
     LOG_verbose << "MegaFTPDataServer::~MegaFTPDataServer. end";
 }
 
-MegaTCPContext* MegaFTPDataServer::initializeContext(uv_stream_t *server_handle)
+MegaTCPContextPtr MegaFTPDataServer::initializeContext(uv_stream_t* server_handle)
 {
-    MegaFTPDataContext* ftpctx = new MegaFTPDataContext();
+    shared_ptr<MegaFTPDataContext> ftpctx = std::make_shared<MegaFTPDataContext>();
 
     // Set connection data
     MegaFTPDataServer* ftpDataServer = (MegaFTPDataServer*)(server_handle->data);
     ftpctx->server = ftpDataServer;
     ftpctx->megaApi = ftpDataServer->megaApi;
-    ftpctx->tcphandle.data = ftpctx;
-    ftpctx->asynchandle.data = ftpctx;
+    ftpctx->tcphandle.data = ftpctx.get();
+    ftpctx->asynchandle.data = ftpctx.get();
 
     return ftpctx;
 }
@@ -39036,17 +39410,14 @@ void MegaFTPDataServer::processWriteFinished(MegaTCPContext *tcpctx, int status)
 
 void MegaFTPDataServer::sendData()
 {
-    MegaTCPContext * tcpctx = NULL;
-
     this->notifyNewConnectionRequired = true;
 
-    if (connections.size())
-    {
-        tcpctx = connections.back(); //only interested in the last connection received (the one that needs response)
-    }
-    //Some client might create connections before receiving a 150 in the control channel (e.g: ftp linux command)
+    // only interested in the last connection received (the one that needs response)
+    // Some client might create connections before receiving a 150 in the control channel (e.g: ftp
+    // linux command)
     // This could cause never answered / never closed connections.
-    //assert(connections.size() <= 1); //This might not be true due to that
+    // assert(connections.size() <= 1); //This might not be true due to that
+    MegaTCPContext* tcpctx = connections.back();
 
     if (tcpctx)
     {
@@ -40242,11 +40613,12 @@ MegaEventPrivate::MegaEventPrivate(MegaEventPrivate *event)
     this->setText(event->getText());
     this->setNumber(event->getNumber());
     this->setHandle(event->getHandle());
+    mIntegerList.reset(event->mIntegerList ? event->mIntegerList->copy() : nullptr);
 }
 
 MegaEventPrivate::~MegaEventPrivate()
 {
-    delete [] text;
+    delete[] text;
 }
 
 MegaEvent *MegaEventPrivate::copy()
@@ -40302,6 +40674,16 @@ MegaHandle MegaEventPrivate::getHandle() const
     return mHandle;
 }
 
+MegaIntegerList* MegaEventPrivate::getIntegerList() const
+{
+    return mIntegerList.get();
+}
+
+void MegaEventPrivate::setIntegerList(MegaIntegerList* integerList)
+{
+    mIntegerList.reset(integerList);
+}
+
 const char *MegaEventPrivate::getEventString() const
 {
     return MegaEventPrivate::getEventString(type);
@@ -40339,6 +40721,8 @@ const char *MegaEventPrivate::getEventString(int type)
             return "CREDIT_CARD_EXPIRY";
         case MegaEvent::EVENT_NETWORK_ACTIVITY:
             return "NETWORK_ACTIVITY";
+        case MegaEvent::EVENT_TRANSFERS_RESUMED:
+            return "TRANSFERS_RESUMED";
     }
 
     return "UNKNOWN";
@@ -42345,6 +42729,110 @@ double MegaDiscountCodeInfoPrivate::getLocalDiscountedMonthlyPriceNet() const
     return mDiscountCodeInfo.localDiscountedMonthlyPriceNet;
 }
 
+MegaFileServiceReclaimOptionsPrivate::MegaFileServiceReclaimOptionsPrivate() = default;
+
+MegaFileServiceReclaimOptionsPrivate::MegaFileServiceReclaimOptionsPrivate(
+    const file_service::ReclaimOptions& options):
+    mReclaim(options)
+{}
+
+MegaFileServiceReclaimOptionsPrivate::MegaFileServiceReclaimOptionsPrivate(
+    const MegaFileServiceReclaimOptionsPrivate&) = default;
+
+MegaFileServiceReclaimOptionsPrivate::~MegaFileServiceReclaimOptionsPrivate() = default;
+
+MegaFileServiceReclaimOptions* MegaFileServiceReclaimOptionsPrivate::copy() const
+{
+    return new MegaFileServiceReclaimOptionsPrivate(*this);
+}
+
+int MegaFileServiceReclaimOptionsPrivate::getAgeThreshold() const
+{
+    return static_cast<int>(mReclaim.mAgeThreshold.count());
+}
+
+void MegaFileServiceReclaimOptionsPrivate::setAgeThreshold(int ageThreshold)
+{
+    mReclaim.mAgeThreshold = std::chrono::minutes(std::max(0, ageThreshold));
+}
+
+std::size_t MegaFileServiceReclaimOptionsPrivate::getBatchSize() const
+{
+    return mReclaim.mBatchSize;
+}
+
+void MegaFileServiceReclaimOptionsPrivate::setBatchSize(std::size_t batchSize)
+{
+    mReclaim.mBatchSize = batchSize;
+}
+
+uint64_t MegaFileServiceReclaimOptionsPrivate::getDelay() const
+{
+    return static_cast<uint64_t>(mReclaim.mDelay.count());
+}
+
+void MegaFileServiceReclaimOptionsPrivate::setDelay(uint64_t seconds)
+{
+    mReclaim.mDelay = std::chrono::seconds(seconds);
+}
+
+uint64_t MegaFileServiceReclaimOptionsPrivate::getPeriod() const
+{
+    return static_cast<uint64_t>(mReclaim.mPeriod.count());
+}
+
+void MegaFileServiceReclaimOptionsPrivate::setPeriod(uint64_t seconds)
+{
+    mReclaim.mPeriod = std::chrono::seconds(seconds);
+}
+
+uint64_t MegaFileServiceReclaimOptionsPrivate::getReclaimTarget() const
+{
+    return mReclaim.mReclaimTarget;
+}
+
+void MegaFileServiceReclaimOptionsPrivate::setReclaimTarget(uint64_t bytes)
+{
+    mReclaim.mReclaimTarget = bytes;
+}
+
+int64_t MegaFileServiceReclaimOptionsPrivate::getReclaimThreshold() const
+{
+    const auto& reclaimThreshold = mReclaim.mReclaimThreshold;
+    if (reclaimThreshold)
+        return static_cast<int64_t>(*reclaimThreshold);
+    else
+        return -1;
+}
+
+void MegaFileServiceReclaimOptionsPrivate::setReclaimThreshold(int64_t bytes)
+{
+    if (bytes >= 0)
+        mReclaim.mReclaimThreshold = static_cast<uint64_t>(bytes);
+    else
+        mReclaim.mReclaimThreshold = std::nullopt;
+}
+
+file_service::ReclaimOptions MegaFileServiceReclaimOptionsPrivate::getOptions() const
+{
+    return mReclaim;
+}
+
+MegaFileServiceStorageInfoPrivate::MegaFileServiceStorageInfoPrivate(
+    const file_service::StorageInfo& storageInfo):
+    mStorageInfo(storageInfo)
+{}
+
+uint64_t MegaFileServiceStorageInfoPrivate::getReclaimableSize() const
+{
+    return mStorageInfo.mReclaimableSize;
+}
+
+uint64_t MegaFileServiceStorageInfoPrivate::getAllocatedSize() const
+{
+    return mStorageInfo.mAllocatedSize;
+}
+
 std::unique_ptr<FileSystemAccess> createFSA()
 {
     auto fsaccess = std::unique_ptr<FileSystemAccess>{new FSACCESS_CLASS};
@@ -42367,6 +42855,13 @@ void MegaApiImpl::notify_network_activity(int networkActivityChannel,
     event->setNumber("channel", networkActivityChannel);
     event->setNumber("activity_type", networkActivityType);
     event->setNumber("error_code", code);
+    fireOnEvent(event);
+}
+
+void MegaApiImpl::notify_transfers_resumed(const std::vector<uint32_t>& uniqueIds)
+{
+    MegaEventPrivate* event = new MegaEventPrivate(MegaEvent::EVENT_TRANSFERS_RESUMED);
+    event->setIntegerList(new MegaIntegerListPrivate(uniqueIds));
     fireOnEvent(event);
 }
 

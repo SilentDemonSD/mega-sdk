@@ -1910,13 +1910,15 @@ public:
     void sc_storeSn(JSON& json);
     void sc_purgeAndCommit();
     void sc_procEoo(std::unique_lock<recursive_mutex>& nodeTreeIsChanging, bool originalAC);
+    void sc_procTerm(bool isDuringMoveOperation);
     // process an action packet
     bool sc_procActionPacket(JSON& json, std::shared_ptr<Node>& lastAPDeletedNode);
     void sc_updateStats();
     // process an action packet excluding a, i and st tags
     std::shared_ptr<Node> sc_procActionPacketWithoutCommonTags(JSON& json,
                                                                nameid name,
-                                                               bool isSelfOriginating);
+                                                               bool isSelfOriginating,
+                                                               bool* isNewSharesMerged = nullptr);
     // evaluates if the sequence tag matches
     bool sc_checkSequenceTag(const string& tag);
     // check if it is ok to process the current action packet
@@ -2012,6 +2014,51 @@ public:
 
     // abort queued direct read(s)
     void abortreads(handle handle, bool isPublicHandle, m_off_t offset, m_off_t count);
+
+    // abort all reads on handle satisfying predicate.
+    template<typename Predicate>
+    auto abortreads(Predicate&& predicate, handle handle, bool isPublicHandle)
+        -> std::enable_if_t<std::is_invocable_r_v<bool, Predicate, const DirectRead&>>
+    {
+        // Sanity: handle should never be undefined.
+        assert(handle != UNDEF);
+
+        // Add handle type as needed.
+        encodeHandleType(&handle, isPublicHandle);
+
+        // Try and find the direct read node associated with our handle.
+        auto i = hdrns.find(handle);
+
+        // No node assocated with this handle.
+        if (i == hdrns.end())
+            return;
+
+        // Abort all reads satisfying our predicate.
+        i->second->abort(predicate);
+
+        // Reads are still pending on this direct read node.
+        if (!i->second->reads.empty())
+            return;
+
+        // No reads are pending so destroy the node.
+        delete i->second;
+    }
+
+    // abort all reads satisfying predicate.
+    template<typename Predicate>
+    auto abortreads(Predicate&& predicate)
+        -> std::enable_if_t<std::is_invocable_r_v<bool, Predicate, const DirectRead&>>
+    {
+        // Iterate over any active direct read nodes.
+        for (auto i = hdrns.begin(); i != hdrns.end();)
+        {
+            // Abort pending reads queued on that node.
+            i->second->abort(predicate);
+
+            // Destroy the node.
+            delete i++->second;
+        }
+    }
 
     // abort all queued direct reads.
     void abortreads();
@@ -3622,6 +3669,8 @@ public:
 
     // Client adapter.
     common::ClientAdapter mClientAdapter;
+    // Non logged in client used by FileService for public links
+    common::ClientAdapter mPublicClientAdapter;
 
     // File Service.
     file_service::FileService mFileService;

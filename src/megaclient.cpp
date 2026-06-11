@@ -1999,7 +1999,8 @@ MegaClient::MegaClient(MegaApp* a,
     mClientType(clientType),
     mJourneyId(),
     mClientAdapter(*this),
-    mFileService(),
+    mPublicClientAdapter(*this),
+    mFileService(mPublicClientAdapter),
     mFuseService(mClientAdapter)
 {
 #ifdef __ANDROID__
@@ -2748,8 +2749,14 @@ void MegaClient::exec()
                                                                 CONSUMED_CHUNK_MAX_LOGGING);
                                     }
 
-                                    // The requests should be already terminated
-                                    assert(!reqs.chunkedProgress());
+                                    // The requests should be already terminated.
+                                    // Otherwise, it means CS response is fully received but JSON
+                                    // parsing is neither finished nor failed.
+                                    if (reqs.chunkedProgress())
+                                    {
+                                        assert(false);
+                                        LOG_err << "CS Response JSON is incomplete.";
+                                    }
                                 }
 
                                 WAIT_CLASS::bumpds();
@@ -3524,6 +3531,7 @@ void MegaClient::exec()
 
         // Dispatch client-side requests.
         mClientAdapter.dispatch();
+        mPublicClientAdapter.dispatch();
 
         notifypurge();
 
@@ -5066,7 +5074,7 @@ void MegaClient::locallogout(bool removecaches, [[maybe_unused]] bool keepSyncsC
     freeq(PUT);
 
     // Deinitialize the File Service.
-    mFileService.deinitialize();
+    mFileService.deinitialize(removecaches);
 
     // Deinitialize the FUSE Service.
     mFuseService.deinitialize();
@@ -5532,6 +5540,17 @@ void MegaClient::sc_procEoo(std::unique_lock<recursive_mutex>& nodeTreeIsChangin
 #endif
 }
 
+void MegaClient::sc_procTerm(bool isDuringMoveOperation)
+{
+    if (!isDuringMoveOperation && !useralerts.isDeletedSharedNodesStashEmpty())
+    {
+        useralerts.purgeNodeVersionsFromStash();
+        useralerts.convertStashedDeletedSharedNodes();
+    }
+    LOG_debug << "Processing of action packets for " << string(sessionid, sizeof(sessionid))
+              << " terminated.";
+}
+
 bool MegaClient::sc_checkActionPacketPreservePos(JSON& json, const Node* lastAPDeletedNode)
 {
     auto actionpacketStart = json.pos;
@@ -5589,7 +5608,8 @@ void MegaClient::sc_updateStats()
 
 std::shared_ptr<Node> MegaClient::sc_procActionPacketWithoutCommonTags(JSON& json,
                                                                        nameid name,
-                                                                       bool isSelfOriginating)
+                                                                       bool isSelfOriginating,
+                                                                       bool* isNewSharesMerged)
 {
     bool moveOperation = false; // true if "d" packet has "m":1
     std::shared_ptr<Node> lastAPDeletedNode;
@@ -5618,6 +5638,12 @@ std::shared_ptr<Node> MegaClient::sc_procActionPacketWithoutCommonTags(JSON& jso
                         useralerts.beginNotingSharedNodes();
                     handle originatingUser = sc_newnodes(json);
                     mergenewshares(1);
+
+                    if (isNewSharesMerged)
+                    {
+                        *isNewSharesMerged = true;
+                    }
+
                     if (!loggedIntoFolder())
                         useralerts.convertNotedSharedNodes(true, originatingUser);
                 }
@@ -5636,6 +5662,10 @@ std::shared_ptr<Node> MegaClient::sc_procActionPacketWithoutCommonTags(JSON& jso
                     reqtag = 0;
                     mergenewshares(1);
                     reqtag = creqtag;
+                }
+                else if (isNewSharesMerged)
+                {
+                    *isNewSharesMerged = false;
                 }
                 break;
             case name_id::c:
@@ -15630,6 +15660,9 @@ string MegaClient::getTransferDBName()
 void MegaClient::resumeTransferFromDB()
 {
     TransferDbCommitter committer(tctable);
+
+    std::vector<uint32_t> resumedUniqueIds;
+
     for (unsigned int i = 0; i < cachedfiles.size(); i++)
     {
         direction_t type = NONE;
@@ -15682,6 +15715,7 @@ void MegaClient::resumeTransferFromDB()
                                    tag,
                                    std::nullopt,
                                    data.inboxTarget);
+                resumedUniqueIds.push_back(file->dbid);
                 break;
             }
         }
@@ -15721,10 +15755,17 @@ void MegaClient::resumeTransferFromDB()
                 }
                 continue;
             }
+            resumedUniqueIds.push_back(file->dbid);
         }
     }
 
     purgeOrphanTransfers(true);
+
+    // fire after the loop so only resumed transfers are reported
+    if (!resumedUniqueIds.empty())
+    {
+        app->notify_transfers_resumed(resumedUniqueIds);
+    }
 
     cachedfiles.clear();
     cachedfilesdbids.clear();
@@ -17502,6 +17543,10 @@ void MegaClient::queueread(handle handle,
                                                                    appData,
                                                                    failure.timeLeft);
                               },
+                              [&](DirectRead::Match& match)
+                              {
+                                  match.mMatched = appData == match.mAppData;
+                              },
                               [&](DirectRead::Revoke& revoke)
                               {
                                   if (appData == revoke.appdata)
@@ -17615,40 +17660,21 @@ void MegaClient::preadabort(handle handle, m_off_t offset, m_off_t count)
 
 void MegaClient::abortreads(handle handle, bool isPublicHandle, m_off_t offset, m_off_t count)
 {
-    encodeHandleType(&handle, isPublicHandle);
-
-    // Try and find the direct read node associated with our handle.
-    auto i = hdrns.find(handle);
-
-    // No node assocated with this handle.
-    if (i == hdrns.end())
-        return;
-
     auto predicate = [=](const DirectRead& read)
     {
         return (count < 0 || count == read.count) && (offset < 0 || offset == read.offset);
     }; // predicate
 
-    // Abort all reads matching our predicate.
-    i->second->abort(std::move(predicate));
+    abortreads(std::move(predicate), handle, isPublicHandle);
 }
 
 void MegaClient::abortreads()
 {
-    auto always = [](const DirectRead&)
-    {
-        return true;
-    };
-
-    // Iterate over any active direct read nodes.
-    for (auto i = hdrns.begin(); i != hdrns.end();)
-    {
-        // Abort pending reads queued on that node.
-        i->second->abort(always);
-
-        // Destroy the node.
-        delete i++->second;
-    }
+    abortreads(
+        [](auto&)
+        {
+            return true;
+        });
 }
 
 // execute pending directreads
@@ -25653,7 +25679,7 @@ void MegaClient::processScMessageInStreaming()
         m_off_t consumed = scStreamingParser.process(pendingsc->data());
         // In case the logic changed
         assert(consumed >= 0);
-        if (consumed)
+        if (consumed > 0)
         {
             pendingsc->purge(static_cast<size_t>(consumed));
         }
@@ -25664,18 +25690,29 @@ void MegaClient::processScMessageInStreaming()
         if (!scStreamingParser.isPaused())
         {
             mStreamingContinue = false;
-            if (scStreamingParser.isLastReceived())
+
+            bool isLastReceived = scStreamingParser.isLastReceived();
+            bool isFinished = scStreamingParser.isFinished();
+            bool isFailed = scStreamingParser.isFailed();
+
+            if (isLastReceived || isFinished || isFailed)
             {
-                if (!scStreamingParser.isFinished() && !scStreamingParser.isFailed())
+                if (isLastReceived && !isFinished && !isFailed)
                 {
                     // This means we received the last part of whole JSON(action packets)
                     // But JSONSplitter did not end the process properly
                     LOG_warn << "Incompleted SC response detected";
                 }
+                else if (!isLastReceived && isFinished)
+                {
+                    LOG_warn << "Superfluous SC response detected";
+                }
 
                 clearStreamingParser();
                 resetScRequest();
 
+                // upon reception of action packets, if the cs request is waiting for a retry
+                // and it failed due to -3 or -4 error from API, we can abort the backoff
                 abortBackoffTimerForCsRequest();
             }
         }

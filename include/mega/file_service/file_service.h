@@ -12,11 +12,13 @@
 #include <mega/file_service/file_service_callbacks.h>
 #include <mega/file_service/file_service_context_pointer.h>
 #include <mega/file_service/file_service_forward.h>
-#include <mega/file_service/file_service_options_forward.h>
+#include <mega/file_service/file_service_options.h>
 #include <mega/file_service/file_service_result_forward.h>
 #include <mega/file_service/file_service_result_or_forward.h>
+#include <mega/file_service/storage_info.h>
 #include <mega/types.h>
 
+#include <cstdint>
 #include <string>
 
 namespace mega
@@ -33,16 +35,41 @@ class FileService
     FileServiceContextPtr mContext;
 
     // Serializes access to mContext;
-    common::SharedMutex mContextLock;
+    mutable common::SharedMutex mContextLock;
+
+    // Specifies how the service should perform storage reclamation.
+    ReclaimOptions mReclaimOptions;
+
+    // Serializes access to mReclaimOptions.
+    common::SharedMutex mReclaimOptionsLock;
+
+    // Specifies various metrics that control how the service behaves.
+    ServiceOptions mServiceOptions;
+
+    // Serializes access to mServiceOptions.
+    common::SharedMutex mServiceOptionsLock;
+
+    // A client that is used when SDK is not logged in, when there is no session id
+    common::Client& mPublicClient;
+
+    // Whether the initialize() has been called
+    bool mInitialized{false};
+
+    // A user storage name when SDK is not logged in, allocated once during logged in/out cycles
+    std::string mPublicStorageName;
+
+    // Construct the file service using mPublicClient
+    auto construct() -> FileServiceResult;
 
 public:
-    FileService();
+    FileService(common::Client& publicClient);
 
     ~FileService();
 
     // Add a foreign file to the service.
-    auto add(NodeHandle handle, const common::NodeKeyData& keyData, std::size_t size)
-        -> FileServiceResultOr<FileID>;
+    auto add(NodeHandle handle,
+             const common::NodeKeyData& keyData,
+             std::uint64_t size) -> FileServiceResultOr<FileID>;
 
     // Notify observer when a file changes.
     auto addObserver(FileEventObserver observer) -> FileServiceResultOr<FileEventObserverID>;
@@ -50,15 +77,16 @@ public:
     // Create a new file.
     auto create(NodeHandle parent, const std::string& name) -> FileServiceResultOr<File>;
 
+    // Where is the service storing its database?
+    auto databasePath() const -> FileServiceResultOr<LocalPath>;
+
     // Deinitialize the file service.
-    void deinitialize();
+    void deinitialize(bool cleanCache);
 
     // Retrieve information about a file managed by the file service.
     auto info(FileID id) -> FileServiceResultOr<FileInfo>;
 
     // Initialize the file service.
-    auto initialize(common::Client& client, const FileServiceOptions& options) -> FileServiceResult;
-
     auto initialize(common::Client& client) -> FileServiceResult;
 
     // Open a file for reading or writing.
@@ -66,10 +94,10 @@ public:
     auto open(FileID id) -> FileServiceResultOr<File>;
 
     // Update the file service's options.
-    auto options(const FileServiceOptions& options) -> FileServiceResult;
+    void serviceOptions(const ServiceOptions& serviceOptions);
 
     // Retrieve the file service's current options.
-    auto options() -> FileServiceResultOr<FileServiceOptions>;
+    auto serviceOptions() -> ServiceOptions;
 
     // Purge all files from storage.
     //
@@ -80,14 +108,28 @@ public:
     // references have been dropped.
     auto purge() -> FileServiceResult;
 
-    // Reclaim storage space.
-    void reclaim(ReclaimCallback callback);
+    // Start a background task to reclaim storage space immediately
+    auto reclaim(ReclaimCallback callback,
+                 std::optional<ReclaimOptions> reclaimOptions = std::nullopt) -> FileServiceResult;
+
+    // Update the file service's reclaim options.
+    void reclaimOptions(const ReclaimOptions& options);
+
+    // Retrieve the file service's current reclaim options.
+    auto reclaimOptions() -> ReclaimOptions;
 
     // Remove a previously added file observer.
     auto removeObserver(FileEventObserverID id) -> FileServiceResult;
 
-    // How much storage is the service using?
+    // Get storage size information in detail such as reclaimable storage size
+    auto storageInfo(const ReclaimOptions* options = nullptr) -> FileServiceResultOr<StorageInfo>;
+
+    // How much storage space is the service using? Better performance than storageInfo but with
+    // less information
     auto storageUsed() -> FileServiceResultOr<std::uint64_t>;
+
+    // Find out where the service is storing a particular file.
+    auto userFilePath(FileID id) const -> FileServiceResultOr<LocalPath>;
 }; // FileService
 
 } // file_service

@@ -63,6 +63,7 @@ target_sources(SDKlib PRIVATE
                       include/mega/common/serialization_traits_forward.h
                       include/mega/common/shared_mutex.h
                       include/mega/common/shared_mutex_forward.h
+                      include/mega/common/statistics.h
                       include/mega/common/status_flag.h
                       include/mega/common/subsystem_logger.h
                       include/mega/common/task_executor.h
@@ -104,6 +105,7 @@ target_sources(SDKlib PRIVATE
                       src/common/logger.cpp
                       src/common/node_event_type.cpp
                       src/common/normalized_path.cpp
+                      src/common/partial_download_callback.cpp
                       src/common/pending_callbacks.cpp
                       src/common/query.cpp
                       src/common/scoped_query.cpp

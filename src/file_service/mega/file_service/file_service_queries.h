@@ -13,11 +13,13 @@ struct FileServiceQueries
     explicit FileServiceQueries(common::Database& database);
 
     common::Query mAddFile;
+    common::Query mAddFileDuration;
     common::Query mAddFileID;
     common::Query mAddFileKeyData;
     common::Query mAddFileRange;
     common::Query mGetFile;
     common::Query mGetFileByNameAndParentHandle;
+    common::Query mGetFileDuration;
     common::Query mGetFileIDs;
     common::Query mGetFileIDsByParentHandle;
     common::Query mGetFileKeyData;
@@ -25,6 +27,7 @@ struct FileServiceQueries
     common::Query mGetFreeFileID;
     common::Query mGetNextFileID;
     common::Query mGetReclaimableFiles;
+    common::Query mGetStorageInfo;
     common::Query mGetStorageUsed;
     common::Query mRemoveFile;
     common::Query mRemoveFileID;

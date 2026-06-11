@@ -49,7 +49,8 @@ std::shared_ptr<mega::MegaClient> makeClient(mega::MegaApp& app, mega::DbAccess*
     struct HttpIo : mega::HttpIO
     {
         void addevents(mega::Waiter*, int) override {}
-        void post(struct mega::HttpReq*, const char* = NULL, unsigned = 0) override {}
+
+        void post(struct mega::HttpReq*, const char* = NULL, size_t = 0) override {}
         void cancel(mega::HttpReq*) override {}
         m_off_t postpos(void*) override { return {}; }
         bool doio(void) override { return {}; }
@@ -67,6 +68,8 @@ std::shared_ptr<mega::MegaClient> makeClient(mega::MegaApp& app, mega::DbAccess*
     using namespace mega;
     auto waiter = std::make_shared<WAIT_CLASS>();
 
+    if (!dbAccess)
+        dbAccess = new mega::SqliteDbAccess(mega::LocalPath::fromAbsolutePath("."));
     std::shared_ptr<mega::MegaClient> client{
         new mega::MegaClient{&app, waiter, httpio, dbAccess, nullptr, "unit_test", 0},
         deleter};

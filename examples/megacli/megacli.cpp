@@ -92,19 +92,23 @@ namespace fs = std::filesystem;
 #include <mega/file_service/file_info.h>
 #include <mega/file_service/file_result.h>
 #include <mega/file_service/file_result_or.h>
+#include <mega/file_service/file_service_options.h>
 #include <mega/file_service/file_service_result.h>
 #include <mega/file_service/file_service_result_or.h>
 
 using namespace mega;
-using std::cout;
 using std::cerr;
+using std::cout;
+using std::dec;
 using std::endl;
 using std::flush;
+using std::hex;
 using std::ifstream;
 using std::ofstream;
 using std::setw;
-using std::hex;
-using std::dec;
+using std::stoul;
+using std::chrono::minutes;
+using std::chrono::seconds;
 
 MegaClient* client;
 MegaClient* clientFolder;
@@ -2575,17 +2579,20 @@ string showMediaInfo(const MediaProperties& mp, MediaFileInfo& mediaInfo, bool o
 
 string showMediaInfo(const std::string& fileattributes, uint32_t fakey[4], MediaFileInfo& mediaInfo, bool oneline)
 {
-    MediaProperties mp = MediaProperties::decodeMediaPropertiesAttributes(fileattributes, fakey);
-    return showMediaInfo(mp, mediaInfo, oneline);
+    if (auto mp = MediaProperties::decodeMediaPropertiesAttributes(fileattributes, fakey))
+        return showMediaInfo(*mp, mediaInfo, oneline);
+
+    return "Couldn't decode media properties";
 }
 
-string showMediaInfo(Node* n, MediaFileInfo& /*mediaInfo*/, bool oneline)
+string showMediaInfo(Node* n, MediaFileInfo& mediaInfo, bool oneline)
 {
+    // Convenience.
+    auto* key = (uint32_t*)(n->nodekey().data() + FILENODEKEYLENGTH / 2);
+
     if (n->hasfileattribute(fa_media))
-    {
-        MediaProperties mp = MediaProperties::decodeMediaPropertiesAttributes(n->fileattrstring, (uint32_t*)(n->nodekey().data() + FILENODEKEYLENGTH / 2));
-        return showMediaInfo(mp, client->mediaFileInfo, oneline);
-    }
+        return showMediaInfo(n->fileattrstring, key, mediaInfo, oneline);
+
     return "The node has no mediainfo attribute";
 }
 
@@ -5207,12 +5214,126 @@ static void exec_fileserviceread(autocomplete::ACState& state)
         // Kick off the read.
         void read()
         {
-            mFile.read(*this, mOffset, mLength - mOffset);
+            mFile.read(*this, mOffset, mLength - mOffset, true);
         }
     }; // Reader
 
     // Kick off the read.
     Reader(std::move(*file), offset, length).read();
+}
+
+static void exec_fileserviceReclaimOptions(autocomplete::ACState& state)
+{
+    auto parseReclaimOptions = [&](file_service::ReclaimOptions& options)
+    {
+        auto ageThreshold = state.extractflagparam("-age-threshold");
+        auto batchSize = state.extractflagparam("-batch-size");
+        auto delay = state.extractflagparam("-delay");
+        auto period = state.extractflagparam("-period");
+        auto reclaimThreshold = state.extractflagparam("-reclaim-threshold");
+        auto reclaimTarget = state.extractflagparam("-reclaim-target");
+
+        if (ageThreshold)
+            options.mAgeThreshold = minutes(stoul(*ageThreshold));
+
+        if (batchSize)
+            options.mBatchSize = stoul(*batchSize);
+
+        if (delay)
+            options.mDelay = seconds(stoul(*delay));
+
+        if (period)
+            options.mPeriod = seconds(stoul(*period));
+
+        if (reclaimThreshold)
+        {
+            if (auto v = stol(*reclaimThreshold); v >= 0)
+                options.mReclaimThreshold = v;
+            else
+                options.mReclaimThreshold = std::nullopt;
+        }
+
+        if (reclaimTarget)
+            options.mReclaimTarget = stoul(*reclaimTarget);
+
+        return ageThreshold || batchSize || delay || period || reclaimThreshold || reclaimTarget;
+    };
+
+    // Try and retrieve current reclaim options.
+    auto options = client->mFileService.reclaimOptions();
+
+    // Update reclaim options if the user specified any flags.
+    if (parseReclaimOptions(options))
+    {
+        client->mFileService.reclaimOptions(options);
+        conlock(std::cout) << "Reclaim options updated." << std::endl;
+    }
+
+    // Print reclaim options.
+    const auto& threshold = options.mReclaimThreshold;
+
+    conlock(std::cout) << "Reclaim options:\n"
+                       << "Age Threshold: " << options.mAgeThreshold.count() << "m\n"
+                       << "Batch Size: " << options.mBatchSize << "\n"
+                       << "Delay: " << options.mDelay.count() << "s\n"
+                       << "Period: " << options.mPeriod.count() << "s\n"
+                       << "Reclaim Threshold (BYTES): "
+                       << (threshold ? std::to_string(*threshold).c_str() : "Disabled") << "\n"
+                       << "Reclaim Target (BYTES): " << options.mReclaimTarget << std::endl;
+}
+
+static void exec_fileserviceReclaim(autocomplete::ACState&)
+{
+    using file_service::FileServiceResultOr;
+
+    // get reclaim options
+    auto reclaimOptions = client->mFileService.reclaimOptions();
+
+    // Set so reclaim can run immediately
+    reclaimOptions.mReclaimThreshold = 0;
+
+    // reclaim
+    const auto result = client->mFileService.reclaim(
+        [](FileServiceResultOr<std::uint64_t> reclaimResult)
+        {
+            if (!reclaimResult)
+            {
+                conlock(std::cerr)
+                    << "Reclaim process failed: " << file_service::toString(reclaimResult.error())
+                    << std::endl;
+                return;
+            }
+
+            conlock(std::cout) << "Reclaim process completed. Reclaimed " << *reclaimResult
+                               << " bytes." << std::endl;
+        },
+        reclaimOptions);
+
+    if (result == file_service::FILE_SERVICE_SUCCESS)
+    {
+        conlock(std::cout) << "Reclaim process initiated." << std::endl;
+    }
+    else
+    {
+        conlock(std::cerr) << "Couldn't initiate reclaim process: " << toString(result)
+                           << std::endl;
+    }
+}
+
+static void exec_fileserviceStorage(autocomplete::ACState&)
+{
+    if (const auto result = client->mFileService.storageInfo(); !result)
+    {
+        conlock(std::cerr) << "Get storage size failed: " << result.error() << std::endl;
+    }
+    else
+    {
+        conlock(std::cout) << "Storage Size:\n"
+                           << "  reclaimable: " << result->mReclaimableSize << " bytes." << "\n"
+                           << "  allocated  : " << result->mAllocatedSize << " bytes." << "\n"
+                           << "  reported   : " << result->mReportedSize << " bytes." << "\n"
+                           << "  total(cloud)   : " << result->mTotalSize << " bytes." << std::endl;
+    }
 }
 
 autocomplete::ACN autocompleteSyntax()
@@ -5441,17 +5562,16 @@ autocomplete::ACN autocompleteSyntax()
     p->Add(exec_alerts_number, sequence(text("alerts"), wholenumber(10)));
     p->Add(exec_alerts_notify, sequence(text("alerts"), text("notify")));
     p->Add(exec_alerts_seen, sequence(text("alerts"), text("seen")));
-    p->Add(exec_alerts_test_reminder, sequence(text("alerts"), text("test_reminder")));
-    p->Add(exec_alerts_test_payment, sequence(text("alerts"), text("test_payment")));
-    p->Add(exec_alerts_test_payment_v2, sequence(text("alerts"), text("test_payment_v2")));
     p->Add(exec_alerts_add_reminder,
            sequence(text("alerts"),
                     text("add_reminder"),
-                    param("timestamp_offset"),
-                    param("expiry_offset")));
-    p->Add(
-        exec_alerts_add_payment,
-        sequence(text("alerts"), text("add_payment"), param("timestamp_offset"), param("result")));
+                    param("create_timestamp_offset"),
+                    param("expiry_timestamp_offset")));
+    p->Add(exec_alerts_add_payment,
+           sequence(text("alerts"),
+                    text("add_payment"),
+                    param("create_timestamp_offset"),
+                    param("result")));
     p->Add(exec_recentactions,
            sequence(text("recentactions"),
                     param("hours"),
@@ -5859,6 +5979,18 @@ autocomplete::ACN autocompleteSyntax()
                     either(sequence(flag("-id"), param("id")),
                            sequence(flag("-path"), remoteFSFile(client, &cwd))),
                     opt(sequence(param("offset"), opt(param("length"))))));
+
+    p->Add(exec_fileserviceReclaimOptions,
+           sequence(text("file-service"),
+                    text("reclaimoptions"),
+                    opt(sequence(flag("-age-threshold"), wholenumber("munites", 3 * 24 * 60))),
+                    opt(sequence(flag("-batch-size"), wholenumber("count", 4))),
+                    opt(sequence(flag("-delay"), wholenumber("seconds", 30 * 60))),
+                    opt(sequence(flag("-period"), wholenumber("seconds", 2 * 60 * 60))),
+                    opt(sequence(flag("-reclaim-threshold"), wholenumber("bytes", 0))),
+                    opt(sequence(flag("-reclaim-target"), wholenumber("bytes", 0)))));
+    p->Add(exec_fileserviceReclaim, sequence(text("file-service"), text("reclaim")));
+    p->Add(exec_fileserviceStorage, sequence(text("file-service"), text("storage")));
 
     return autocompleteTemplate = std::move(p);
 }
@@ -9068,40 +9200,20 @@ void exec_alerts_seen(autocomplete::ACState&)
     return;
 }
 
-void exec_alerts_test_reminder(autocomplete::ACState&)
-{
-    client->useralerts.add(
-        new UserAlert::PaymentReminder(time(NULL) - 86000 * 3 / 2, client->useralerts.nextId()));
-}
-
-void exec_alerts_test_payment(autocomplete::ACState&)
-{
-    client->useralerts.add(new UserAlert::Payment(true,
-                                                  1,
-                                                  time(NULL) + 86000 * 1,
-                                                  client->useralerts.nextId(),
-                                                  name_id::psts));
-}
-
-void exec_alerts_test_payment_v2(autocomplete::ACState&)
-{
-    client->useralerts.add(new UserAlert::Payment(true,
-                                                  1,
-                                                  time(NULL) + 86000 * 1,
-                                                  client->useralerts.nextId(),
-                                                  name_id::psts_v2));
-}
-
 void exec_alerts_add_reminder(autocomplete::ACState& s)
 {
     // Parameterized command to add payment reminder
-    // Usage: alerts add_reminder <timestamp_offset> <expiry_offset>
+    // Usage: alerts add_reminder <create_timestamp_offset> <expiry_timestamp_offset>
 
     if (s.words.size() < 4)
     {
-        cout << "Usage: alerts add_reminder <timestamp_offset> <expiry_offset>" << endl;
-        cout << "  timestamp_offset: seconds from now (e.g., -86400 = 1 day ago)" << endl;
-        cout << "  expiry_offset: seconds from now for expiry (e.g., 2592000 = 30 days)" << endl;
+        cout << "Usage: alerts add_reminder <create_timestamp_offset> <expiry_timestamp_offset>"
+             << endl;
+        cout << "  create_timestamp_offset: seconds from now for when alert is created(e.g., "
+                "-86400 = 1 day ago)"
+             << endl;
+        cout << "  expiry_timestamp_offset: seconds from now for expiry (e.g., 2592000 = 30 days)"
+             << endl;
         cout << "Examples:" << endl;
         cout << "  alerts add_reminder \"-86400\" 2592000 # Created 1 day ago, expires in 30 "
                 "days"
@@ -9130,18 +9242,19 @@ void exec_alerts_add_reminder(autocomplete::ACState& s)
         cout << "  - Actual timestamp: " << client->useralerts.alerts.back()->ts() << endl;
     }
     cout << "  - Total alerts in memory: " << client->useralerts.alerts.size() << endl;
-    return;
 }
 
 void exec_alerts_add_payment(autocomplete::ACState& s)
 {
     // Parameterized command to add payment alert
-    // Usage: alerts add_payment <timestamp_offset> <success|failed>
+    // Usage: alerts add_payment <create_timestamp_offset> <success|failed>
 
-    if (s.words.size() < 3)
+    if (s.words.size() < 4)
     {
-        cout << "Usage: alerts add_payment <timestamp_offset> <success|failed>" << endl;
-        cout << "  timestamp_offset: seconds from now (e.g., 0 = now, -86400 = 1 day ago)" << endl;
+        cout << "Usage: alerts add_payment <create_timestamp_offset> <success|failed>" << endl;
+        cout << "  create_timestamp_offset: seconds from now for when alert is created (e.g., 0 = "
+                "now, -86400 = 1 day ago)"
+             << endl;
         cout << "  success|failed: payment result" << endl;
         cout << "Examples:" << endl;
         cout << "  alerts add_payment 0 success            # Payment succeeded now," << endl;
@@ -9171,7 +9284,6 @@ void exec_alerts_add_payment(autocomplete::ACState& s)
     cout << "  - Timestamp: " << now + timestampOffset << " (" << timestampOffset << "s from now)"
          << endl;
     cout << "  - Total alerts in memory: " << client->useralerts.alerts.size() << endl;
-    return;
 }
 
 void exec_lmkdir(autocomplete::ACState& s)
@@ -9433,10 +9545,11 @@ void exec_mediainfo(autocomplete::ACState& s)
         if (client->fsaccess->getextension(localFilename, ext) && MediaProperties::isMediaFilenameExt(ext))
         {
             mp.extractMediaPropertyFileAttributes(localFilename, client->fsaccess.get());
-                                uint32_t dummykey[4] = { 1, 2, 3, 4 };  // check encode/decode
-                                string attrs = mp.convertMediaPropertyFileAttributes(dummykey, client->mediaFileInfo);
-                                MediaProperties dmp = MediaProperties::decodeMediaPropertiesAttributes(":" + attrs, dummykey);
-                                cout << showMediaInfo(dmp, client->mediaFileInfo, false) << endl;
+            uint32_t dummykey[4] = {1, 2, 3, 4}; // check encode/decode
+            string attrs = mp.convertMediaPropertyFileAttributes(dummykey, client->mediaFileInfo);
+            auto dmp = MediaProperties::decodeMediaPropertiesAttributes(":" + attrs, dummykey);
+            cout << showMediaInfo(dmp.value_or(MediaProperties{}), client->mediaFileInfo, false)
+                 << endl;
         }
         else
         {
@@ -10842,6 +10955,8 @@ void DemoApp::enumeratequotaitems_result(const Product& product)
                  << "\n";
             cout << "\t\tId: " << product.mobileOffer->id << "\n";
             cout << "\t\tUat: " << product.mobileOffer->uat << "\n";
+            cout << "\t\tLabel: " << product.mobileOffer->label << "\n";
+            cout << "\t\tDiscount percentage: " << product.mobileOffer->discountPercentage << "\n";
         }
     }
     else // Business plan (type == 1)

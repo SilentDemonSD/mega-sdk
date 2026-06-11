@@ -7,11 +7,24 @@ find_path(FUSE_INCLUDE_DIR
           include/fuse
 )
 
+# First, try to locate libfuse under the same install prefix as headers.
+if (FUSE_INCLUDE_DIR)
+    if (CMAKE_VERSION VERSION_GREATER_EQUAL "3.20.0")
+        cmake_path(GET FUSE_INCLUDE_DIR PARENT_PATH _FUSE_INCLUDE_PARENT)
+        cmake_path(GET _FUSE_INCLUDE_PARENT PARENT_PATH _FUSE_HEADER_PREFIX)
+    else()
+        get_filename_component(_FUSE_INCLUDE_PARENT "${FUSE_INCLUDE_DIR}" DIRECTORY)
+        get_filename_component(_FUSE_HEADER_PREFIX "${_FUSE_INCLUDE_PARENT}" DIRECTORY)
+    endif()
+endif()
+
 find_library(FUSE_LIBRARY
-             libfuse3.so
-             libfuse.dylib
-             libfuse.so
+             NAMES
+             fuse3
+             fuse.2
+             fuse
              HINTS
+             ${_FUSE_HEADER_PREFIX}
              $ENV{FUSE_PREFIX}
              PATH_SUFFIXES
              lib
@@ -77,6 +90,8 @@ if (FUSE_INCLUDE_DIR AND FUSE_LIBRARY)
     # Cleanup after ourselves.
     unset(CONTENT)
     unset(FUSE_VERSION_PATH)
+    unset(_FUSE_HEADER_PREFIX)
+    unset(_FUSE_INCLUDE_PARENT)
 endif()
 
 include(FindPackageHandleStandardArgs)
@@ -91,4 +106,3 @@ find_package_handle_standard_args(
 )
 
 mark_as_advanced(FUSE_INCLUDE_DIR FUSE_LIBRARY)
-

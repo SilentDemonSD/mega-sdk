@@ -137,8 +137,16 @@ public:
         ASSERT_NO_FATAL_FAILURE(getAccountsForTest(1, true));
 
         ASSERT_NO_FATAL_FAILURE(initializeOtherSessions(2));
-        megaApi[1]->getClient()->enableStreaming();
-        megaApi[2]->getClient()->disableStreaming();
+        // TODO: enableStreaming() and disableStreaming() were previously used by the
+        // test cases below, which are disabled. They are no longer useful because
+        // the action packet parsing mode is now determined by the "apm" field in the
+        // SC response. We should use setScParserMode() instead. However,
+        // setScParserMode() changes the mode globally, so we need a way to configure
+        // it per MegaApi instance.
+        // - DISABLED_MassiveActionPacketsProcessing
+        // - DISABLED_IncrementalActionPacketsProcessing
+        // megaApi[1]->getClient()->enableStreaming();
+        // megaApi[2]->getClient()->disableStreaming();
     }
 
     void TearDown() override

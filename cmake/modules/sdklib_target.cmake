@@ -336,6 +336,13 @@ target_sources_conditional(SDKlib
     src/thread/cppthread.cpp
 )
 
+target_sources_conditional(SDKlib
+    FLAG USE_LIBUV
+    PRIVATE
+    include/impl/tcp_context_pool.h
+    src/impl/tcp_context_pool.cpp
+)
+
 # Include directories
 target_include_directories(SDKlib
     PUBLIC

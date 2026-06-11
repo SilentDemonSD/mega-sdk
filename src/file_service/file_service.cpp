@@ -1,3 +1,4 @@
+#include <mega/common/client_adapter.h>
 #include <mega/common/lock.h>
 #include <mega/file_service/file.h>
 #include <mega/file_service/file_id.h>
@@ -11,6 +12,43 @@
 
 #include <stdexcept>
 
+namespace
+{
+using mega::LocalPath;
+
+class PublicStorageNamer
+{
+public:
+    std::string name(const LocalPath& dbRoot);
+
+private:
+    std::map<LocalPath, uint64_t> mIndexes;
+    std::mutex mMutex;
+};
+
+std::string PublicStorageNamer::name(const LocalPath& dbRoot)
+{
+    // Allow different MegaApi instances to use the same db root. Some APP has this problem.
+    // Each db root path maintains own index. if db root path share one index,
+    // changing the MegaApi creation order may result in a different index to be used.
+    uint64_t index = 0;
+    {
+        const std::lock_guard<std::mutex> lock(mMutex);
+        auto [iterator, inserted] = mIndexes.try_emplace(dbRoot, 0);
+        index = iterator->second++;
+    }
+
+    return "public" + std::to_string(index);
+}
+
+PublicStorageNamer& getNamer()
+{
+    static PublicStorageNamer namer;
+    return namer;
+}
+
+}
+
 namespace mega
 {
 namespace file_service
@@ -18,16 +56,31 @@ namespace file_service
 
 using namespace common;
 
-FileService::FileService():
+FileService::FileService(common::Client& publicClient):
     mInstanceLogger("FileService", *this, logger()),
     mContext(),
-    mContextLock()
-{}
+    mContextLock(),
+    mReclaimOptions(),
+    mReclaimOptionsLock(),
+    mServiceOptions(),
+    mServiceOptionsLock(),
+    mPublicClient(publicClient),
+    mInitialized(false),
+    mPublicStorageName(getNamer().name(publicClient.dbRootPath()))
+{
+    construct();
+}
 
-FileService::~FileService() = default;
+FileService::~FileService()
+{
+    mPublicClient.deinitialize();
 
-auto FileService::add(NodeHandle handle, const NodeKeyData& keyData, std::size_t size)
-    -> FileServiceResultOr<FileID>
+    mContext.reset();
+}
+
+auto FileService::add(NodeHandle handle,
+                      const NodeKeyData& keyData,
+                      std::uint64_t size) -> FileServiceResultOr<FileID>
 {
     SharedLock guard(mContextLock);
 
@@ -48,6 +101,27 @@ auto FileService::addObserver(FileEventObserver observer)
     return unexpected(FILE_SERVICE_UNINITIALIZED);
 }
 
+auto FileService::construct() -> FileServiceResult
+try
+{
+    assert(!mContext);
+
+    mContext = std::make_unique<FileServiceContext>(
+        mPublicClient,
+        *this,
+        UserStoragePath{mPublicClient.dbRootPath(), mPublicStorageName});
+
+    FSInfo1("File Service constructed");
+
+    return FILE_SERVICE_SUCCESS;
+}
+catch (std::runtime_error& exception)
+{
+    FSErrorF("Unable to construct File Service: %s", exception.what());
+
+    return FILE_SERVICE_UNEXPECTED;
+}
+
 auto FileService::create(NodeHandle parent, const std::string& name) -> FileServiceResultOr<File>
 {
     SharedLock guard(mContextLock);
@@ -58,11 +132,40 @@ auto FileService::create(NodeHandle parent, const std::string& name) -> FileServ
     return mContext->create(parent, name);
 }
 
-void FileService::deinitialize()
+auto FileService::databasePath() const -> FileServiceResultOr<LocalPath>
+{
+    SharedLock guard(mContextLock);
+
+    if (mContext)
+        return mContext->databasePath();
+
+    return unexpected(FILE_SERVICE_UNINITIALIZED);
+}
+
+void FileService::deinitialize(bool cleanCache)
 {
     UniqueLock guard(mContextLock);
 
+    // No context needs to be destroyed.
+    if (!mContext)
+        return;
+
+    // Not initialized
+    if (!mInitialized)
+        return;
+
+    // Caller wants to clean the service's cache.
+    if (cleanCache)
+        mContext->cleanCacheOnDestruction();
+
+    // Destroy the service's context.
     mContext.reset();
+
+    // Reconstruct a context using public client
+    construct();
+
+    // Not initialized anymore
+    mInitialized = false;
 }
 
 auto FileService::info(FileID id) -> FileServiceResultOr<FileInfo>
@@ -101,41 +204,47 @@ auto FileService::open(FileID id) -> FileServiceResultOr<File>
     return mContext->open(id);
 }
 
-auto FileService::options(const FileServiceOptions& options) -> FileServiceResult
+void FileService::serviceOptions(const ServiceOptions& serviceOptions)
 {
-    SharedLock guard(mContextLock);
+    // Acquire service options lock.
+    UniqueLock guard(mServiceOptionsLock);
 
-    if (!mContext)
-        return FILE_SERVICE_UNINITIALIZED;
-
-    mContext->options(options);
-
-    return FILE_SERVICE_SUCCESS;
+    // Update service options.
+    mServiceOptions = serviceOptions;
 }
 
-auto FileService::options() -> FileServiceResultOr<FileServiceOptions>
+auto FileService::serviceOptions() -> ServiceOptions
 {
-    SharedLock guard(mContextLock);
+    // Acquire service options lock.
+    SharedLock guard(mServiceOptionsLock);
 
-    if (!mContext)
-        return unexpected(FILE_SERVICE_UNINITIALIZED);
-
-    return mContext->options();
+    // Return a snapshot of our current service options.
+    return mServiceOptions;
 }
 
-auto FileService::initialize(Client& client, const FileServiceOptions& options) -> FileServiceResult
+auto FileService::initialize(Client& client) -> FileServiceResult
 try
 {
     UniqueLock guard(mContextLock);
 
-    if (mContext)
+    if (mInitialized)
     {
         FSError1("File Service has already been initialized");
 
         return FILE_SERVICE_ALREADY_INITIALIZED;
     }
 
-    mContext = std::make_unique<FileServiceContext>(client, options);
+    // Switched to a logged-in client; clean the non logged-in client cache.
+    // Otherwise, the cache may remain unused for a long time without being reclaimed.
+    if (mContext)
+        mContext->cleanCacheOnDestruction();
+
+    mContext = std::make_unique<FileServiceContext>(
+        client,
+        *this,
+        UserStoragePath{client.dbRootPath(), client.sessionID()});
+
+    mInitialized = true;
 
     FSInfo1("File Service initialized");
 
@@ -143,14 +252,11 @@ try
 }
 catch (std::runtime_error& exception)
 {
+    mInitialized = false;
+
     FSErrorF("Unable to initialize File Service: %s", exception.what());
 
     return FILE_SERVICE_UNEXPECTED;
-}
-
-auto FileService::initialize(Client& client) -> FileServiceResult
-{
-    return initialize(client, FileServiceOptions());
 }
 
 auto FileService::purge() -> FileServiceResult
@@ -163,14 +269,55 @@ auto FileService::purge() -> FileServiceResult
     return mContext->purge();
 }
 
-void FileService::reclaim(ReclaimCallback callback)
+auto FileService::reclaim(ReclaimCallback callback,
+                          std::optional<ReclaimOptions> reclaimOptions) -> FileServiceResult
 {
     SharedLock guard(mContextLock);
 
     if (!mContext)
-        return callback(FILE_SERVICE_UNINITIALIZED);
+        return FILE_SERVICE_UNINITIALIZED;
 
-    return mContext->reclaim(std::move(callback));
+    // Convenience.
+    auto& executor = mContext->executor();
+
+    executor.execute(
+        [this, callback = std::move(callback), reclaimOptions = std::move(reclaimOptions)](
+            const common::Task&)
+        {
+            mContext->reclaim(std::move(callback),
+                              reclaimOptions.value_or(mContext->reclaimOptions()));
+        },
+        true);
+
+    return FILE_SERVICE_SUCCESS;
+}
+
+void FileService::reclaimOptions(const ReclaimOptions& newOptions)
+{
+    // Acquire reclaim options lock.
+    UniqueLock lockw(mReclaimOptionsLock);
+
+    // Update reclamation options.
+    mReclaimOptions = newOptions;
+
+    // Translate write lock into a read lock.
+    auto lockr = lockw.to_shared_lock();
+
+    // Acquire context lock.
+    SharedLock lockContext(mContextLock);
+
+    // Let the context know it's reclamation options have changed.
+    if (mContext)
+        mContext->reclaimOptionsChanged(newOptions);
+}
+
+auto FileService::reclaimOptions() -> ReclaimOptions
+{
+    // Acquire reclaim options lock.
+    SharedLock guard(mReclaimOptionsLock);
+
+    // Return a snapshot of our current reclamation options.
+    return mReclaimOptions;
 }
 
 auto FileService::removeObserver(FileEventObserverID id) -> FileServiceResult
@@ -185,6 +332,16 @@ auto FileService::removeObserver(FileEventObserverID id) -> FileServiceResult
     return FILE_SERVICE_SUCCESS;
 }
 
+auto FileService::storageInfo(const ReclaimOptions* options) -> FileServiceResultOr<StorageInfo>
+{
+    SharedLock guard(mContextLock);
+
+    if (!mContext)
+        return unexpected(FILE_SERVICE_UNINITIALIZED);
+
+    return mContext->storageInfo(options);
+}
+
 auto FileService::storageUsed() -> FileServiceResultOr<std::uint64_t>
 {
     SharedLock guard(mContextLock);
@@ -193,6 +350,16 @@ auto FileService::storageUsed() -> FileServiceResultOr<std::uint64_t>
         return unexpected(FILE_SERVICE_UNINITIALIZED);
 
     return mContext->storageUsed();
+}
+
+auto FileService::userFilePath(FileID id) const -> FileServiceResultOr<LocalPath>
+{
+    SharedLock guard(mContextLock);
+
+    if (mContext)
+        return mContext->userFilePath(id);
+
+    return unexpected(FILE_SERVICE_UNINITIALIZED);
 }
 
 } // file_service

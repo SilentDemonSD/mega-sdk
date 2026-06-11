@@ -1,10 +1,13 @@
 #pragma once
 
+#include <mega/auto_file_handle.h>
 #include <mega/common/activity_monitor.h>
 #include <mega/common/database_forward.h>
 #include <mega/common/instance_logger.h>
 #include <mega/common/lock_forward.h>
 #include <mega/common/node_key_data.h>
+#include <mega/common/statistics.h>
+#include <mega/common/task_queue.h>
 #include <mega/common/transaction_forward.h>
 #include <mega/file_service/buffer_pointer.h>
 #include <mega/file_service/file_append_request_forward.h>
@@ -19,11 +22,12 @@
 #include <mega/file_service/file_forward.h>
 #include <mega/file_service/file_info_context_pointer.h>
 #include <mega/file_service/file_info_forward.h>
-#include <mega/file_service/file_range_context_manager.h>
-#include <mega/file_service/file_range_context_pointer_map.h>
 #include <mega/file_service/file_range_forward.h>
+#include <mega/file_service/file_range_map.h>
+#include <mega/file_service/file_range_set.h>
 #include <mega/file_service/file_range_vector.h>
 #include <mega/file_service/file_read_request_forward.h>
+#include <mega/file_service/file_read_request_set.h>
 #include <mega/file_service/file_read_write_state.h>
 #include <mega/file_service/file_reclaim_request_forward.h>
 #include <mega/file_service/file_remove_request_forward.h>
@@ -36,20 +40,24 @@
 #include <mega/file_service/file_write_request_forward.h>
 #include <mega/types.h>
 
-#include <functional>
+#include <chrono>
+#include <cstdint>
+#include <future>
 #include <list>
 #include <memory>
 #include <mutex>
 #include <type_traits>
-#include <variant>
 
 namespace mega
 {
 namespace file_service
 {
 
-class FileContext final: FileRangeContextManager, public std::enable_shared_from_this<FileContext>
+class FileContext final: public std::enable_shared_from_this<FileContext>
 {
+    // Tracks state necessary for download.
+    class DownloadContext;
+
     // Tracks state necessary for fetch.
     class FetchContext;
 
@@ -60,6 +68,7 @@ class FileContext final: FileRangeContextManager, public std::enable_shared_from
     class ReclaimContext;
 
     // Convenience.
+    using DownloadContextPtr = std::shared_ptr<DownloadContext>;
     using FetchContextPtr = std::shared_ptr<FetchContext>;
     using FlushContextPtr = std::shared_ptr<FlushContext>;
     using FlushContextWeakPtr = std::weak_ptr<FlushContext>;
@@ -68,8 +77,11 @@ class FileContext final: FileRangeContextManager, public std::enable_shared_from
     // Add a range to the database.
     void addRange(const FileRange& range, common::Transaction& transaction);
 
-    // Cancel any reads intersect the specified range.
-    void cancel(const FileRange& range);
+    // Cancel all downloads contained within the specified range.
+    auto cancel(const FileRangeMap<DownloadContextPtr>& downloading,
+                const FileRange& range) -> std::list<DownloadContextPtr>;
+
+    auto cancel(const FileRange& range) -> std::future<void>;
 
     // Cancel a pending request.
     void cancel(FileRequest& request);
@@ -77,28 +89,26 @@ class FileContext final: FileRangeContextManager, public std::enable_shared_from
     // Cancel any downloads and pending requests.
     void cancel();
 
-    // Called when a file range has been downloaded.
-    void completed(Buffer& buffer,
-                   FileRangeContextPtrMap::Iterator iterator,
-                   FileRange range) override;
-
     // Called when a file read request has been completed.
-    void completed(BufferPtr buffer, FileReadRequest&& request) override;
+    void completed(BufferPtr buffer, FileReadRequest&& request);
 
     // Called when a file request has been completed.
     template<typename Request, typename Result, typename... Captures>
     auto completed(Request&& request, Result result, Captures&&... captures)
         -> std::enable_if_t<IsFileRequestV<Request>>;
 
+    // Called to complete all file read requests within range.
+    void completed(const FileRange& range);
+
     // Called when a file write request has been completed.
     void completed(FileWriteRequest&& request);
 
-    // Called when a request of a particular class is dequeued.
-    void dequeued(std::unique_lock<std::mutex> lock, FileReadRequestTag tag);
-    void dequeued(std::unique_lock<std::mutex> lock, FileWriteRequestTag tag);
+    // Dispatch all read requests within range.
+    template<typename Dispatcher>
+    void dispatch(Dispatcher&& dispatcher, const FileRange& range);
 
-    // Called when a request has been dequeued.
-    void dequeued(std::unique_lock<std::mutex> lock, const FileRequest& request);
+    // Large download bitrate
+    std::uint64_t downloadBitrate() const;
 
     // Check if a request can be executed.
     bool executable(std::unique_lock<std::mutex>& lock, bool queuing, const FileRequest& request);
@@ -106,9 +116,6 @@ class FileContext final: FileRangeContextManager, public std::enable_shared_from
     // Check if a particular class of request can be executed.
     bool executable(std::unique_lock<std::mutex>& lock, bool queuing, FileReadRequestTag tag);
     bool executable(std::unique_lock<std::mutex>& lock, bool queuing, FileWriteRequestTag tag);
-
-    // Called to execute an arbitrary function on the service's thread pool.
-    void execute(std::function<void()> function) override;
 
     // Try and execute an append request.
     void execute(FileAppendRequest& request);
@@ -151,30 +158,17 @@ class FileContext final: FileRangeContextManager, public std::enable_shared_from
     void executed(FileReadRequestTag tag);
     void executed(FileWriteRequestTag tag);
 
-    // Called when a file read request has failed.
-    void failed(FileReadRequest&& request, FileResult result) override;
+    // Called to fail all read requests within range.
+    void failed(const FileRange& range, FileResult result);
 
     // Increase this file's size.
     auto grow(std::uint64_t newSize, std::uint64_t oldSize)
         -> std::pair<common::UniqueLock<common::Database>, common::Transaction>;
 
-    // Acquire a lock on this manager.
-    std::unique_lock<std::recursive_mutex> lock() const override;
-
-    // Return a reference to the mutex protecting this manager.
-    std::recursive_mutex& mutex() const override;
-
-    // Retrieve a copy of the service's current options.
-    FileServiceOptions options() const override;
-
     // Queue a request for later execution.
     template<typename Request>
     auto queue(std::unique_lock<std::mutex> lock, Request&& request)
         -> std::enable_if_t<IsFileRequestV<Request>>;
-
-    // Called when a request of a particular class has been queued.
-    void queued(std::unique_lock<std::mutex> lock, FileReadRequestTag tag);
-    void queued(std::unique_lock<std::mutex> lock, FileWriteRequestTag tag);
 
     // Return an error if this request should be rejected.
     template<typename Request>
@@ -190,10 +184,16 @@ class FileContext final: FileRangeContextManager, public std::enable_shared_from
     auto shrink(std::uint64_t newSize, std::uint64_t oldSize)
         -> std::pair<common::UniqueLock<common::Database>, common::Transaction>;
 
+    // Update this file's access time in the database.
+    void updateAccessTime(std::int64_t accessed, common::Transaction& transaction);
+
     // Update this file's access and modification time in the database.
     void updateAccessAndModificationTimes(std::int64_t accessed,
                                           std::int64_t modified,
                                           common::Transaction& transaction);
+
+    // Called after a range has been written to disk.
+    FileRange updateRanges(FileRange range, common::Transaction& transaction);
 
     // Update the file's sizes in the database.
     void updateSize(std::uint64_t size, common::Transaction& transaction);
@@ -204,8 +204,18 @@ class FileContext final: FileRangeContextManager, public std::enable_shared_from
     // Keep our service alive until we're dead.
     common::Activity mActivity;
 
+    // What's the average bitrate of our large downloads?
+    common::EmaInteger mAverageLargeDownloadBitrate;
+
     // Wraps mFile and unifies logic.
     FileBufferPtr mBuffer;
+
+    // What ranges are currently being downloaded?
+    struct
+    {
+        FileRangeMap<DownloadContextPtr> mLarge;
+        FileRangeMap<DownloadContextPtr> mSmall;
+    } mDownloading;
 
     // How we get and set our file's attributes.
     FileInfoContextPtr mInfo;
@@ -228,14 +238,20 @@ class FileContext final: FileRangeContextManager, public std::enable_shared_from
     // The file's decryption key, IV and authentication tokens.
     const std::optional<common::NodeKeyData> mKeyData;
 
-    // How many write requests are pending?
-    std::size_t mNumPendingWriteRequests;
+    // Serializes access to mDownloading, mOnDisk and mPendingReadRequests.
+    mutable std::recursive_mutex mLock;
 
-    // What ranges of the file do we have?
-    FileRangeContextPtrMap mRanges;
+    // What ranges are present on disk?
+    FileRangeSet mOnDisk;
 
-    // Serializes access to mRanges.
-    mutable std::recursive_mutex mRangesLock;
+    // Read requests pending completion.
+    FileReadRequestSet mPendingReadRequests;
+
+    // Task pinning this context in memory, if any.
+    common::Task mPinTask;
+
+    // Serializes access to mPinTask.
+    std::recursive_mutex mPinTaskLock;
 
     // Tracks whether any reads or writes are in progress.
     FileReadWriteState mReadWriteState;
@@ -255,15 +271,18 @@ class FileContext final: FileRangeContextManager, public std::enable_shared_from
     // The service that manages this context.
     FileServiceContext& mService;
 
-    // Keeps us alive until all of our ranges have died.
-    common::ActivityMonitor mActivities;
+    // Keeps us alive until all of our downloads have completed.
+    common::ActivityMonitor mDownloadMonitor;
+
+    // Keeps us alive until all non-download operations have completed.
+    common::ActivityMonitor mMonitor;
 
 public:
     FileContext(common::Activity activity,
                 FileAccessPtr file,
                 FileInfoContextPtr info,
                 std::optional<common::NodeKeyData> keyData,
-                const FileRangeVector& ranges,
+                FileRangeSet ranges,
                 FileServiceContext& service);
 
     ~FileContext();
@@ -273,6 +292,12 @@ public:
 
     // Append data to the end of this file.
     void append(FileAppendRequest request);
+
+    // Duplicate OS file descriptor of storage file, return an unset AutoFileHandle on errors
+    AutoFileHandle dupFileDescriptor();
+
+    // What ranges are currently being downloaded?
+    FileRangeVector downloading() const;
 
     // Fetch all of this file's data from the cloud.
     void fetch(FileFetchRequest request);
@@ -285,6 +310,19 @@ public:
 
     // Retrieve information about this file.
     FileInfo info() const;
+
+    // Pin this context in memory for a specified period of time.
+    template<typename Rep, typename Duration>
+    void pinFor(std::chrono::duration<Rep, Duration> period)
+    {
+        pinUntil(std::chrono::steady_clock::now() + period);
+    }
+
+    // Pin this context in memory until the specified time.
+    void pinUntil(std::chrono::steady_clock::time_point when);
+
+    // Return a copy of the service's current options.
+    ServiceOptions serviceOptions() const;
 
     // What ranges of this file are currently in storage?
     FileRangeVector ranges() const;

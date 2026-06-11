@@ -1,4 +1,3 @@
-#include <mega/common/client.h>
 #include <mega/common/node_info.h>
 #include <mega/file_service/file_id.h>
 #include <mega/file_service/file_storage.h>
@@ -26,7 +25,7 @@ FileAccessPtr FileStorage::openFile(const LocalPath& path, bool mustCreate)
         throw FSError1("Couldn't create file access instance");
 
     // Vulnerable to TOCTOU race.
-    if (file->isfile(path) != !mustCreate || !file->fopen(path, OPEN_RDWR, FSLogging::noLogging))
+    if (file->isfile(path) != !mustCreate || !file->fopen(path, OPEN_RDWR, FSLogging::logOnError))
         throw FSErrorF("Couldn't %s file: %s",
                        mustCreate ? "create" : "open",
                        path.toPath(false).c_str());
@@ -38,10 +37,10 @@ FileAccessPtr FileStorage::openFile(const LocalPath& path, bool mustCreate)
     return file;
 }
 
-FileStorage::FileStorage(const Client& client):
+FileStorage::FileStorage(const UserStoragePath& userStoragePath):
     mFilesystem(std::make_unique<FSACCESS_CLASS>()),
-    mStorageDirectory(*mFilesystem, logger(), "file-service", client.dbRootPath()),
-    mUserStorageDirectory(*mFilesystem, logger(), client.sessionID(), mStorageDirectory),
+    mStorageDirectory(*mFilesystem, logger(), "file-service", userStoragePath.dbRoot),
+    mUserStorageDirectory(*mFilesystem, logger(), userStoragePath.userName, mStorageDirectory),
     mUserCacheDirectory(*mFilesystem, logger(), "cache", mUserStorageDirectory),
     mFolderLocker(mUserCacheDirectory.path().asPlatformEncoded(true))
 {}
@@ -67,6 +66,21 @@ LocalPath FileStorage::databasePath() const
 FileAccessPtr FileStorage::getFile(FileID id)
 {
     return openFile(userFilePath(id), false);
+}
+
+bool FileStorage::removeFile(FileID id, std::nothrow_t)
+{
+    // Compute the file's path.
+    auto path = userFilePath(id);
+
+    // File was removed from storage.
+    if (mFilesystem->unlinklocal(path))
+        return true;
+
+    // Couldn't remove the file from storage.
+    FSWarningF("Couldn't remove file: %s", path.toPath(false).c_str());
+
+    return false;
 }
 
 void FileStorage::removeFile(FileID id)

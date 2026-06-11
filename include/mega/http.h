@@ -246,7 +246,7 @@ struct MEGA_API HttpIO : public EventTrigger
     bool success;
 
     // post request to target URL
-    virtual void post(struct HttpReq*, const char* = NULL, unsigned = 0) = 0;
+    virtual void post(struct HttpReq*, const char* = NULL, size_t = 0) = 0;
 
     // cancel request
     virtual void cancel(HttpReq*) = 0;
@@ -402,7 +402,7 @@ struct MEGA_API HttpReq
     void setreq(const char*, contenttype_t);
 
     // send POST request to the network
-    void post(MegaClient*, const char* = NULL, unsigned = 0);
+    void post(MegaClient*, const char* = NULL, size_t = 0);
 
     // send GET request to the network
     void get(MegaClient*);
@@ -411,7 +411,7 @@ struct MEGA_API HttpReq
     void dns(MegaClient*);
 
     // store chunk of incoming data with optional purging
-    void put(void*, unsigned, bool = false);
+    void put(void*, size_t, bool = false);
 
     // start and size of unpurged data block - must be called with !buf and httpio locked
     char* data();
@@ -533,7 +533,7 @@ public:
     // encryption: data must be NULL-padded to SymmCipher::BLOCKSIZE
     // (so buffer allocation size must be rounded up too)
     // len must be < 2^31
-    virtual byte* nextbuffer(unsigned datasize) = 0;
+    virtual byte* nextbuffer(size_t datasize) = 0;
 
     bool encrypt(m_off_t pos, m_off_t npos, string& urlSuffix);
 
@@ -542,7 +542,7 @@ private:
     chunkmac_map* macs;
     uint64_t ctriv;     // initialization vector for CTR mode
     byte crc[CRCSIZE];
-    void updateCRC(byte* data, unsigned size, unsigned offset);
+    void updateCRC(byte* data, size_t size, size_t offset);
 };
 
 class MEGA_API EncryptBufferByChunks : public EncryptByChunks
@@ -550,7 +550,7 @@ class MEGA_API EncryptBufferByChunks : public EncryptByChunks
     // specialisation for encrypting a whole contiguous buffer by chunks
     byte *chunkstart;
 
-    byte* nextbuffer(unsigned bufsize) override;
+    byte* nextbuffer(size_t bufsize) override;
 
 public:
     EncryptBufferByChunks(byte* b, SymmCipher* k, chunkmac_map* m, uint64_t iv);
@@ -559,7 +559,7 @@ public:
 // file chunk I/O
 struct MEGA_API HttpReqXfer : public HttpReq
 {
-    unsigned size;
+    uint64_t size;
     double mStartTransferTime{-1};
     double mConnectTime{-1};
     bool isLatencyProcessed{};

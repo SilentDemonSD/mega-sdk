@@ -247,9 +247,10 @@ TransferSlot::~TransferSlot()
                 switch (static_cast<reqstatus_t>(downloadRequest->status))
                 {
                     case REQ_INFLIGHT:
-                        if (fa && downloadRequest && downloadRequest->status == REQ_INFLIGHT
-                            && downloadRequest->contentlength == downloadRequest->size
-                            && downloadRequest->bufpos >= SymmCipher::BLOCKSIZE)
+                        if (fa && downloadRequest && downloadRequest->status == REQ_INFLIGHT &&
+                            downloadRequest->contentlength ==
+                                static_cast<m_off_t>(downloadRequest->size) &&
+                            downloadRequest->bufpos >= SymmCipher::BLOCKSIZE)
                         {
                             HttpReq::http_buf_t* buf = downloadRequest->release_buf();
                             buf->end -= buf->datalen() % RAIDSECTOR;
@@ -668,7 +669,10 @@ void TransferSlot::doio(MegaClient* client, TransferDbCommitter& committer)
         if (reqs[i])
         {
             unsigned slowestStartConnection;
-            if (transfer->type == GET && reqs[i]->contentlength == reqs[i]->size && !transferbuf.isNewRaid() && transferbuf.detectSlowestRaidConnection(i, slowestStartConnection))
+            if (transfer->type == GET &&
+                reqs[i]->contentlength == static_cast<m_off_t>(reqs[i]->size) &&
+                !transferbuf.isNewRaid() &&
+                transferbuf.detectSlowestRaidConnection(i, slowestStartConnection))
             {
                 LOG_debug << "Connection " << slowestStartConnection << " is the slowest to reply, using the other 5.";
                 reqs[slowestStartConnection].reset();
@@ -682,10 +686,11 @@ void TransferSlot::doio(MegaClient* client, TransferDbCommitter& committer)
                 // check if we got some data and the failure occured partway through the part chunk.  If so, best not to waste it, convert to success case with less data
                 HttpReqDL *downloadRequest = static_cast<HttpReqDL*>(reqs[i].get());
                 LOG_debug << "Connection " << i << " received " << downloadRequest->bufpos << " before failing, processing data.";
-                if (downloadRequest->contentlength == downloadRequest->size && downloadRequest->bufpos >= RAIDSECTOR)
+                if (downloadRequest->contentlength == static_cast<m_off_t>(downloadRequest->size) &&
+                    downloadRequest->bufpos >= RAIDSECTOR)
                 {
                     downloadRequest->bufpos -= downloadRequest->bufpos % RAIDSECTOR;  // always on a raidline boundary
-                    downloadRequest->size = unsigned(downloadRequest->bufpos);
+                    downloadRequest->size = static_cast<uint64_t>(downloadRequest->bufpos);
                     transferbuf.transferPos(i) = downloadRequest->bufpos;
                     downloadRequest->status = REQ_SUCCESS;
                 }
@@ -725,24 +730,31 @@ void TransferSlot::doio(MegaClient* client, TransferDbCommitter& committer)
                 case REQ_SUCCESS:
                 {
                     processRequestLatency(reqs[i]);
-                    mReqSpeeds[i].requestProgressed(reqs[i]->size);
+                    mReqSpeeds[i].requestProgressed(static_cast<m_off_t>(reqs[i]->size));
 
                     if (client->orderdownloadedchunks && transfer->type == GET && !transferbuf.isRaid() && transfer->progresscompleted != static_cast<HttpReqDL*>(reqs[i].get())->dlpos)
                     {
                         LOG_debug << "Conn " << i << " : POSTPONING UNSORTED CHUNK";
                         // postponing unsorted chunk
-                        p += reqs[i]->size;
+                        p += static_cast<m_off_t>(reqs[i]->size);
                         break;
                     }
 
                     lastdata = Waiter::ds;
                     transfer->lastaccesstime = m_time();
 
-                    LOG_debug << "Conn " << i << " : Transfer request finished (" << connDirectionToStr(transfer->type) << ")"
-                            << " " << reqs[i]->pos << " - " << (reqs[i]->pos + reqs[i]->size)
-                            << "   Size: " << reqs[i]->size
-                            << (transferbuf.isRaid() ? string("   Part progress: " + std::to_string(transferbuf.transferPos(i)) + "/" + std::to_string(transferbuf.raidPartSize(i, transfer->size))) : "")
-                            << "   (" << (mReqSpeeds[i].lastRequestMeanSpeed() / 1024) << " KB/s)";
+                    LOG_debug << "Conn " << i << " : Transfer request finished ("
+                              << connDirectionToStr(transfer->type) << ")" << " " << reqs[i]->pos
+                              << " - " << (reqs[i]->pos + static_cast<m_off_t>(reqs[i]->size))
+                              << "   Size: " << reqs[i]->size
+                              << (transferbuf.isRaid() ?
+                                      string("   Part progress: " +
+                                             std::to_string(transferbuf.transferPos(i)) + "/" +
+                                             std::to_string(
+                                                 transferbuf.raidPartSize(i, transfer->size))) :
+                                      "")
+                              << "   (" << (mReqSpeeds[i].lastRequestMeanSpeed() / 1024)
+                              << " KB/s)";
 
                     if (transfer->type == PUT)
                     {
@@ -920,7 +932,10 @@ void TransferSlot::doio(MegaClient* client, TransferDbCommitter& committer)
                     else   // GET
                     {
                         HttpReqDL *downloadRequest = static_cast<HttpReqDL*>(reqs[i].get());
-                        if (reqs[i]->size == reqs[i]->bufpos || downloadRequest->buffer_released)   // downloadRequest->buffer_released being true indicates we're retrying this asyncIO
+                        if (static_cast<m_off_t>(reqs[i]->size) == reqs[i]->bufpos ||
+                            downloadRequest
+                                ->buffer_released) // downloadRequest->buffer_released being true
+                                                   // indicates we're retrying this asyncIO
                         {
                             if (!downloadRequest->buffer_released)
                             {
@@ -1325,7 +1340,8 @@ void TransferSlot::doio(MegaClient* client, TransferDbCommitter& committer)
             {
                 if (reqs[i]->status == REQ_PREPARED &&
                     (numInflight && !earliestUploadCompleted &&
-                    earliestPosInFlight + MAX_GAP_SIZE < (reqs[i]->pos + reqs[i]->size)))
+                     earliestPosInFlight + MAX_GAP_SIZE <
+                         (reqs[i]->pos + static_cast<m_off_t>(reqs[i]->size))))
                 {
                     LOG_debug << "Connection " << i << " delaying until earliest completes. pos=" << reqs[i]->pos;
                     reqs[i]->status = REQ_UPLOAD_PREPARED_BUT_WAIT;
@@ -1355,9 +1371,9 @@ void TransferSlot::doio(MegaClient* client, TransferDbCommitter& committer)
                         LOG_verbose << "Conn " << i << " : balancedRequest Size: " << reqs[i]->size << ". Pos: " << reqs[i]->pos << ". Progressreported = " << progressreported << ", progresscompleted = " << transfer->progresscompleted << " [req = " << (void*)reqs[i].get() << "]";
                         if (!cloudRaid->balancedRequest(static_cast<int>(i),
                                                         transferbuf.tempUrlVector(),
-                                                        reqs[i]->size,
+                                                        static_cast<size_t>(reqs[i]->size),
                                                         reqs[i]->pos,
-                                                        reqs[i]->size))
+                                                        static_cast<size_t>(reqs[i]->size)))
                         {
                             reqs[i]->status = REQ_FAILURE;
                         }
@@ -1711,7 +1727,7 @@ std::pair<error, dstime> TransferSlot::processRaidReq(size_t connection, m_off_t
         httpReq->status = REQ_INFLIGHT;
     }
     byte* buf = httpReq->buf + httpReq->bufpos;
-    m_off_t len = httpReq->size - httpReq->bufpos;
+    m_off_t len = static_cast<m_off_t>(httpReq->size) - httpReq->bufpos;
     assert((len > 0) && "len is 0 in processRaidReq");
 
     // Get raid-assembled data
@@ -1719,7 +1735,7 @@ std::pair<error, dstime> TransferSlot::processRaidReq(size_t connection, m_off_t
     if (raidReqProgress > 0)
     {
         httpReq->bufpos += raidReqProgress;
-        if (httpReq->bufpos == httpReq->size)
+        if (httpReq->bufpos == static_cast<m_off_t>(httpReq->size))
         {
             httpReq->status = REQ_SUCCESS;
         }

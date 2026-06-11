@@ -2582,9 +2582,28 @@ m_off_t DirectRead::drMaxReqSize() const
     return std::max(drn->size / numParts, TransferSlot::MAX_REQ_SIZE);
 }
 
+bool DirectRead::match(void* appData) const
+{
+    // Sanity: callback should never be null.
+    assert(callback);
+
+    // No callback? No match.
+    if (!callback)
+        return false;
+
+    DirectRead::CallbackParam param{std::in_place_type<DirectRead::Match>, appData};
+
+    // Ask our callback if this read references appData.
+    callback(param);
+
+    // Let our caller know if this read references appData.
+    return std::get<DirectRead::Match>(param).mMatched;
+}
+
 void DirectRead::revokeCallback(void* appData)
 {
     assert(callback);
+
     DirectRead::CallbackParam param{std::in_place_type<DirectRead::Revoke>, appData};
     callback(param);
 }

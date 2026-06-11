@@ -83,9 +83,24 @@ MountResult MountDB::check(const Client& client, const MountInfo& info) const
     // Path isn't accessible.
     if (fileAccess->type == TYPE_UNKNOWN)
     {
-        FUSEErrorF("Local path doesn't exist: %s", path.toPath(false).c_str());
+        auto errorCode = fileAccess->errorcode;
 
-        return MOUNT_LOCAL_UNKNOWN;
+        if (errorCode == ENOTCONN || errorCode == ESTALE)
+        {
+            FUSEErrorF("Local path points to stale or inaccessible mount: %s (errno: %d)",
+                       path.toPath(false).c_str(),
+                       errorCode);
+
+            return MOUNT_LOCAL_STALE;
+        }
+        else
+        {
+            FUSEErrorF("Local path doesn't exist: %s (errno: %d)",
+                       path.toPath(false).c_str(),
+                       errorCode);
+
+            return MOUNT_LOCAL_UNKNOWN;
+        }
     }
 
     // Path denotes a file.

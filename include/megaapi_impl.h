@@ -24,6 +24,9 @@
 
 #include "mega.h"
 #include "mega/command.h"
+#include "mega/file_service/file_callbacks.h"
+#include "mega/file_service/file_service_options.h"
+#include "mega/file_service/file_stream_result.h"
 #include "mega/filesystem.h"
 #include "mega/gfx/external.h"
 #include "mega/heartbeats.h"
@@ -32,6 +35,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <map>
 #include <memory>
 
 #define CRON_USE_LOCAL_TIME 1
@@ -63,6 +67,7 @@
 #endif
 
 #include "impl/share.h"
+#include "impl/tcp_context_pool.h"
 
 // FUSE
 #include <mega/fuse/common/mount_flags.h>
@@ -1106,8 +1111,13 @@ class MegaNodePrivate : public MegaNode, public Cacheable
         bool mMarkedSensitive = false; // sensitive attribute set on this node
         nodelabel_t mLabel;
         bool mIsNodeKeyDecrypted = false;
-};
 
+    private:
+        template<typename PropertySelector>
+        auto getMediaProperty(PropertySelector selector)
+            -> std::enable_if_t<MediaProperties::IsPropertySelectorV<PropertySelector>,
+                                std::optional<MediaProperties::PropertyTypeT<PropertySelector>>>;
+};
 
 class MegaBackupInfoPrivate : public MegaBackupInfo
 {
@@ -2258,6 +2268,10 @@ class MegaRequestPrivate : public MegaRequest
         const MegaDiscountCodeInfo* getMegaDiscountCodeInfo() const override;
         void setMegaDiscountCodeInfo(std::unique_ptr<MegaDiscountCodeInfo> discountCodeInfo);
 
+        const MegaFileServiceReclaimOptions* getMegaFileServiceReclaimOptions() const override;
+        // Take ownership of the options object.
+        void setMegaFileServiceReclaimOptions(MegaFileServiceReclaimOptions* options);
+
         static bool causesLocklessRequest(const int type);
 
     protected:
@@ -2332,6 +2346,8 @@ class MegaRequestPrivate : public MegaRequest
         unique_ptr<MegaDiscountCodeList> mMegaDiscountCodeList;
         unique_ptr<MegaDiscountCodeInfo> mMegaDiscountCodeInfo;
 
+        unique_ptr<MegaFileServiceReclaimOptions> mMegaFileServiceReclaimOptions;
+
     public:
         shared_ptr<ExecuteOnce> functionToExecute;
 };
@@ -2350,6 +2366,7 @@ public:
     MegaHandle getHandle() const override;
     const char* getEventString() const override;
     std::optional<int64_t> getNumber(const std::string& key) const override;
+    MegaIntegerList* getIntegerList() const override;
 
     std::string getValidDataToString() const;
     static const char* getEventString(int type);
@@ -2358,6 +2375,7 @@ public:
     void setNumber(int64_t newNumber);
     void setHandle(const MegaHandle& handle);
     void setNumber(const std::string& key, int64_t value);
+    void setIntegerList(MegaIntegerList* integerList);
 
 protected:
     int type;
@@ -2365,6 +2383,7 @@ protected:
     int64_t number = -1;
     std::map<std::string, int64_t> numberMap;
     MegaHandle mHandle = INVALID_HANDLE;
+    std::unique_ptr<MegaIntegerList> mIntegerList;
 };
 
 class MegaAccountBalancePrivate : public MegaAccountBalance
@@ -2611,6 +2630,8 @@ public:
     bool hasMobileOffers(int productIndex) const override;
     std::string getMobileOfferId(int productIndex) const override;
     bool hasMobileOfferUat(int productIndex) const override;
+    std::string getMobileOfferLabel(int productIndex) const override;
+    int getMobileOfferDiscountPercentage(int productIndex) const override;
     bool hasDiscount(int productIndex) const override;
     const char* getDiscountCode(int productIndex) const override;
     const char* getDiscountName(int productIndex) const override;
@@ -3080,14 +3101,14 @@ class EncryptFilePieceByChunks : public EncryptByChunks
     FileAccess* faout;
     m_off_t inpos, outpos;
     string buffer;
-    unsigned lastsize;
+    size_t lastsize;
 
 public:
 
     EncryptFilePieceByChunks(FileAccess* cFain, m_off_t cInPos, FileAccess* cFaout, m_off_t cOutPos,
                              SymmCipher* cipher, chunkmac_map* chunkmacs, uint64_t ctriv);
 
-    byte* nextbuffer(unsigned bufsize) override;
+    byte* nextbuffer(size_t bufsize) override;
 };
 
 class MegaBackgroundMediaUploadPrivate : public MegaBackgroundMediaUpload
@@ -3843,6 +3864,11 @@ class MegaApiImpl : public MegaApp
         virtual ~MegaApiImpl();
 
         static MegaApiImpl* ImplOf(MegaApi*);
+
+        void ensureIsMegaApiImplThread() const
+        {
+            assert(threadId == std::this_thread::get_id() && "We are not in MegaApiImpl's thread");
+        }
 
         /**
          * @brief Max children count to allow name-based search for nodes with same name than local
@@ -4694,6 +4720,8 @@ public:
         int httpServerGetMaxBufferSize();
         void httpServerSetMaxOutputSize(int outputSize);
         int httpServerGetMaxOutputSize();
+        void httpServerSetThrottleBitrate(unsigned long long bitrateBps);
+        unsigned long long httpServerGetThrottleBitrate();
 
         // permissions
         void httpServerEnableFileServer(bool enable);
@@ -4707,13 +4735,6 @@ public:
         void httpServerEnableOfflineAttribute(bool enable);
         void httpServerEnableSubtitlesSupport(bool enable);
         bool httpServerIsSubtitlesSupportEnabled();
-
-        void httpServerAddListener(MegaTransferListener *listener);
-        void httpServerRemoveListener(MegaTransferListener *listener);
-
-        void fireOnStreamingStart(MegaTransferPrivate *transfer);
-        void fireOnStreamingTemporaryError(MegaTransferPrivate *transfer, unique_ptr<MegaErrorPrivate> e);
-        void fireOnStreamingFinish(MegaTransferPrivate *transfer, unique_ptr<MegaErrorPrivate> e);
 
         //FTP
         bool ftpServerStart(bool localOnly = true, int port = 4990, int dataportBegin = 1500, int dataPortEnd = 1600, bool useTLS = false, const char *certificatepath = NULL, const char *keypath = NULL);
@@ -4939,6 +4960,16 @@ public:
 
         void getDiscountCodeInformation(const char* discountCode, MegaRequestListener* listener);
 
+        MegaFileServiceReclaimOptions* fileServiceGetReclaimOptions();
+
+        void fileServiceSetReclaimOptions(const MegaFileServiceReclaimOptions* options);
+
+        void fileServiceReclaim(const MegaFileServiceReclaimOptions* options,
+                                MegaRequestListener* listener);
+
+        MegaFileServiceStorageInfo*
+            fileServiceGetStorageInfo(const MegaFileServiceReclaimOptions* options);
+
     private:
         void init(MegaApi* publicApi,
                   std::unique_ptr<GfxProc> gfxproc,
@@ -4952,7 +4983,9 @@ public:
         MegaTransferPrivate* getMegaTransferPrivate(int tag);
 
         void fireOnRequestStart(MegaRequestPrivate *request);
-        void fireOnRequestFinish(MegaRequestPrivate *request, unique_ptr<MegaErrorPrivate> e, bool callbackIsFromSyncThread = false);
+        void fireOnRequestFinish(MegaRequestPrivate* request,
+                                 unique_ptr<MegaErrorPrivate> e,
+                                 bool callbackIsFromOtherThread = false);
         void fireOnRequestUpdate(MegaRequestPrivate *request);
         void fireOnRequestTemporaryError(MegaRequestPrivate *request, unique_ptr<MegaErrorPrivate> e);
         bool fireOnTransferData(MegaTransferPrivate *transfer);
@@ -5017,12 +5050,12 @@ public:
         MegaHTTPServer *httpServer;
         int httpServerMaxBufferSize;
         int httpServerMaxOutputSize;
+        std::atomic_ullong httpServerThrottleBitrateBps{0}; // bps, 0 = disabled
         bool httpServerEnableFiles;
         bool httpServerEnableFolders;
         bool httpServerOfflineAttributeEnabled;
         int httpServerRestrictedMode;
         bool httpServerSubtitlesSupportEnabled;
-        set<MegaTransferListener *> httpServerListeners;
 
         MegaFTPServer *ftpServer;
         int ftpServerMaxBufferSize;
@@ -5361,6 +5394,8 @@ public:
         // notify credit card Expiry
         void notify_creditCardExpiry() override;
 
+        void notify_transfers_resumed(const std::vector<uint32_t>& uniqueIds) override;
+
         void sendPendingScRequest();
         void sendPendingRequests();
         unsigned sendPendingTransfers(TransferQueue *queue, MegaRecursiveOperation* = nullptr, m_off_t availableDiskSpace = 0);
@@ -5576,6 +5611,7 @@ public:
 };
 
 #ifdef HAVE_LIBUV
+
 class StreamingBuffer
 {
 public:
@@ -5668,9 +5704,11 @@ public:
     uv_async_t asynchandle;
     uv_mutex_t mutex;
     MegaApiImpl *megaApi;
+    // Bytes has been written so far
     m_off_t bytesWritten;
+    // All bytes going to be written
     m_off_t size;
-    bool finished;
+    std::atomic_bool finished{false};
 
 #ifdef ENABLE_EVT_TLS
     //tls stuff:
@@ -5679,6 +5717,8 @@ public:
 #endif
     std::list<char*> writePointers;
 };
+
+using MegaTCPContextPtr = shared_ptr<MegaTCPContext>;
 
 class MegaTCPServer
 {
@@ -5690,7 +5730,8 @@ protected:
 
     set<handle> allowedHandles;
     handle lastHandle;
-    list<MegaTCPContext*> connections;
+    TcpContextPool connections;
+    std::map<MegaTCPContext*, MegaTCPContextPtr> closingConnections;
     uv_async_t exit_handle;
     MegaApiImpl *megaApi;
     bool semaphoresdestroyed;
@@ -5793,7 +5834,7 @@ protected:
      * @note The returned context will be managed by the TCP server
      * @note Caller is responsible for proper initialization of the context
      */
-    virtual MegaTCPContext* initializeContext(uv_stream_t* server_handle) = 0;
+    virtual MegaTCPContextPtr initializeContext(uv_stream_t* server_handle) = 0;
 
     /**
      * @brief Handle completion of a write operation.
@@ -5866,6 +5907,7 @@ public:
     bool start(int newPort, bool newLocalOnly = true);
     void stop(bool doNotWait = false);
     int getPort();
+    uv_loop_t* getUvLoop();
     bool isLocalOnly();
     void setMaxBufferSize(int bufferSize);
     void setMaxOutputSize(int outputSize);
@@ -5886,12 +5928,29 @@ public:
     void readData(MegaTCPContext* tcpctx);
 };
 
-class MegaHTTPContext : public MegaTCPContext
+struct FileStreamResultConsumption
+{
+    struct Value
+    {
+        // Result returned from file service stream callback
+        file_service::FileStreamResult mFileStreamResult;
+        // How many length has been consumed
+        std::uint64_t mConsumedLength{};
+    };
+
+    std::optional<Value> mValue;
+};
+
+class MegaHTTPContext: public MegaTCPContext, public std::enable_shared_from_this<MegaHTTPContext>
 {
 private:
+    friend class MegaHTTPServer;
     static std::atomic_uint32_t nextId;
     const uint32_t contextId;
     std::string logname;
+    FileStreamResultConsumption mFileStreamResultConsumption{};
+
+    std::unique_ptr<uv_work_t> processFileStreamResult();
 
 public:
     MegaHTTPContext();
@@ -5899,13 +5958,17 @@ public:
 
     // Connection management
     StreamingBuffer streamingBuffer;
-    std::unique_ptr<MegaTransferPrivate> transfer;
     http_parser parser;
     char *lastBuffer;
     size_t lastBufferLen;
+
+    // Rate limiting: adaptive — only delay when data arrives faster than throttle rate
+    unsigned long long throttleBps{0};
+    std::optional<std::chrono::steady_clock::time_point> throttleLastChunkTime{};
+    std::optional<m_off_t> throttleOffset{};
+
     bool nodereceived;
-    bool failed;
-    bool pause;
+    std::atomic_bool failed{false};
 
     // Request information
     bool range;
@@ -5942,11 +6005,14 @@ public:
     uv_mutex_t mutex_responses;
     std::list<std::string> responses;
 
-    virtual void onTransferStart(MegaApi*, MegaTransfer* httpTransfer);
-    virtual bool
-        onTransferData(MegaApi*, MegaTransfer* httpTransfer, char* buffer, size_t dataSize);
-    virtual void onTransferFinish(MegaApi* api, MegaTransfer *transfer, MegaError *e);
-    virtual void onRequestFinish(MegaApi* api, MegaRequest *request, MegaError *e);
+    // Support PUT to upload a file by using MegaApi::startUpload
+    virtual void onTransferStart(MegaApi*, MegaTransfer*) override;
+    virtual void onTransferFinish(MegaApi*, MegaTransfer*, MegaError*) override;
+
+    // Only needed by streaming via MegaApi::startStreaming
+    virtual bool onTransferData(MegaApi*, MegaTransfer*, char*, size_t) override;
+
+    virtual void onRequestFinish(MegaApi* api, MegaRequest* request, MegaError* e) override;
 
     const std::string& getLogName() const
     {
@@ -5965,9 +6031,9 @@ protected:
     bool subtitlesSupportEnabled;
 
     //virtual methods:
-    virtual void processReceivedData(MegaTCPContext *ftpctx, ssize_t nread, const uv_buf_t * buf);
-    virtual void processAsyncEvent(MegaTCPContext *ftpctx);
-    virtual MegaTCPContext * initializeContext(uv_stream_t *server_handle);
+    virtual void processReceivedData(MegaTCPContext* tcpctx, ssize_t nread, const uv_buf_t* buf);
+    virtual void processAsyncEvent(MegaTCPContext* tcpctx);
+    virtual MegaTCPContextPtr initializeContext(uv_stream_t* server_handle);
     virtual void processWriteFinished(MegaTCPContext* tcpctx, int status);
     virtual void processOnAsyncEventClose(MegaTCPContext* tcpctx);
     virtual bool respondNewConnection(MegaTCPContext* tcpctx);
@@ -5985,6 +6051,7 @@ protected:
 
     static void sendHeaders(MegaHTTPContext *httpctx, string *headers);
     static void sendNextBytes(MegaHTTPContext *httpctx);
+    static bool startStream(MegaHTTPContext* httpctx, std::uint64_t offset, std::uint64_t length);
     static int streamNode(MegaHTTPContext *httpctx);
 
     //Utility funcitons
@@ -6124,7 +6191,7 @@ protected:
     //virtual methods:
     virtual void processReceivedData(MegaTCPContext *tcpctx, ssize_t nread, const uv_buf_t * buf);
     virtual void processAsyncEvent(MegaTCPContext *tcpctx);
-    virtual MegaTCPContext * initializeContext(uv_stream_t *server_handle);
+    virtual MegaTCPContextPtr initializeContext(uv_stream_t* server_handle);
     virtual void processWriteFinished(MegaTCPContext* tcpctx, int status);
     virtual void processOnAsyncEventClose(MegaTCPContext* tcpctx);
     virtual bool respondNewConnection(MegaTCPContext* tcpctx);
@@ -6158,7 +6225,7 @@ protected:
     //virtual methods:
     virtual void processReceivedData(MegaTCPContext *tcpctx, ssize_t nread, const uv_buf_t * buf);
     virtual void processAsyncEvent(MegaTCPContext *tcpctx);
-    virtual MegaTCPContext * initializeContext(uv_stream_t *server_handle);
+    virtual MegaTCPContextPtr initializeContext(uv_stream_t* server_handle);
     virtual void processWriteFinished(MegaTCPContext* tcpctx, int status);
     virtual void processOnAsyncEventClose(MegaTCPContext* tcpctx);
     virtual bool respondNewConnection(MegaTCPContext* tcpctx);
@@ -6858,6 +6925,63 @@ public:
 private:
     DiscountCodeInfoExtended mDiscountCodeInfo;
 };
+
+class MegaFileServiceReclaimOptionsPrivate: public MegaFileServiceReclaimOptions
+{
+private:
+    file_service::ReclaimOptions mReclaim;
+
+protected:
+    MegaFileServiceReclaimOptionsPrivate(const MegaFileServiceReclaimOptionsPrivate&);
+
+public:
+    MegaFileServiceReclaimOptionsPrivate(const file_service::ReclaimOptions& options);
+
+    MegaFileServiceReclaimOptionsPrivate();
+
+    ~MegaFileServiceReclaimOptionsPrivate() override;
+
+    MegaFileServiceReclaimOptions* copy() const override;
+
+    int getAgeThreshold() const override;
+
+    void setAgeThreshold(int ageThreshold) override;
+
+    std::size_t getBatchSize() const override;
+
+    void setBatchSize(std::size_t batchSize) override;
+
+    uint64_t getDelay() const override;
+
+    void setDelay(uint64_t seconds) override;
+
+    uint64_t getPeriod() const override;
+
+    void setPeriod(uint64_t seconds) override;
+
+    uint64_t getReclaimTarget() const override;
+
+    void setReclaimTarget(uint64_t bytes) override;
+
+    int64_t getReclaimThreshold() const override;
+
+    void setReclaimThreshold(int64_t bytes) override;
+
+    file_service::ReclaimOptions getOptions() const;
+}; // MegaFileServiceReclaimOptionsPrivate
+
+class MegaFileServiceStorageInfoPrivate: public MegaFileServiceStorageInfo
+{
+private:
+    file_service::StorageInfo mStorageInfo;
+
+public:
+    MegaFileServiceStorageInfoPrivate(const file_service::StorageInfo& storageInfo);
+
+    uint64_t getAllocatedSize() const override;
+
+    uint64_t getReclaimableSize() const override;
+}; // MegaFileServiceStorageInfoPrivate
 
 std::unique_ptr<FileSystemAccess> createFSA();
 }

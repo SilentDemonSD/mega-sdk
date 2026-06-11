@@ -1,7 +1,6 @@
 #include <mega/common/activity_monitor.h>
 #include <mega/common/instance_logger.h>
 #include <mega/common/shared_mutex.h>
-#include <mega/file_service/file_event_emitter.h>
 #include <mega/file_service/file_event_observer.h>
 #include <mega/file_service/file_event_observer_id.h>
 #include <mega/file_service/file_id.h>
@@ -12,6 +11,7 @@
 #include <mega/file_service/file_size_info.h>
 #include <mega/types.h>
 
+#include <cstddef>
 #include <mutex>
 #include <optional>
 #include <type_traits>
@@ -21,11 +21,8 @@ namespace mega
 namespace file_service
 {
 
-class FileInfoContext: FileEventEmitter, public FileSizeInfo
+class FileInfoContext: public FileSizeInfo
 {
-    // Maps observer IDs to observer callbacks.
-    using FileEventObserverMap = std::map<FileEventObserverID, FileEventObserver>;
-
     // Retrieve one of our properties in a thread-safe manner.
     template<typename T>
     auto get(T FileInfoContext::* const property) const;
@@ -33,9 +30,6 @@ class FileInfoContext: FileEventEmitter, public FileSizeInfo
     // Set one of our properties in a thread-safe manner.
     template<typename T, typename U>
     void set(T FileInfoContext::*property, U&& value);
-
-    // Transmit an event to all registered observers.
-    void notify(const FileEvent& event);
 
     // Logs instance lifetime.
     common::InstanceLogger<FileInfoContext> mInstanceLogger;
@@ -51,6 +45,9 @@ class FileInfoContext: FileEventEmitter, public FileSizeInfo
 
     // Whether this file's been locally modified.
     bool mDirty;
+
+    // How long does this file play for?
+    const std::optional<std::uint32_t> mDuration;
 
     // The node in the cloud this file is associated with, if any.
     NodeHandle mHandle;
@@ -84,6 +81,7 @@ public:
                     common::Activity activity,
                     std::uint64_t allocatedSize,
                     bool dirty,
+                    std::optional<std::uint32_t> duration,
                     NodeHandle handle,
                     FileID id,
                     std::optional<FileLocation> location,
@@ -95,13 +93,13 @@ public:
     ~FileInfoContext();
 
     // Set the file's last access time.
-    void accessed(std::int64_t accessed);
+    std::int64_t accessed(std::int64_t accessed);
 
     // When was this file last accessed?
     std::int64_t accessed() const;
 
-    // Add an observer.
-    using FileEventEmitter::addObserver;
+    // Notify observer when a file changes.
+    FileEventObserverID addObserver(FileEventObserver observer);
 
     // Update this file's allocated size.
     void allocatedSize(std::uint64_t allocatedSize) override;
@@ -109,8 +107,18 @@ public:
     // How much disk space has been allocated to this file?
     std::uint64_t allocatedSize() const override;
 
+    // What is the estimated bitrate of this file?
+    //
+    // Meaningful only for media files such as videos.
+    std::optional<std::uint64_t> bitrate() const;
+
     // Has the file been locally modified?
     bool dirty() const;
+
+    // How long does this file play for?
+    //
+    // Meaningful only for media files such as videos.
+    std::optional<std::uint32_t> duration() const;
 
     // Signal that this file has been flushed to the cloud.
     void flushed(NodeHandle handle);
@@ -133,14 +141,14 @@ public:
     // When was this file last modified?
     auto modified() const -> std::int64_t;
 
-    // Remove an observer.
-    using FileEventEmitter::removeObserver;
-
     // Specify whether this file has been removed.
     void removed(bool replaced);
 
     // Has this file been removed?
     bool removed() const;
+
+    // Remove a previously added observer.
+    void removeObserver(FileEventObserverID id);
 
     // Update this file's reported size.
     void reportedSize(std::uint64_t reportedSize) override;

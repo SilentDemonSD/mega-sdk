@@ -5,7 +5,8 @@ namespace mega
 namespace file_service
 {
 
-class FileRangeContext;
+struct FileStreamResult;
+struct FileStreamFDResult;
 
 } // file_service
 } // mega

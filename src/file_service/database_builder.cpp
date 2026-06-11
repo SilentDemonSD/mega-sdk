@@ -11,14 +11,23 @@ using namespace common;
 
 static void downgrade10(Query& query);
 static void downgrade21(Query& query);
+static void downgrade32(Query& query);
+static void downgrade43(Query& query);
+static void downgrade54(Query& query);
 
 static void upgrade01(Query& query);
 static void upgrade12(Query& query);
+static void upgrade23(Query& query);
+static void upgrade34(Query& query);
+static void upgrade45(Query& query);
 
 const DatabaseVersionVector& DatabaseBuilder::versions() const
 {
     static const DatabaseVersionVector versions = {{&downgrade10, &upgrade01},
-                                                   {&downgrade21, &upgrade12}}; // versions
+                                                   {&downgrade21, &upgrade12},
+                                                   {&downgrade32, &upgrade23},
+                                                   {&downgrade43, &upgrade34},
+                                                   {&downgrade54, &upgrade45}}; // versions
 
     return versions;
 }
@@ -41,6 +50,65 @@ void downgrade10(Query& query)
 void downgrade21(Query& query)
 {
     query = "drop table file_key_data";
+
+    query.execute();
+}
+
+void downgrade32(Query& query)
+{
+    query = "drop table file_durations";
+
+    query.execute();
+}
+
+void downgrade43(Query& query)
+{
+    query = "create table file_key_data_new ( "
+            "  chat_auth text, "
+            "  id integer "
+            "  constraint nn_file_key_data_id "
+            "             not null, "
+            "  is_public integer "
+            "  constraint nn_file_key_data_is_public "
+            "             not null, "
+            "  key_and_iv text "
+            "  constraint nn_file_key_data_key_and_iv "
+            "             not null, "
+            "  public_auth text, "
+            "  private_auth text, "
+            "  constraint fk_file_key_data_files "
+            "             foreign key (id) "
+            "             references files (id) "
+            "             on delete cascade, "
+            "  constraint pk_file_key_data "
+            "            primary key (id) "
+            ")";
+
+    query.execute();
+
+    query = "insert into file_key_data_new "
+            "select chat_auth "
+            "     , id "
+            "     , is_public "
+            "     , key_and_iv "
+            "     , private_auth "
+            "     , public_auth "
+            "  from file_key_data";
+
+    query.execute();
+
+    query = "drop table file_key_data";
+
+    query.execute();
+
+    query = "alter table file_key_data_new rename to file_key_data";
+
+    query.execute();
+}
+
+void downgrade54(Query& query)
+{
+    query = "drop index if exists idx_files_storage_sizes";
 
     query.execute();
 }
@@ -159,6 +227,80 @@ void upgrade12(Query& query)
             "  constraint pk_file_key_data "
             "            primary key (id) "
             ")";
+
+    query.execute();
+}
+
+void upgrade23(Query& query)
+{
+    query = "create table file_durations ( "
+            "  duration integer "
+            "  constraint nn_file_durations_duration "
+            "             not null, "
+            "  id integer "
+            "  constraint nn_file_durations_id "
+            "             not null, "
+            "  constraint fk_file_durations_files "
+            "             foreign key (id) "
+            "             references files (id) "
+            "             on delete cascade, "
+            "  constraint pk_file_durations "
+            "             primary key (id) "
+            ")";
+
+    query.execute();
+}
+
+void upgrade34(Query& query)
+{
+    query = "create table file_key_data_new ( "
+            "  chat_auth text, "
+            "  id integer "
+            "  constraint nn_file_key_data_id "
+            "             not null, "
+            "  is_public integer "
+            "  constraint nn_file_key_data_is_public "
+            "             not null, "
+            "  key_and_iv text "
+            "  constraint nn_file_key_data_key_and_iv "
+            "             not null, "
+            "  private_auth text, "
+            "  public_auth text, "
+            "  constraint fk_file_key_data_files "
+            "             foreign key (id) "
+            "             references files (id) "
+            "             on delete cascade, "
+            "  constraint pk_file_key_data "
+            "            primary key (id) "
+            ")";
+
+    query.execute();
+
+    query = "insert into file_key_data_new "
+            "select chat_auth "
+            "     , id "
+            "     , is_public "
+            "     , key_and_iv "
+            "     , public_auth "
+            "     , private_auth "
+            "  from file_key_data";
+
+    query.execute();
+
+    query = "drop table file_key_data";
+
+    query.execute();
+
+    query = "alter table file_key_data_new rename to file_key_data";
+
+    query.execute();
+}
+
+void upgrade45(Query& query)
+{
+    // Index for mGetStorageInfo query
+    query = "create index if not exists idx_files_storage_sizes "
+            "  on files (removed, accessed, id, allocated_size, reported_size, size)";
 
     query.execute();
 }

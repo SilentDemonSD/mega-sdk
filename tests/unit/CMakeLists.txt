@@ -69,6 +69,12 @@ target_sources(test_unit
 )
 
 target_sources_conditional(test_unit
+    FLAG USE_LIBUV
+    PRIVATE
+    impl/tcp_context_pool_test.cpp
+)
+
+target_sources_conditional(test_unit
     FLAG ENABLE_ISOLATED_GFX
     PRIVATE
     Isolatedprocess_test.cpp

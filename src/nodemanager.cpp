@@ -1761,6 +1761,7 @@ void NodeManager::notifyPurge()
 
         // Let the client adapter know that nodes have been updated.
         mClient.mClientAdapter.updated(nodesToReport);
+        mClient.mPublicClientAdapter.updated(nodesToReport);
 
         TransferDbCommitter committer(mClient.tctable);
 

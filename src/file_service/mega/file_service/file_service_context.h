@@ -8,7 +8,6 @@
 #include <mega/common/node_key_data.h>
 #include <mega/common/shared_mutex.h>
 #include <mega/common/task_executor.h>
-#include <mega/common/task_queue.h>
 #include <mega/file_service/file_context_badge_forward.h>
 #include <mega/file_service/file_context_pointer.h>
 #include <mega/file_service/file_event_emitter.h>
@@ -18,14 +17,17 @@
 #include <mega/file_service/file_info_context_badge_forward.h>
 #include <mega/file_service/file_info_context_pointer.h>
 #include <mega/file_service/file_info_forward.h>
-#include <mega/file_service/file_range_vector.h>
+#include <mega/file_service/file_range_set.h>
 #include <mega/file_service/file_service_callbacks.h>
 #include <mega/file_service/file_service_context_forward.h>
+#include <mega/file_service/file_service_forward.h>
 #include <mega/file_service/file_service_options.h>
 #include <mega/file_service/file_service_queries.h>
 #include <mega/file_service/file_service_result_or_forward.h>
 #include <mega/file_service/file_storage.h>
 #include <mega/file_service/from_file_id_map.h>
+#include <mega/file_service/storage_info.h>
+#include <mega/scoped_helpers.h>
 
 #include <chrono>
 #include <condition_variable>
@@ -41,7 +43,7 @@ class LocalPath;
 namespace file_service
 {
 
-class FileServiceContext: common::NodeEventObserver, public FileEventEmitter
+class FileServiceContext: common::NodeEventObserver
 {
     // Processes client node events.
     class EventProcessor;
@@ -57,6 +59,9 @@ class FileServiceContext: common::NodeEventObserver, public FileEventEmitter
 
     template<typename Lock>
     FileID allocateID(Lock&& lock, common::Transaction& transaction);
+
+    // Remove unmodified files from the database and from disk.
+    void cleanCache();
 
     template<typename Lock>
     void deallocateID(FileID id, Lock&& lock, common::Transaction& transaction);
@@ -83,13 +88,13 @@ class FileServiceContext: common::NodeEventObserver, public FileEventEmitter
     auto keyData(FileID id, Transaction&& transaction) -> std::optional<common::NodeKeyData>;
 
     template<typename Transaction>
-    auto ranges(FileID id, Transaction&& transaction) -> FileRangeVector;
+    auto ranges(FileID id, Transaction&& transaction) -> FileRangeSet;
 
     void reclaimTaskCallback(common::Activity& activity,
                              std::chrono::steady_clock::time_point when,
                              const common::Task& task);
 
-    auto reclaimable() -> FileServiceResultOr<FileIDVector>;
+    auto reclaimable(const ReclaimOptions& reclaimOptions) -> FileServiceResultOr<FileIDVector>;
 
     template<typename ContextLock, typename DatabaseLock>
     void remove(ContextLock&& contextLock,
@@ -107,6 +112,11 @@ class FileServiceContext: common::NodeEventObserver, public FileEventEmitter
     bool removeFromIndex(FileID id, FromFileIDMap<T>& map);
 
     void purgeRemovedFiles();
+
+    template<typename Lock, typename Transaction>
+    auto storageInfo(Lock&& lock,
+                     const ReclaimOptions& reclaimOptions,
+                     Transaction&& transaction) -> StorageInfo;
 
     template<typename Lock, typename Transaction>
     auto storageUsed(Lock&& lock, Transaction&& transaction) -> std::uint64_t;
@@ -131,6 +141,12 @@ class FileServiceContext: common::NodeEventObserver, public FileEventEmitter
     common::Database mDatabase;
     FileServiceQueries mQueries;
 
+    // Responsible for cleaning the service's cache on destruction.
+    //
+    // Note that mCacheCleaner makes use of the mDatabase, mQueries and
+    // mStorage members directly above during destruction.
+    ScopedDestructor mCacheCleaner;
+
     FromFileIDMap<FileContextWeakPtr> mFileContexts;
     std::condition_variable_any mInfoContextRemoved;
     FromFileIDMap<FileInfoContextWeakPtr> mInfoContexts;
@@ -140,12 +156,6 @@ class FileServiceContext: common::NodeEventObserver, public FileEventEmitter
     // Note that if we want to run some query on the database, we must
     // explicitly lock mDatabase, too.
     common::SharedMutex mLock;
-
-    // Specifies various metrics that control how the service behaves.
-    FileServiceOptions mOptions;
-
-    // Serializes access to mOptions.
-    common::SharedMutex mOptionsLock;
 
     // Tracks any reclaim in progress.
     ReclaimContextPtr mReclaimContext;
@@ -158,6 +168,12 @@ class FileServiceContext: common::NodeEventObserver, public FileEventEmitter
 
     // Serializes access to mReclaimTask.
     std::recursive_mutex mReclaimTaskLock;
+
+    // Responsible for event notification.
+    FileEventEmitter mEventEmitter;
+
+    // What service does this context belong to?
+    FileService& mService;
 
     // This member will ensure the context isn't destroyed until any related
     // activities have been completed.
@@ -172,13 +188,25 @@ class FileServiceContext: common::NodeEventObserver, public FileEventEmitter
     common::TaskExecutor mExecutor;
 
 public:
-    FileServiceContext(common::Client& client, const FileServiceOptions& options);
+    FileServiceContext(common::Client& client,
+                       FileService& service,
+                       const UserStoragePath& userStoragePath);
 
     ~FileServiceContext();
 
     // Add a foreign file to the service.
-    auto add(NodeHandle handle, const common::NodeKeyData& keyData, std::size_t size)
-        -> FileServiceResultOr<FileID>;
+    auto add(NodeHandle handle,
+             const common::NodeKeyData& keyData,
+             std::uint64_t size) -> FileServiceResultOr<FileID>;
+
+    // Notify observer when a file changes.
+    FileEventObserverID addObserver(FileEventObserver observer);
+
+    // Notify observer when a specific file changes.
+    FileEventObserverID addObserver(FileID id, FileEventObserver observer);
+
+    // Let the service know it should clean the cache on destruction.
+    void cleanCacheOnDestruction();
 
     // Retrieve a reference to this service's client.
     common::Client& client();
@@ -189,21 +217,21 @@ public:
     // Retrieve a reference to this service's database.
     common::Database& database();
 
-    // Execute a task on this service's thread pool.
-    auto execute(std::function<void(const common::Task&)> function) -> common::Task;
+    // Where is the service storing this user's database?
+    LocalPath databasePath() const;
+
+    // Get a reference to this context's task executor.
+    common::TaskExecutor& executor();
 
     // Retrieve information about a file managed by this service.
     auto info(FileID id) -> FileServiceResultOr<FileInfo>;
 
+    // Emit a file event.
+    void notify(const FileEvent& event);
+
     // Open a file for reading or writing.
     auto open(NodeHandle parent, const std::string& name) -> FileServiceResultOr<File>;
     auto open(FileID id) -> FileServiceResultOr<File>;
-
-    // Update the file service's options.
-    void options(const FileServiceOptions& options);
-
-    // Retrieve the file service's current options.
-    FileServiceOptions options();
 
     // Find out where the service is storing the specified file.
     LocalPath path(FileID id) const;
@@ -215,7 +243,19 @@ public:
     auto purge() -> FileServiceResult;
 
     // Reclaim storage space.
-    void reclaim(ReclaimCallback callback);
+    void reclaim(ReclaimCallback callback, const ReclaimOptions& reclaimOptions);
+
+    // Remove an observer.
+    void removeObserver(FileEventObserverID id);
+
+    // Remove an observer from a specific file.
+    void removeObserver(FileID id, FileEventObserverID observerID);
+
+    // Retrieve the file service's current reclaim options.
+    ReclaimOptions reclaimOptions();
+
+    // Let the context know its reclamation options has changed.
+    void reclaimOptionsChanged(const ReclaimOptions& newOptions);
 
     // Remove a file context from our index.
     void removeFromIndex(FileContextBadge badge, FileID id);
@@ -223,8 +263,19 @@ public:
     // Remove a file info context from our index.
     void removeFromIndex(FileInfoContextBadge badge, FileInfoContext& context);
 
+    // Retrieve the service's current options.
+    ServiceOptions serviceOptions();
+
     // How much storage space is the service using?
+    // Get storage size information in detail such as reclaimable storage size
+    auto storageInfo(const ReclaimOptions* options) -> FileServiceResultOr<StorageInfo>;
+
+    // How much storage space is the service using? Better performance than storageInfo but with
+    // less information
     auto storageUsed() -> FileServiceResultOr<std::uint64_t>;
+
+    // Find out where the service is storing a particular file.
+    LocalPath userFilePath(FileID id) const;
 }; // FileServiceContext
 
 } // file_service

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <mega/common/type_traits.h>
 #include <mega/file_service/file_request.h>
 #include <mega/file_service/file_request_tags.h>
 #include <mega/file_service/type_traits.h>
@@ -43,8 +44,15 @@ using IsFileRemoveRequest = std::is_same<FileRemoveRequest, T>;
 template<typename T>
 constexpr auto IsFileRemoveRequestV = IsFileRemoveRequest<T>::value;
 
+template<typename Key, typename Type>
+struct IsFileRequestHelper;
+
+template<typename Key, typename First, typename... Rest>
+struct IsFileRequestHelper<Key, std::variant<First, Rest...>>: common::IsOneOf<Key, First, Rest...>
+{}; // IsFileRequestHelper<Key, std::variant<First, Rest...>>
+
 template<typename T>
-using IsFileRequest = std::is_constructible<FileRequest, T>;
+using IsFileRequest = IsFileRequestHelper<T, FileRequest>;
 
 template<typename T>
 constexpr auto IsFileRequestV = IsFileRequest<T>::value;

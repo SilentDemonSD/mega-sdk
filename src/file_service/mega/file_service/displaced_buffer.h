@@ -26,12 +26,6 @@ public:
               std::uint64_t targetOffset,
               std::uint64_t length) const -> std::pair<std::uint64_t, bool> override;
 
-    // Update our displacement.
-    void displacement(std::uint64_t displacement);
-
-    // What is our displacement?
-    std::uint64_t displacement() const;
-
     // Check if this buffer is a file buffer.
     bool isFileBuffer() const override;
 
@@ -45,7 +39,7 @@ public:
 }; // DisplacedBuffer
 
 // Displace a buffer.
-DisplacedBufferPtr displace(BufferPtr buffer, std::uint64_t displacement);
+BufferPtr displace(BufferPtr buffer, std::uint64_t displacement);
 
 } // file_service
 } // mega

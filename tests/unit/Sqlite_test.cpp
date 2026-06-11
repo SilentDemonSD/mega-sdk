@@ -10,6 +10,7 @@
 #include <mega/localpath.h>
 
 #include <filesystem>
+#include <fstream>
 #include <mega.h>
 #include <set>
 #include <sqlite3.h>
@@ -107,11 +108,581 @@ TEST(Sqlite, renameDB)
     }
 }
 
+namespace
+{
+
+/**
+ * @brief Computed paths for the legacy/current DB triplets seeded by
+ *        createLegacyDbTestFiles().
+ */
+struct LegacyDbTestFiles
+{
+    LocalPath legacyPath;
+    LocalPath legacyShm;
+    LocalPath legacyWal;
+    LocalPath currentPath;
+    LocalPath currentShm;
+    LocalPath currentWal;
+};
+
+/**
+ * @brief Creates the test folder and seeds DB placeholder files for
+ *        checkDbFileAndAdjustLegacy_* tests.
+ *
+ * Seeds both the legacy and the current-version triplet (main, -shm, -wal)
+ * with distinct contents ("legacy-*" and "current-*") so callers can verify
+ * reuse, rename, and delete semantics.
+ *
+ * @param folderFsPath  filesystem directory to create
+ * @param dbAccess      used to compute the legacy/current paths
+ * @param fsaccess      used by databasePath()
+ * @param dbName        DB base name
+ * @return Computed legacy and current paths (with -shm/-wal sidecars).
+ */
+LegacyDbTestFiles createLegacyDbTestFiles(const std::filesystem::path& folderFsPath,
+                                          SqliteDbAccess& dbAccess,
+                                          FileSystemAccess& fsaccess,
+                                          const std::string& dbName)
+{
+    std::filesystem::create_directory(folderFsPath);
+
+    LegacyDbTestFiles p;
+    p.legacyPath = dbAccess.databasePath(fsaccess, dbName, DbAccess::LEGACY_DB_VERSION);
+    p.legacyShm = p.legacyPath;
+    p.legacyShm.append(LocalPath::fromRelativePath("-shm"));
+    p.legacyWal = p.legacyPath;
+    p.legacyWal.append(LocalPath::fromRelativePath("-wal"));
+
+    p.currentPath = dbAccess.databasePath(fsaccess, dbName, DbAccess::DB_VERSION);
+    p.currentShm = p.currentPath;
+    p.currentShm.append(LocalPath::fromRelativePath("-shm"));
+    p.currentWal = p.currentPath;
+    p.currentWal.append(LocalPath::fromRelativePath("-wal"));
+
+    const std::vector<std::pair<LocalPath, std::string>> seed = {
+        {p.legacyPath, "legacy-main"},
+        {p.legacyShm, "legacy-shm"},
+        {p.legacyWal, "legacy-wal"},
+        {p.currentPath, "current-main"},
+        {p.currentShm, "current-shm"},
+        {p.currentWal, "current-wal"},
+    };
+
+    for (const auto& [path, contents]: seed)
+    {
+        std::ofstream{path.toPath(false)} << contents;
+        EXPECT_TRUE(std::filesystem::exists(path.toPath(false)))
+            << "Failed to create placeholder file " << path.toPath(false);
+    }
+
+    return p;
+}
+
+} // namespace
+
+/**
+ * @brief Validate checkDbFileAndAdjustLegacy method reuses legacy DB files
+ *
+ *
+ * Steps:
+ *  - Init currentDbVersion of DbAccess to LEGACY_DB_VERSION.
+ *  - Drop placeholder files at both the legacy and the current-version paths
+ *    (main, -shm, -wal sidecars) with distinct content, named with SQLite's
+ *    WAL convention.
+ *  - Call checkDbFileAndAdjustLegacy with flags 0.
+ *  - Assert dbPath now points at the legacy path and the function reports the
+ *    DB as existing.
+ *  - Verify both the legacy and current triplets are left untouched (content
+ *    unchanged); the reuse path must not modify the current-version files.
+ */
+TEST(Sqlite, checkDbFileAndAdjustLegacy_useLegacyDB)
+{
+    if (DbAccess::LEGACY_DB_VERSION == DbAccess::LAST_DB_VERSION_WITHOUT_NOD ||
+        DbAccess::LEGACY_DB_VERSION == DbAccess::LAST_DB_VERSION_WITHOUT_SRW ||
+        DbAccess::LEGACY_DB_VERSION == DbAccess::LAST_DB_VERSION_WITHOUT_VFINGERPRINT)
+    {
+        GTEST_SKIP()
+            << "use-legacy-DB branch is unreachable: LEGACY_DB_VERSION sits at a migration cutoff";
+    }
+
+    auto pathString{std::filesystem::current_path() / "folder_use_legacy"};
+
+    const MrProper cleanUp(
+        [pathString]()
+        {
+            std::filesystem::remove_all(pathString);
+        });
+
+    LocalPath folderPath = LocalPath::fromAbsolutePath(path_u8string(pathString));
+    SqliteDbAccess dbAccess{folderPath};
+
+    std::unique_ptr<FileSystemAccess> fsaccess{new FSACCESS_CLASS};
+    const std::string dbName{"dbToTest"};
+
+    const LegacyDbTestFiles paths =
+        createLegacyDbTestFiles(pathString, dbAccess, *fsaccess, dbName);
+
+    LocalPath dbPath;
+    constexpr int flags = 0;
+    dbAccess.currentDbVersion = DbAccess::LEGACY_DB_VERSION;
+    const bool exists = dbAccess.checkDbFileAndAdjustLegacy(*fsaccess, dbName, flags, dbPath);
+
+    EXPECT_TRUE(exists) << "checkDbFileAndAdjustLegacy should report the legacy DB as existing";
+    EXPECT_EQ(dbPath.toPath(false), paths.legacyPath.toPath(false))
+        << "dbPath should be the legacy path when reusing the legacy DB as-is";
+    EXPECT_EQ(dbAccess.currentDbVersion, DbAccess::LEGACY_DB_VERSION)
+        << "currentDbVersion should remain at LEGACY_DB_VERSION when reusing the legacy DB";
+
+    auto readFile = [](const LocalPath& p)
+    {
+        std::ifstream in{p.toPath(false)};
+        return std::string{std::istreambuf_iterator<char>(in), {}};
+    };
+
+    LocalPath dbShm = dbPath;
+    dbShm.append(LocalPath::fromRelativePath("-shm"));
+    LocalPath dbWal = dbPath;
+    dbWal.append(LocalPath::fromRelativePath("-wal"));
+
+    EXPECT_EQ(readFile(dbPath), "legacy-main") << "Legacy DB file should be untouched";
+    EXPECT_EQ(readFile(dbShm), "legacy-shm") << "Legacy -shm sidecar should be untouched";
+    EXPECT_EQ(readFile(dbWal), "legacy-wal") << "Legacy -wal sidecar should be untouched";
+    EXPECT_EQ(readFile(paths.currentPath), "current-main")
+        << "Current DB file should be untouched when reusing the legacy DB";
+    EXPECT_EQ(readFile(paths.currentShm), "current-shm")
+        << "Current -shm sidecar should be untouched when reusing the legacy DB";
+    EXPECT_EQ(readFile(paths.currentWal), "current-wal")
+        << "Current -wal sidecar should be untouched when reusing the legacy DB";
+}
+
+/**
+ * @brief Validate checkDbFileAndAdjustLegacy method recycles legacy DB files
+ *
+ *
+ * Steps:
+ *  - Init currentDbVersion of DbAccess to DB_VERSION.
+ *  - Drop placeholder files at the legacy paths AND the current-version paths
+ *    (main, -shm, -wal sidecars), each with distinct content so the rename is
+ *    verifiable. Files are named with SQLite's WAL convention (suffix appended
+ *    to the full filename).
+ *  - Call checkDbFileAndAdjustLegacy with flags DB_OPEN_FLAG_RECYCLE. This wipes
+ *    the stale current-version files via removeDBFiles, then renames the legacy
+ *    triplet onto the current-version paths.
+ *  - Assert all three legacy files have been removed.
+ *  - Verify the rename by comparing content: each current-version file must now
+ *    hold what was originally written to its legacy counterpart.
+ */
+TEST(Sqlite, checkDbFileAndAdjustLegacy_recycleLegacyDB)
+{
+    auto pathString{std::filesystem::current_path() / "folder_recycle_legacy"};
+
+    const MrProper cleanUp(
+        [pathString]()
+        {
+            std::filesystem::remove_all(pathString);
+        });
+
+    LocalPath folderPath = LocalPath::fromAbsolutePath(path_u8string(pathString));
+    SqliteDbAccess dbAccess{folderPath};
+
+    std::unique_ptr<FileSystemAccess> fsaccess{new FSACCESS_CLASS};
+    const std::string dbName{"dbToTest"};
+
+    const LegacyDbTestFiles paths =
+        createLegacyDbTestFiles(pathString, dbAccess, *fsaccess, dbName);
+
+    LocalPath dbPath;
+    constexpr int flags = DB_OPEN_FLAG_RECYCLE;
+    dbAccess.currentDbVersion = DbAccess::DB_VERSION;
+    const bool exists = dbAccess.checkDbFileAndAdjustLegacy(*fsaccess, dbName, flags, dbPath);
+
+    EXPECT_TRUE(exists) << "checkDbFileAndAdjustLegacy should report the legacy DB as existing";
+    EXPECT_EQ(dbPath.toPath(false), paths.currentPath.toPath(false))
+        << "dbPath should be the current path when recycling the legacy DB as-is";
+    EXPECT_TRUE(dbAccess.currentDbVersion == DbAccess::DB_VERSION)
+        << "currentDbVersion was not updated to DB_VERSION";
+
+    EXPECT_FALSE(std::filesystem::exists(paths.legacyPath.toPath(false)))
+        << "Legacy DB file " << paths.legacyPath.toPath(false) << " still exists";
+    EXPECT_FALSE(std::filesystem::exists(paths.legacyShm.toPath(false)))
+        << "Legacy -shm sidecar " << paths.legacyShm.toPath(false) << " still exists";
+    EXPECT_FALSE(std::filesystem::exists(paths.legacyWal.toPath(false)))
+        << "Legacy -wal sidecar " << paths.legacyWal.toPath(false) << " still exists";
+
+    auto readFile = [](const LocalPath& p)
+    {
+        std::ifstream in{p.toPath(false)};
+        return std::string{std::istreambuf_iterator<char>(in), {}};
+    };
+
+    LocalPath dbShm = dbPath;
+    dbShm.append(LocalPath::fromRelativePath("-shm"));
+    LocalPath dbWal = dbPath;
+    dbWal.append(LocalPath::fromRelativePath("-wal"));
+
+    EXPECT_EQ(readFile(dbPath), "legacy-main")
+        << "Current DB file content doesn't match the legacy main content";
+    EXPECT_EQ(readFile(dbShm), "legacy-shm")
+        << "Current -shm sidecar content doesn't match the legacy -shm content";
+    EXPECT_EQ(readFile(dbWal), "legacy-wal")
+        << "Current -wal sidecar content doesn't match the legacy -wal content";
+}
+
+/**
+ * @brief Validate checkDbFileAndAdjustLegacy method deletes legacy DB files
+ *
+ *
+ * Steps:
+ *  - Init currentDbVersion of DbAccess to DB_VERSION.
+ *  - Drop placeholder files at both the legacy and the current-version paths
+ *    (main, -shm, -wal sidecars), named with SQLite's WAL convention (suffix
+ *    appended to the full filename).
+ *  - Call checkDbFileAndAdjustLegacy with flags 0.
+ *  - Assert all three legacy files have been removed.
+ *  - Verify the current-version triplet is left untouched (content unchanged);
+ *    the delete path must not modify the current-version files.
+ */
+TEST(Sqlite, checkDbFileAndAdjustLegacy_deleteLegacyDB)
+{
+    auto pathString{std::filesystem::current_path() / "folder_remove_legacy"};
+
+    const MrProper cleanUp(
+        [pathString]()
+        {
+            std::filesystem::remove_all(pathString);
+        });
+
+    LocalPath folderPath = LocalPath::fromAbsolutePath(path_u8string(pathString));
+    SqliteDbAccess dbAccess{folderPath};
+
+    std::unique_ptr<FileSystemAccess> fsaccess{new FSACCESS_CLASS};
+    const std::string dbName{"dbToTest"};
+
+    const LegacyDbTestFiles paths =
+        createLegacyDbTestFiles(pathString, dbAccess, *fsaccess, dbName);
+
+    LocalPath dbPath;
+    constexpr int flags = 0;
+    dbAccess.currentDbVersion = DbAccess::DB_VERSION;
+    const bool exists = dbAccess.checkDbFileAndAdjustLegacy(*fsaccess, dbName, flags, dbPath);
+
+    EXPECT_TRUE(dbAccess.currentDbVersion == DbAccess::DB_VERSION)
+        << "currentDbVersion was not updated to DB_VERSION";
+
+    EXPECT_TRUE(exists) << "checkDbFileAndAdjustLegacy should report the current DB as existing";
+    EXPECT_EQ(dbPath.toPath(false), paths.currentPath.toPath(false))
+        << "dbPath should be the current path when deleting the legacy DB as-is";
+
+    EXPECT_FALSE(std::filesystem::exists(paths.legacyPath.toPath(false)))
+        << "Legacy DB file " << paths.legacyPath.toPath(false) << " still exists";
+    EXPECT_FALSE(std::filesystem::exists(paths.legacyShm.toPath(false)))
+        << "Legacy -shm sidecar " << paths.legacyShm.toPath(false) << " still exists";
+    EXPECT_FALSE(std::filesystem::exists(paths.legacyWal.toPath(false)))
+        << "Legacy -wal sidecar " << paths.legacyWal.toPath(false) << " still exists";
+
+    auto readFile = [](const LocalPath& p)
+    {
+        std::ifstream in{p.toPath(false)};
+        return std::string{std::istreambuf_iterator<char>(in), {}};
+    };
+
+    EXPECT_EQ(readFile(paths.currentPath), "current-main")
+        << "Current DB file should be untouched when deleting the legacy DB";
+    EXPECT_EQ(readFile(paths.currentShm), "current-shm")
+        << "Current -shm sidecar should be untouched when deleting the legacy DB";
+    EXPECT_EQ(readFile(paths.currentWal), "current-wal")
+        << "Current -wal sidecar should be untouched when deleting the legacy DB";
+}
+
 #ifdef USE_SQLITE
+
+#include "utils.h"
+
+#include <mega/megaapp.h>
+#include <mega/megaclient.h>
+
+namespace
+{
+
+// sqlite3_close_v2 — defers cleanup so ASSERT_* mid-loop doesn't leak via SQLITE_BUSY.
+using SqliteHandle = std::unique_ptr<sqlite3, decltype(&sqlite3_close_v2)>;
+
+std::filesystem::path makeFreshTestDir(const char* name)
+{
+    auto dirPath = std::filesystem::current_path() / name;
+    std::filesystem::remove_all(dirPath);
+    std::filesystem::create_directory(dirPath);
+    return dirPath;
+}
+
+std::pair<SqliteHandle, int> openSqliteRaw(const std::string& path)
+{
+    sqlite3* raw = nullptr;
+    const int rc = sqlite3_open(path.c_str(), &raw);
+    return {SqliteHandle{raw, &sqlite3_close_v2}, rc};
+}
+
+std::set<std::string> readNodesColumnSet(const std::string& dbPath)
+{
+    std::set<std::string> cols;
+    auto [dbGuard, openRc] = openSqliteRaw(dbPath);
+    if (openRc != SQLITE_OK)
+        return cols;
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(dbGuard.get(),
+                           "SELECT name FROM pragma_table_xinfo('nodes')",
+                           -1,
+                           &stmt,
+                           nullptr) == SQLITE_OK)
+    {
+        while (sqlite3_step(stmt) == SQLITE_ROW)
+        {
+            // sqlite3_column_text can return nullptr on OOM; std::string(nullptr) is UB.
+            if (const auto* name = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0)))
+            {
+                cols.emplace(name);
+            }
+        }
+    }
+    sqlite3_finalize(stmt);
+    return cols;
+}
+
+// Per-row test fixture for migration seed/verify.
+struct SeedRow
+{
+    handle nh;
+    m_time_t mtime;
+    int label; // 0 == LBL_UNKNOWN (unlabelled)
+    std::string description;
+    std::string tags;
+};
+
+// Builds an in-memory Node with the row's attrs set so Node::serialize()
+// produces a BLOB that NodeData (mtime/label/description/tags accessors) can
+// round-trip. Returns the serialized BLOB.
+std::string buildSeedNodeBlob(MegaClient& client, const SeedRow& r)
+{
+    const NodeHandle h = NodeHandle().set6byte(r.nh);
+    Node& nodeRef = mt::makeNode(client, FILENODE, h);
+    auto node = std::shared_ptr<Node>(&nodeRef);
+
+    // mtime is read from the 'c' attr fingerprint, not a direct field.
+    node->size = 100;
+    node->mtime = r.mtime;
+    node->ctime = r.mtime;
+    node->crc[0] = static_cast<int32_t>(r.nh);
+    node->isvalid = true;
+    node->serializefingerprint(&node->attrs.map['c']);
+    node->setfingerprint();
+
+    if (r.label > 0)
+    {
+        node->attrs.map[AttrMap::string2nameid("lbl")] = std::to_string(r.label);
+    }
+    node->attrs.map[AttrMap::string2nameid(MegaClient::NODE_ATTRIBUTE_DESCRIPTION)] = r.description;
+    if (!r.tags.empty()) // empty tags ⇒ attr absent, matches production
+    {
+        node->attrs.map[AttrMap::string2nameid(MegaClient::NODE_ATTRIBUTE_TAGS)] = r.tags;
+    }
+
+    std::string blob;
+    [[maybe_unused]] const bool ok = node->serialize(&blob);
+    assert(ok);
+    return blob;
+}
+
+// Binds a SeedRow into a 12-column INSERT prepared statement against the
+// pre-migration `nodes` schema. counterBlob and blob must outlive sqlite3_step.
+void bindSeedRow(sqlite3_stmt* ins,
+                 const SeedRow& r,
+                 const std::string& blob,
+                 const std::string& counterBlob)
+{
+    sqlite3_reset(ins);
+    sqlite3_clear_bindings(ins);
+    sqlite3_bind_int64(ins, 1, static_cast<sqlite3_int64>(r.nh));
+    sqlite3_bind_int64(ins, 2, 0);
+    sqlite3_bind_text(ins, 3, "file.txt", -1, SQLITE_STATIC);
+    sqlite3_bind_blob(ins, 4, "", 0, SQLITE_STATIC);
+    sqlite3_bind_blob(ins, 5, "", 0, SQLITE_STATIC);
+    sqlite3_bind_int(ins, 6, FILENODE);
+    sqlite3_bind_int(ins, 7, 0);
+    sqlite3_bind_int(ins, 8, 0);
+    sqlite3_bind_int64(ins, 9, r.mtime);
+    sqlite3_bind_int64(ins, 10, 0);
+    sqlite3_bind_blob(ins,
+                      11,
+                      counterBlob.data(),
+                      static_cast<int>(counterBlob.size()),
+                      SQLITE_TRANSIENT);
+    sqlite3_bind_blob(ins, 12, blob.data(), static_cast<int>(blob.size()), SQLITE_TRANSIENT);
+}
+
+// Reads the four migrated columns for `nh` from an open DB. Returns defaults
+// (zero / empty strings) if the row is missing.
+struct MigratedRowValues
+{
+    m_time_t mtime = 0;
+    int label = 0;
+    std::string description;
+    std::string tags;
+    bool found = false;
+};
+
+MigratedRowValues readMigratedRow(sqlite3* db, handle nh)
+{
+    MigratedRowValues v;
+    sqlite3_stmt* s = nullptr;
+    if (sqlite3_prepare_v2(db,
+                           "SELECT mtime, label, description, tags FROM nodes "
+                           "WHERE nodehandle = ?",
+                           -1,
+                           &s,
+                           nullptr) != SQLITE_OK)
+    {
+        return v;
+    }
+    sqlite3_bind_int64(s, 1, static_cast<sqlite3_int64>(nh));
+    if (sqlite3_step(s) == SQLITE_ROW)
+    {
+        v.found = true;
+        v.mtime = sqlite3_column_int64(s, 0);
+        v.label = sqlite3_column_int(s, 1);
+        if (const auto* d = sqlite3_column_text(s, 2))
+            v.description = reinterpret_cast<const char*>(d);
+        if (const auto* t = sqlite3_column_text(s, 3))
+            v.tags = reinterpret_cast<const char*>(t);
+    }
+    sqlite3_finalize(s);
+    return v;
+}
+
+// ASSERT_* in a helper doesn't abort the caller — wrap calls in ASSERT_NO_FATAL_FAILURE.
+void readAllMigratedRows(const std::string& dbPath,
+                         const std::vector<SeedRow>& rows,
+                         std::vector<MigratedRowValues>& out)
+{
+    auto [dbGuard, openRc] = openSqliteRaw(dbPath);
+    ASSERT_EQ(SQLITE_OK, openRc);
+
+    out.clear();
+    out.reserve(rows.size());
+    for (const auto& r: rows)
+    {
+        const auto got = readMigratedRow(dbGuard.get(), r.nh);
+        ASSERT_TRUE(got.found) << "row missing, nh=" << r.nh;
+        out.push_back(got);
+    }
+}
+
+// Per-test scaffold: makes a fresh test dir, wires SqliteDbAccess + filesystem
+// access against it, derives the db file path, and cleans the dir up on exit.
+// Move-disabled because MrProper captures dirPath by value (safe) but moving
+// the env would still split the SqliteDbAccess from its filesystem.
+struct MigrationTestEnv
+{
+    std::filesystem::path dirPath;
+    MrProper cleanUp;
+    LocalPath folderPath;
+    SqliteDbAccess dbAccess;
+    std::unique_ptr<FileSystemAccess> fsaccess;
+    std::string dbName;
+    LocalPath dbLocalPath;
+    std::string dbPathStr;
+
+    MigrationTestEnv(const char* dirName, std::string dbN):
+        dirPath(makeFreshTestDir(dirName)),
+        cleanUp(
+            [p = dirPath]()
+            {
+                std::filesystem::remove_all(p);
+            }),
+        folderPath(LocalPath::fromAbsolutePath(path_u8string(dirPath))),
+        dbAccess(folderPath),
+        fsaccess(new FSACCESS_CLASS),
+        dbName(std::move(dbN)),
+        dbLocalPath(dbAccess.databasePath(*fsaccess, dbName, DbAccess::DB_VERSION)),
+        dbPathStr(dbLocalPath.toPath(false))
+    {}
+
+    MigrationTestEnv(const MigrationTestEnv&) = delete;
+    MigrationTestEnv& operator=(const MigrationTestEnv&) = delete;
+};
+
+// Pre-migration `nodes` schema. Keep this schema frozen — do not add or
+// remove columns here. It represents a pre-migration `nodes` table on disk,
+// so the whole point of the tests that use it is to upgrade *this exact
+// shape* to the current schema. Expanding it silently weakens the regression
+// guard.
+//
+// Mirrors the CREATE TABLE `nodes` DDL in src/db/sqlite.cpp with all
+// migration-added columns (the entries in the `newCols` vector inside
+// SqliteDbAccess::openTableWithNodes) removed.
+constexpr const char* kOldNodesSchema = "CREATE TABLE nodes ("
+                                        " nodehandle int64 PRIMARY KEY NOT NULL,"
+                                        " parenthandle int64,"
+                                        " name text,"
+                                        " fingerprint BLOB,"
+                                        " origFingerprint BLOB,"
+                                        " type tinyint,"
+                                        " share tinyint,"
+                                        " fav tinyint,"
+                                        " ctime int64,"
+                                        " flags int64,"
+                                        " counter BLOB NOT NULL,"
+                                        " node BLOB NOT NULL)";
+
+// INSERT statement against the pre-migration schema. Binds 12 columns,
+// matches bindSeedRow().
+constexpr const char* kOldNodesInsertSql =
+    "INSERT INTO nodes(nodehandle, parenthandle, name, fingerprint, "
+    "origFingerprint, type, share, fav, ctime, flags, counter, node) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+
+// ASSERT_* in a helper doesn't abort the caller — wrap calls in ASSERT_NO_FATAL_FAILURE.
+void seedOldSchemaWithRows(const std::string& dbPath, const std::vector<SeedRow>& rows)
+{
+    auto [dbGuard, openRc] = openSqliteRaw(dbPath);
+    ASSERT_EQ(SQLITE_OK, openRc);
+
+    char* err = nullptr;
+    const int rc = sqlite3_exec(dbGuard.get(), kOldNodesSchema, nullptr, nullptr, &err);
+    const std::string errStr = err ? err : "";
+    sqlite3_free(err);
+    ASSERT_EQ(SQLITE_OK, rc) << "Failed to seed old schema: " << errStr;
+
+    if (rows.empty())
+        return;
+
+    // Transient client, no DbAccess — only used for Node::serialize().
+    mega::MegaApp app;
+    auto client = mt::makeClient(app);
+
+    NodeCounter nc;
+    nc.files = 1;
+    nc.storage = 100;
+    const std::string counterBlob = nc.serialize();
+
+    sqlite3_stmt* ins = nullptr;
+    ASSERT_EQ(SQLITE_OK, sqlite3_prepare_v2(dbGuard.get(), kOldNodesInsertSql, -1, &ins, nullptr));
+
+    for (const auto& r: rows)
+    {
+        const std::string blob = buildSeedNodeBlob(*client, r);
+        bindSeedRow(ins, r, blob, counterBlob); // resets + clears bindings internally
+        ASSERT_EQ(SQLITE_DONE, sqlite3_step(ins))
+            << "INSERT failed for nh=" << r.nh << ": " << sqlite3_errmsg(dbGuard.get());
+    }
+    sqlite3_finalize(ins);
+}
+
+} // anonymous namespace
 
 /**
  * @brief Validate that opening a DB shaped like a previous schema version
- *        runs the column-migration path to completion.
+ *        runs the column-migration path to completion AND populates the new
+ *        columns with the correct per-row data (SDK-6155).
  *
  * Regression guard for DB-migration bugs where a new VIRTUAL column
  * references a base column that does not exist in older on-disk schemas,
@@ -119,78 +690,28 @@ TEST(Sqlite, renameDB)
  * failing with "no such column: fp" on upgraded databases.
  *
  * Steps:
- *  - Seed an on-disk DB with an older `nodes` schema (base columns only).
+ *  - Seed an on-disk DB with an older `nodes` schema (base columns only) and
+ *    INSERT rows with serialized Node BLOBs encoding known attribute values.
  *  - Open via SqliteDbAccess::openTableWithNodes, which runs addAndPopulateColumns.
- *  - Assert the call succeeds and every expected column is present afterwards.
+ *  - Assert the call succeeds, every expected column is present, the row count
+ *    is unchanged, and each migrated column holds the value encoded in the BLOB.
  */
 TEST(Sqlite, MigratesOldNodesSchema)
 {
-    auto dirPath = std::filesystem::current_path() / "nodes_schema_migration_test";
+    MigrationTestEnv env("nodes_schema_migration_test", "nodes_schema_migration");
 
-    const MrProper cleanUp(
-        [dirPath]()
-        {
-            std::filesystem::remove_all(dirPath);
-        });
-
-    std::filesystem::remove_all(dirPath);
-    std::filesystem::create_directory(dirPath);
-    LocalPath folderPath = LocalPath::fromAbsolutePath(path_u8string(dirPath));
-    SqliteDbAccess dbAccess{folderPath};
-
-    std::unique_ptr<FileSystemAccess> fsaccess{new FSACCESS_CLASS};
-    const std::string dbName{"nodes_schema_migration"};
-    LocalPath dbLocalPath = dbAccess.databasePath(*fsaccess, dbName, DbAccess::DB_VERSION);
-    const std::string dbPathStr = dbLocalPath.toPath(false);
-
-    // sqlite3_open may allocate the handle even on error, and the handle
-    // must be released via sqlite3_close regardless. Wrap in unique_ptr so
-    // close runs on every exit path (including ASSERT_* aborts).
-    using SqliteHandle = std::unique_ptr<sqlite3, decltype(&sqlite3_close)>;
-
-    auto openSqlite = [](const std::string& path) -> std::pair<SqliteHandle, int>
-    {
-        sqlite3* raw = nullptr;
-        const int rc = sqlite3_open(path.c_str(), &raw);
-        return {SqliteHandle{raw, &sqlite3_close}, rc};
+    const std::vector<SeedRow> rows = {
+        {1, 1700000001, 1, "first node description", "alpha,beta"},
+        {2, 1700000002, 2, "second", ""}, // empty tags
+        {3, 1700000003, 0, "third with multi-byte chars", "x"}, // unlabelled (LBL_UNKNOWN)
     };
 
-    {
-        auto [dbGuard, openRc] = openSqlite(dbPathStr);
-        ASSERT_EQ(SQLITE_OK, openRc);
-
-        // NOTE: Keep this schema frozen — do not add or remove columns here.
-        // It represents a pre-migration `nodes` table on disk, so the whole
-        // point of the test is to upgrade *this exact shape* to the current
-        // schema. Expanding oldSchema silently weakens the regression guard.
-        //
-        // oldSchema mirrors the CREATE TABLE `nodes` DDL in src/db/sqlite.cpp
-        // with all migration-added columns (the entries in the `newCols` vector
-        // inside SqliteDbAccess::openTableWithNodes) removed.
-        const char* oldSchema = "CREATE TABLE nodes ("
-                                " nodehandle int64 PRIMARY KEY NOT NULL,"
-                                " parenthandle int64,"
-                                " name text,"
-                                " fingerprint BLOB,"
-                                " origFingerprint BLOB,"
-                                " type tinyint,"
-                                " share tinyint,"
-                                " fav tinyint,"
-                                " ctime int64,"
-                                " flags int64,"
-                                " counter BLOB NOT NULL,"
-                                " node BLOB NOT NULL)";
-        char* err = nullptr;
-        const int rc = sqlite3_exec(dbGuard.get(), oldSchema, nullptr, nullptr, &err);
-        const std::string errStr = err ? err : "";
-        sqlite3_free(err);
-        ASSERT_EQ(SQLITE_OK, rc) << "Failed to seed old schema: " << errStr;
-    }
+    ASSERT_NO_FATAL_FAILURE(seedOldSchemaWithRows(env.dbPathStr, rows));
 
     // Run the migration through the SDK's open path.
     PrnGen rng;
     std::unique_ptr<DbTable> dbTable{
-        dbAccess.openTableWithNodes(rng, *fsaccess, dbName, 0, nullptr)};
+        env.dbAccess.openTableWithNodes(rng, *env.fsaccess, env.dbName, 0, nullptr)};
     // If this fails, openTableWithNodes could not migrate the old schema
     // to the current one — such as a new VIRTUAL column in `newCols`
     // (SqliteDbAccess::openTableWithNodes in src/db/sqlite.cpp) referencing
@@ -198,57 +719,27 @@ TEST(Sqlite, MigratesOldNodesSchema)
     // base column to oldSchema above — oldSchema is a frozen historical
     // snapshot, the guard only works if it stays one.
     ASSERT_TRUE(dbTable) << "Migration failed — openTableWithNodes() returned null";
-    EXPECT_EQ(dbAccess.currentDbVersion, DbAccess::DB_VERSION);
+    EXPECT_EQ(env.dbAccess.currentDbVersion, DbAccess::DB_VERSION);
     dbTable.reset(); // release the DB handle before re-opening for assertions
 
     // Build a reference DB from scratch and compare column sets. This catches
     // the case where someone adds a new entry to newCols in sqlite.cpp but
     // forgets to keep this test in sync — the two sets will diverge.
-    auto refDirPath = std::filesystem::current_path() / "nodes_schema_migration_ref";
-    const MrProper refCleanUp(
-        [refDirPath]()
-        {
-            std::filesystem::remove_all(refDirPath);
-        });
-    std::filesystem::remove_all(refDirPath);
-    std::filesystem::create_directory(refDirPath);
-    LocalPath refFolder = LocalPath::fromAbsolutePath(path_u8string(refDirPath));
-    SqliteDbAccess refDbAccess{refFolder};
-    LocalPath refDbLocalPath = refDbAccess.databasePath(*fsaccess, dbName, DbAccess::DB_VERSION);
-
+    MigrationTestEnv refEnv("nodes_schema_migration_ref", env.dbName);
     std::unique_ptr<DbTable> refDbTable{
-        refDbAccess.openTableWithNodes(rng, *fsaccess, dbName, 0, nullptr)};
+        refEnv.dbAccess.openTableWithNodes(rng, *refEnv.fsaccess, refEnv.dbName, 0, nullptr)};
     ASSERT_TRUE(refDbTable);
     refDbTable.reset();
 
-    auto readColumnSet = [&openSqlite](const std::string& path)
-    {
-        std::set<std::string> cols;
-        auto [dbGuard, openRc] = openSqlite(path);
-        if (openRc != SQLITE_OK)
-            return cols;
-        sqlite3_stmt* stmt = nullptr;
-        const char* q = "SELECT name FROM pragma_table_xinfo('nodes')";
-        if (sqlite3_prepare_v2(dbGuard.get(), q, -1, &stmt, nullptr) == SQLITE_OK)
-        {
-            while (sqlite3_step(stmt) == SQLITE_ROW)
-            {
-                cols.emplace(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0)));
-            }
-        }
-        sqlite3_finalize(stmt);
-        return cols;
-    };
+    const auto migratedCols = readNodesColumnSet(env.dbPathStr);
+    const auto freshCols = readNodesColumnSet(refEnv.dbPathStr);
 
-    const auto migratedCols = readColumnSet(dbPathStr);
-    const auto freshCols = readColumnSet(refDbLocalPath.toPath(false));
-
-    // Guard against false-green: readColumnSet silently returns an empty
+    // Guard against false-green: readNodesColumnSet silently returns an empty
     // set on open / prepare failure or if the `nodes` table is absent.
     // Without this, two empty sets would trivially compare equal.
-    ASSERT_FALSE(migratedCols.empty()) << "Failed to read columns from migrated DB: " << dbPathStr;
-    ASSERT_FALSE(freshCols.empty())
-        << "Failed to read columns from fresh DB: " << refDbLocalPath.toPath(false);
+    ASSERT_FALSE(migratedCols.empty())
+        << "Failed to read columns from migrated DB: " << env.dbPathStr;
+    ASSERT_FALSE(freshCols.empty()) << "Failed to read columns from fresh DB: " << refEnv.dbPathStr;
 
     // If this fails, the CREATE TABLE DDL and the `newCols` list in
     // SqliteDbAccess::openTableWithNodes (src/db/sqlite.cpp) are out of
@@ -256,6 +747,164 @@ TEST(Sqlite, MigratesOldNodesSchema)
     // new column must appear in both so that fresh-create and migrate
     // paths end up with identical schemas.
     EXPECT_THAT(migratedCols, ::testing::UnorderedElementsAreArray(freshCols));
+
+    // Data verification — guards against migrate-leaves-DEFAULTs regressions.
+    std::vector<MigratedRowValues> migrated;
+    ASSERT_NO_FATAL_FAILURE(readAllMigratedRows(env.dbPathStr, rows, migrated));
+    for (size_t i = 0; i < rows.size(); ++i)
+    {
+        const auto& r = rows[i];
+        const auto& got = migrated[i];
+        // EXPECT (not ASSERT) so all column mismatches surface in one run.
+        EXPECT_EQ(r.mtime, got.mtime) << "mtime mismatch, nh=" << r.nh;
+        EXPECT_EQ(r.label, got.label) << "label mismatch, nh=" << r.nh;
+        EXPECT_EQ(r.description, got.description) << "description mismatch, nh=" << r.nh;
+        EXPECT_EQ(r.tags, got.tags) << "tags mismatch, nh=" << r.nh;
+    }
+
+    // Row count must be unchanged.
+    {
+        auto [dbGuard, openRc] = openSqliteRaw(env.dbPathStr);
+        ASSERT_EQ(SQLITE_OK, openRc);
+        sqlite3_stmt* countStmt = nullptr;
+        ASSERT_EQ(SQLITE_OK,
+                  sqlite3_prepare_v2(dbGuard.get(),
+                                     "SELECT COUNT(*) FROM nodes",
+                                     -1,
+                                     &countStmt,
+                                     nullptr));
+        ASSERT_EQ(SQLITE_ROW, sqlite3_step(countStmt));
+        EXPECT_EQ(rows.size(), static_cast<size_t>(sqlite3_column_int64(countStmt, 0)));
+        sqlite3_finalize(countStmt);
+    }
+}
+
+// SDK-6155: a populate-phase failure must roll back the ALTERs too.
+// Forced via a BEFORE-UPDATE trigger that RAISE(ABORT)s the populate UPDATE.
+TEST(Sqlite, MigrationIsAtomicOnPopulateFailure)
+{
+    MigrationTestEnv env("nodes_migration_atomic_test", "nodes_migration_atomic");
+
+    const SeedRow seedRow{42, 1700000000, 0, "forced-failure row", ""};
+
+    // Need at least one row with extractable data, else populate is a no-op
+    // and the trigger never fires.
+    ASSERT_NO_FATAL_FAILURE(seedOldSchemaWithRows(env.dbPathStr, {seedRow}));
+
+    {
+        // Install the trigger AFTER seeding — it's BEFORE-UPDATE only, so it
+        // doesn't fire on the seed INSERT.
+        auto [dbGuard, openRc] = openSqliteRaw(env.dbPathStr);
+        ASSERT_EQ(SQLITE_OK, openRc);
+        ASSERT_EQ(SQLITE_OK,
+                  sqlite3_exec(dbGuard.get(),
+                               "CREATE TRIGGER fail_update BEFORE UPDATE ON nodes "
+                               "BEGIN SELECT RAISE(ABORT, 'forced abort for SDK-6155 test'); END",
+                               nullptr,
+                               nullptr,
+                               nullptr));
+    }
+
+    // Snapshot pre-migration columns from the live DB rather than a hardcoded
+    // list — that way any future migration column added in src/db/sqlite.cpp is
+    // automatically covered without touching this test.
+    const auto preMigrationCols = readNodesColumnSet(env.dbPathStr);
+    ASSERT_FALSE(preMigrationCols.empty()) << "Failed to read pre-migration columns";
+
+    PrnGen rng;
+    std::unique_ptr<DbTable> dbTable{
+        env.dbAccess.openTableWithNodes(rng, *env.fsaccess, env.dbName, 0, nullptr)};
+    ASSERT_FALSE(dbTable) << "openTableWithNodes() should fail when populate aborts";
+
+    // Atomicity: any column added by the failed migration must have been
+    // rolled back. survivors = postFailureCols - preMigrationCols.
+    const auto postFailureCols = readNodesColumnSet(env.dbPathStr);
+    ASSERT_FALSE(postFailureCols.empty()) << "Failed to read columns from DB after rollback";
+
+    std::vector<std::string> survivors;
+    std::set_difference(postFailureCols.begin(),
+                        postFailureCols.end(),
+                        preMigrationCols.begin(),
+                        preMigrationCols.end(),
+                        std::back_inserter(survivors));
+
+    EXPECT_TRUE(survivors.empty())
+        << "columns survived rollback: " << ::testing::PrintToString(survivors)
+        << " — addAndPopulateColumns() is not atomic. See SDK-6155.";
+
+    // Pre-existing row survives — ROLLBACK only undoes the migration's own work.
+    auto [dbGuard, openRc] = openSqliteRaw(env.dbPathStr);
+    ASSERT_EQ(SQLITE_OK, openRc);
+    {
+        sqlite3_stmt* stmt = nullptr;
+        ASSERT_EQ(SQLITE_OK,
+                  sqlite3_prepare_v2(dbGuard.get(),
+                                     "SELECT COUNT(*) FROM nodes WHERE nodehandle = ?",
+                                     -1,
+                                     &stmt,
+                                     nullptr));
+        sqlite3_bind_int64(stmt, 1, static_cast<sqlite3_int64>(seedRow.nh));
+        ASSERT_EQ(SQLITE_ROW, sqlite3_step(stmt));
+        EXPECT_EQ(1, sqlite3_column_int(stmt, 0));
+        sqlite3_finalize(stmt);
+    }
+}
+
+// Idempotence: re-opening an already-migrated DB must leave both the schema
+// and the per-row migrated data untouched. Guards against a regression in
+// stripExistingColumns() where columns are wrongly treated as missing and the
+// populate UPDATE re-runs over already-populated rows.
+TEST(Sqlite, MigrationOpenOnAlreadyMigratedDbIsIdempotent)
+{
+    MigrationTestEnv env("nodes_migration_idempotent_test", "nodes_migration_idempotent");
+
+    const std::vector<SeedRow> rows = {
+        {1, 1700000001, 1, "first idempotent row", "alpha"},
+        {2, 1700000002, 2, "second idempotent row", ""},
+    };
+
+    ASSERT_NO_FATAL_FAILURE(seedOldSchemaWithRows(env.dbPathStr, rows));
+
+    // First open runs the real migration path on the old schema.
+    {
+        PrnGen rng;
+        std::unique_ptr<DbTable> dbTable{
+            env.dbAccess.openTableWithNodes(rng, *env.fsaccess, env.dbName, 0, nullptr)};
+        ASSERT_TRUE(dbTable);
+        EXPECT_EQ(env.dbAccess.currentDbVersion, DbAccess::DB_VERSION);
+    }
+
+    const auto colsAfterFirstOpen = readNodesColumnSet(env.dbPathStr);
+    ASSERT_FALSE(colsAfterFirstOpen.empty());
+
+    // Snapshot the migrated row values so we can diff them after the second open.
+    std::vector<MigratedRowValues> snapshotAfterFirstOpen;
+    ASSERT_NO_FATAL_FAILURE(readAllMigratedRows(env.dbPathStr, rows, snapshotAfterFirstOpen));
+
+    // Second open — the asserted idempotent case.
+    {
+        PrnGen rng;
+        std::unique_ptr<DbTable> dbTable{
+            env.dbAccess.openTableWithNodes(rng, *env.fsaccess, env.dbName, 0, nullptr)};
+        ASSERT_TRUE(dbTable) << "second open of an already-migrated DB must succeed";
+        EXPECT_EQ(env.dbAccess.currentDbVersion, DbAccess::DB_VERSION);
+    }
+
+    const auto colsAfterSecondOpen = readNodesColumnSet(env.dbPathStr);
+    EXPECT_THAT(colsAfterSecondOpen, ::testing::UnorderedElementsAreArray(colsAfterFirstOpen));
+
+    // Per-row data must be byte-for-byte unchanged.
+    std::vector<MigratedRowValues> snapshotAfterSecondOpen;
+    ASSERT_NO_FATAL_FAILURE(readAllMigratedRows(env.dbPathStr, rows, snapshotAfterSecondOpen));
+    for (size_t i = 0; i < rows.size(); ++i)
+    {
+        const auto& before = snapshotAfterFirstOpen[i];
+        const auto& got = snapshotAfterSecondOpen[i];
+        EXPECT_EQ(before.mtime, got.mtime) << "mtime changed, nh=" << rows[i].nh;
+        EXPECT_EQ(before.label, got.label) << "label changed, nh=" << rows[i].nh;
+        EXPECT_EQ(before.description, got.description) << "description changed, nh=" << rows[i].nh;
+        EXPECT_EQ(before.tags, got.tags) << "tags changed, nh=" << rows[i].nh;
+    }
 }
 
 #endif // USE_SQLITE

@@ -28,6 +28,7 @@
 #include "utils.h"
 #include "waiter.h"
 
+#include <mega/auto_file_handle.h>
 #include <mega/localpath.h>
 
 #include <atomic>
@@ -572,6 +573,8 @@ struct MEGA_API FileAccess
 
     // Retrieve this file's allocated and reported size.
     virtual auto getFileSize() const -> std::optional<std::pair<std::uint64_t, std::uint64_t>> = 0;
+
+    virtual AutoFileHandle dupFileDescriptor() = 0;
 
 protected:
     virtual AsyncIOContext* newasynccontext();
@@ -1134,6 +1137,14 @@ private:
 
 // True if type denotes a network filesystem.
 bool isNetworkFilesystem(FileSystemType type);
+
+// Read from a file descriptor at a given offset. Negative values indicate errors.
+m_off_t sysread(OsFileDescriptor fd,
+                void* buffer,
+                unsigned long length,
+                m_off_t offset,
+                bool* cretry,
+                int* cerrorcode);
 
 } // namespace
 

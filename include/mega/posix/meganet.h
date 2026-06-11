@@ -190,7 +190,7 @@ protected:
     m_off_t maxspeed[2];
 
 public:
-    void post(HttpReq*, const char* = 0, unsigned = 0) override;
+    void post(HttpReq*, const char* = 0, size_t = 0) override;
     void cancel(HttpReq*) override;
 
     m_off_t postpos(void*) override;
@@ -265,7 +265,7 @@ struct MEGA_API CurlHttpContext
     int port;
     string hostheader;
     string posturl;
-    unsigned len;
+    size_t len;
     const char* data;
     std::unique_ptr<curl_slist, decltype(&curl_slist_free_all)> mCurlDnsList{nullptr,
                                                                              curl_slist_free_all};

@@ -28,6 +28,8 @@
 #import "MEGADelegate.h"
 #import "MEGAError.h"
 #import "MEGAEvent.h"
+#import "MEGAFileServiceReclaimOptions.h"
+#import "MEGAFileServiceStorageInfo.h"
 #import "MEGAGlobalDelegate.h"
 #import "MEGANodeList.h"
 #import "MEGANode.h"
@@ -8860,6 +8862,26 @@ typedef NS_ENUM(NSInteger, PasswordManagerNodeType) {
  */
 - (NSInteger)httpServerGetMaxOutputSize;
 
+/**
+ * @brief Set the throttle bitrate for cached data delivery (in bits per second).
+ *
+ * When serving from local cache, data delivery is throttled to this rate
+ * to prevent AVPlayer audio loss. Set to 0 to disable. Recommended: 2x video bitrate.
+ *
+ * Note: this setting is HTTP server wide. All videos being streamed at the time are
+ * affected.
+ *
+ * @param bitrateBps Throttle bitrate in bits per second, or 0 to disable
+ */
+- (void)httpServerSetThrottleBitrate:(unsigned long long)bitrateBps;
+
+/**
+ * @brief Get the current throttle bitrate setting
+ *
+ * @return Throttle bitrate in bits per second, or 0 if disabled
+ */
+- (unsigned long long)httpServerGetThrottleBitrate;
+
 #endif
 
 /**
@@ -10188,6 +10210,44 @@ typedef NS_ENUM(NSInteger, PasswordManagerNodeType) {
  * @return newly generated password string, or nil if the password generation fails due to invalid length parameter.
  */
 + (nullable NSString *)generateRandomPasswordWithCapitalLetters:(BOOL)includeCapitalLetters digits:(BOOL)includeDigits symbols:(BOOL)includeSymbols length:(int)length;
+
+#pragma mark - File Service
+
+/**
+ * @brief Get the file service storage size information.
+ *
+ * The returned object is a snapshot of the current state of the file service storage size.
+ *
+ * @param options Reclaim options to consider when calculating the storage info, or nil to use the
+ * current file service's reclaim options.
+ * @return MEGAFileServiceStorageInfo with the current allocated and reclaimable sizes, or nil if unavailable.
+ */
+- (nullable MEGAFileServiceStorageInfo *)fileServiceStorageInfoWithOptions:(nullable MEGAFileServiceReclaimOptions *)options;
+
+/**
+ * @brief Trigger the file services to reclaim storage according to the current options or input options.
+ *
+ * The associated request type with this request is MEGARequestTypeFileServiceReclaim.
+ *
+ * Valid data in the MEGARequest object received in onRequestFinish when the error code
+ * is MEGAErrorTypeApiOk:
+ * - [MEGARequest totalBytes] - Returns the number of bytes that were reclaimed.
+ *
+ * @param options Options to consider when reclaiming storage used by MEGA's file services, or nil
+ * to use the current file service reclaim options with an additional call to setReclaimThreshold(0).
+ * @param delegate MEGARequestDelegate to track this request.
+ */
+- (void)fileServiceReclaimWithOptions:(nullable MEGAFileServiceReclaimOptions *)options delegate:(id<MEGARequestDelegate>)delegate;
+
+/**
+ * @brief Set the options for reclaiming storage used by MEGA's file services.
+ *
+ * The provided options will be applied to the file services, and they will affect how the
+ * file services reclaim storage.
+ *
+ * @param options Options to set for reclaiming storage used by MEGA's file services.
+ */
+- (void)setFileServiceReclaimOptions:(MEGAFileServiceReclaimOptions *)options;
 
 @end
 

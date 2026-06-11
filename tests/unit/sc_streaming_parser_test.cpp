@@ -39,6 +39,8 @@ protected:
         app = std::make_shared<MegaApp>();
         client = mt::makeClient(*app);
         scStreamingParser = std::make_shared<ScStreamingParser>(*client, client->rng);
+
+        client->statecurrent = true;
     }
 
     void TearDown() override
@@ -87,6 +89,26 @@ protected:
     std::shared_ptr<ScStreamingParser> scStreamingParser;
 };
 
+bool isNodeTreeLocked(MegaClient& client)
+{
+    recursive_mutex& m = client.nodeTreeMutex;
+    bool held = true;
+
+    std::thread t(
+        [&]
+        {
+            if (m.try_lock())
+            {
+                held = false;
+                m.unlock();
+            }
+        });
+
+    t.join();
+
+    return held;
+}
+
 void testFinishedProcess(std::shared_ptr<ScStreamingParser>& scStreamingParser,
                          MegaClient& client,
                          std::string& json,
@@ -105,6 +127,9 @@ void testFinishedProcess(std::shared_ptr<ScStreamingParser>& scStreamingParser,
     handle snHdl;
     Base64::atob(sn, (byte*)&snHdl, sizeof(snHdl));
     ASSERT_TRUE(client.scsn.getHandle() == snHdl);
+
+    ASSERT_EQ(client.actionpacketsCurrent, true);
+    ASSERT_FALSE(isNodeTreeLocked(client));
 }
 
 TEST_F(ScStreamingParserTest, InitAndClear)
@@ -142,7 +167,7 @@ TEST_F(ScStreamingParserTest, SetLastReceived)
 TEST_F(ScStreamingParserTest, Process)
 {
     std::string json =
-        R"({"a":[{"a":"ua","st":"!?>VwgM","u":"k-N5-o6LLkE","ua":["^!stbmp"],"v":["Gt-009Sr-XA"]}],"w":"https://g.api.mega.co.nz/wsc/5lhYq8nqzgIEE8j9OqymmA","sn":"Gt-009Sr-XA"})";
+        R"({"a":[{"a":"ua","st":"!?>?e)G","u":"k-N5-o6LLkE","ua":["^!stbmp"],"v":["Gt-009Sr-XA"]}],"w":"https://g.api.mega.co.nz/wsc/5lhYq8nqzgIEE8j9OqymmA","sn":"Gt-009Sr-XA"})";
 
     scStreamingParser->init();
 
@@ -163,7 +188,7 @@ TEST_F(ScStreamingParserTest, Process)
 
     // Process 2nd SC packet
     json =
-        R"({"a":[{"a":"ipc","st":"!?>?e)G","p":"gjqrEkfohxc","m":"sdk-jenkins+005-19@mega.nz","msg":"","ps":0,"ts":1761821624,"uts":1761821624}],"w":"https://g.api.mega.co.nz/wsc/wZ9inPVUsAufT1YgyZ_AIA","sn":"P-LLOv0J3u0"})";
+        R"({"a":[{"a":"ipc","st":"!?>VwgM","p":"gjqrEkfohxc","m":"sdk-jenkins+005-19@mega.nz","msg":"","ps":0,"ts":1761821624,"uts":1761821624}],"w":"https://g.api.mega.co.nz/wsc/wZ9inPVUsAufT1YgyZ_AIA","sn":"P-LLOv0J3u0"})";
 
     testFinishedProcess(scStreamingParser,
                         *client.get(),
@@ -245,6 +270,8 @@ TEST_F(ScStreamingParserTest, ProcessChunks)
     ASSERT_FALSE(scStreamingParser->isFailed());
     ASSERT_FALSE(scStreamingParser->isPaused());
     ASSERT_TRUE(client->scnotifyurl.empty());
+    ASSERT_EQ(client->actionpacketsCurrent, false);
+    ASSERT_TRUE(isNodeTreeLocked(*client));
 
     const char* isn = "xyp4UX7xFZ4";
     handle isnHdl;
@@ -274,7 +301,7 @@ TEST_F(ScStreamingParserTest, ProcessChunksByMove)
     std::string jsonMovePart1 =
         R"({"a":[{"a":"d","isn":"xyp4UX7xFZ4","i":"fbtekrfnlb","st":"!G(<L_j","n":"i4om2BrJ","m":1,"ou":"vN8A0kvxmC0"},)";
     std::string jsonMovePart2 =
-        R"({"a":"t","i":"fbtekrfnlb","t":{"f":[{"h":"i4om2BrJ","p":"HtpQjbba","u":"vN8A0kvxmC0","t":1,"a":"k8mDAq0-TfskLMyMqcxssQ","k":"vN8A0kvxmC0:cXtlV5RG0QHpBxl-sZWQxA","ts":1770364711}],"u":[{"u":"vN8A0kvxmC0","m":"jye+test3@mega.co.nz","m2":["jye+test3@mega.co.nz"],"pubk":"CADLwMeFsNUFHY5vIHrDF73XMk6lZvRPQlhh67NGgg8WdiZF7vtM4HrCoftYvQEFLM-JF498dEFLNo9f76KydgWSdl_IEFT4KpnuexvJpfwI0eyJRzU1Wt5wegWJw9WPEKxpHGP91VllLPWB31X2FH48angXw9Mf_3nyjNh-q83tMEbT5XEWuL3KqiMdP80XeqJk3TOuCcaSmq5tzj84rzc1sNnsoNkgYPYuGjOqzA8VzURVU6Tp7BV2eJm0x68dCwoJMHiZVNor1fz0I-iB1Vj2Hurr1NmIGLP9AEJOSKE1iwBSmseTOci3KaLcMrwy1rQMx8r9y-KV5eBnt7kPRSCdACAAAAEB","+puCu255":"dLFE7BT0zCf3Q2f0EXVGRUZRtVuY0J_TPZVMkhAI3Hs","+puEd255":"owpFu55NPN4Y93GX8-iDVcbmktEvd-LcYtgMJUILLxU","+sigCu255":"AAAAAGj5nvcOQZQogXSCNe7RkRLP21nkWcr3D3zx2zY0xC0BqY5_Ny_O1JMaN95YtbkO8dgcYFGiHaW1CWnu9njDcGtnKm8A","+sigPubk":"AAAAAGj5nvgwEi2YXMbNhHdsV1IDYs62RzF1p60M4PkVxXx68HGqF7nBQSg69KUbh_yydf36nneGFMm-7UnKr_yZyFei2wsD"}]},"ou":"vN8A0kvxmC0"}],)";
+        R"({"a":"t","i":"fbtekrfnlb","t":{"f":[{"h":"i4om2BrJ","p":"HtpQjbba","u":"vN8A0kvxmC0","t":1,"a":"k8mDAq0-TfskLMyMqcxssQ","k":"vN8A0kvxmC0:cXtlV5RG0QHpBxl-sZWQxA","ts":1770364711}],"u":[{"u":"vN8A0kvxmC0","m":"test@mega.co.nz","m2":["test@mega.co.nz"],"pubk":"CADLwMeFsNUFHY5vIHrDF73XMk6lZvRPQlhh67NGgg8WdiZF7vtM4HrCoftYvQEFLM-JF498dEFLNo9f76KydgWSdl_IEFT4KpnuexvJpfwI0eyJRzU1Wt5wegWJw9WPEKxpHGP91VllLPWB31X2FH48angXw9Mf_3nyjNh-q83tMEbT5XEWuL3KqiMdP80XeqJk3TOuCcaSmq5tzj84rzc1sNnsoNkgYPYuGjOqzA8VzURVU6Tp7BV2eJm0x68dCwoJMHiZVNor1fz0I-iB1Vj2Hurr1NmIGLP9AEJOSKE1iwBSmseTOci3KaLcMrwy1rQMx8r9y-KV5eBnt7kPRSCdACAAAAEB","+puCu255":"dLFE7BT0zCf3Q2f0EXVGRUZRtVuY0J_TPZVMkhAI3Hs","+puEd255":"owpFu55NPN4Y93GX8-iDVcbmktEvd-LcYtgMJUILLxU","+sigCu255":"AAAAAGj5nvcOQZQogXSCNe7RkRLP21nkWcr3D3zx2zY0xC0BqY5_Ny_O1JMaN95YtbkO8dgcYFGiHaW1CWnu9njDcGtnKm8A","+sigPubk":"AAAAAGj5nvgwEi2YXMbNhHdsV1IDYs62RzF1p60M4PkVxXx68HGqF7nBQSg69KUbh_yydf36nneGFMm-7UnKr_yZyFei2wsD"}]},"ou":"vN8A0kvxmC0"}],)";
     std::string jsonMovePart3 =
         R"("w":"https://g.api.mega.co.nz/wsc/WS_LMPJFp8VlKndvCVoSBQ","sn":"YydQMr-woLo"})";
 
@@ -300,6 +327,8 @@ TEST_F(ScStreamingParserTest, ProcessChunksByMove)
     ASSERT_FALSE(scStreamingParser->isFinished());
     ASSERT_FALSE(scStreamingParser->isFailed());
     ASSERT_FALSE(scStreamingParser->isPaused());
+    ASSERT_EQ(client->actionpacketsCurrent, false);
+    ASSERT_TRUE(isNodeTreeLocked(*client));
 
     // isn is received, but is not stored yet.
     const char* sn = "JcnE8wc8Xz0";
@@ -320,6 +349,8 @@ TEST_F(ScStreamingParserTest, ProcessChunksByMove)
     ASSERT_FALSE(scStreamingParser->isFinished());
     ASSERT_FALSE(scStreamingParser->isFailed());
     ASSERT_FALSE(scStreamingParser->isPaused());
+    ASSERT_EQ(client->actionpacketsCurrent, false);
+    ASSERT_TRUE(isNodeTreeLocked(*client));
 
     const char* isn = "xyp4UX7xFZ4";
     handle isnHdl;
@@ -331,6 +362,71 @@ TEST_F(ScStreamingParserTest, ProcessChunksByMove)
 
     // Process the remained
     jsonMove += jsonMovePart3;
+
+    testFinishedProcess(scStreamingParser,
+                        *client.get(),
+                        jsonMove,
+                        "https://g.api.mega.co.nz/wsc/WS_LMPJFp8VlKndvCVoSBQ",
+                        "YydQMr-woLo");
+}
+
+TEST_F(ScStreamingParserTest, ProcessChunksByNewShare)
+{
+    initNodes();
+
+    std::string jsonSharePart1 =
+        R"({"a":[{"a":"s","isn":"xyp4UX7xFZ4","st":"xyp4UX7xFZ4","n":"IipQWaLR","o":"8kCmVc3EkKo","ok":"AAAAAAAAAAAAAAAAAAAAAA","ha":"AAAAAAAAAAAAAAAAAAAAAA","u":"1TZ8GptXHc0","r":1,"ts":1778566872,"ou":"8kCmVc3EkKo"},)";
+    std::string jsonSharePart2 =
+        R"({"a":"t","st":"xyp4UX7xFZ4","t":{"f":[{"h":"IipQWaLR","p":"Ll5VkSJZ","u":"8kCmVc3EkKo","t":1,"a":"O7nuh_3533RIH7fYMaUMehJhIjSMnfBrJAXfYqxrvWo","k":"8kCmVc3EkKo:aa2HqukMlSVPEeTZIw50Hg/IipQWaLR:EM1Zh1bucpP6seTAB1F7kQ","ts":1778566850},{"h":"digGyIiB","p":"IipQWaLR","u":"8kCmVc3EkKo","t":0,"a":"KDmtBP6en9b36m0jcZPKbuFNtUiRXR-exPL0PwHfnMQVFciXkioOgvsySGPgD_wxzx-MdWXyh7IdiqOsWZDEt41Z9YVjVxKq7ll2ONNQ5pw","k":"8kCmVc3EkKo:IkzbQl4G3kSgnw3gmvVtLD1jRoR4_6zuGQfm918HjCA/IipQWaLR:EZkKEu6pu7RV9ubjF5BMZhmpqPyoIZG1mkWxxX8ZbtE","s":10000,"ts":1778566870}],"u":[{"u":"8kCmVc3EkKo","m":"jye+test1@mega.co.nz","m2":["jye+test1@mega.co.nz"],"pubk":"CACrs5ljxvqSFMEw-6BekVEZW7t-r_hjUmcpuk-BOhs-kCZNrYqQu_8LGpZRJLf2NjsZaSFDn9rC3gK5C2XoZyHCVHKs_-T8lbcrEDhDSUCk_iJd-vAssJqMfs4KBCIhSt5u2jLpOnA2G7tPwotEIrrvJ0p5WpSzwCxkKQAV2bhb3RhRVmxIRGrjqEGKIJiaeRWnHI2MaGmkk4lVPZRiRrBfkeUiVoH70f_-8xRTt7lv0q-INOliDEdJaupq3koXojRrWqav6jDiP8DxJfH1Qolt1YJL-rJZ-7R5iziQqbRYWvEPpAGaRMkoNy0hDxPTqxtDgZN3AJiXlgO85H7ptCzdACAAAAEB","+puCu255":"bdMHaADkAesHzMRh_XH4LdTD2upOS6HxUuRAyds7FTs","+puEd255":"1GyzwZtLBaZ4Vb4OQcWu__pRnqVhBSKrGTPUbHTqu2w","+sigCu255":"AAAAAGj5niiWUs9A75e2JZZ7XyCFU6NA3HYbVMAjHWP33ZeJYF0rxaRc8NmKCUqvNXNY4JWLJGxkBlV9gG0bfnIXv9__JfYL","+sigPubk":"AAAAAGj5ninCXmk40Hj2eYx0uzu0Fy7LC79_GqsEoPlmICMh3sLrZKf1GHkanoWv6D1gYJ5fJu5FAqejRxFHrupTsrutMIIH"}]},"ou":"8kCmVc3EkKo"}],)";
+    std::string jsonSharePart3 =
+        R"("w":"https://g.api.mega.co.nz/wsc/WS_LMPJFp8VlKndvCVoSBQ","sn":"YydQMr-woLo"})";
+
+    scStreamingParser->init();
+
+    client->scsn.setScsn(0xFFFFFFFF);
+
+    // Process "s" part
+    std::string jsonMove = jsonSharePart1;
+
+    size_t consumed = (size_t)scStreamingParser->process(jsonMove.c_str());
+
+    ASSERT_TRUE(consumed > 0);
+    ASSERT_TRUE(scStreamingParser->hasStarted());
+    ASSERT_FALSE(scStreamingParser->isFinished());
+    ASSERT_FALSE(scStreamingParser->isFailed());
+    ASSERT_FALSE(scStreamingParser->isPaused());
+    ASSERT_EQ(client->actionpacketsCurrent, false);
+    ASSERT_TRUE(isNodeTreeLocked(*client));
+
+    // isn is received, but is not stored yet.
+    ASSERT_TRUE(client->scsn.getHandle() == 0xFFFFFFFF);
+
+    // Purge
+    jsonMove.erase(0, consumed);
+
+    // Process "t" part
+    jsonMove += jsonSharePart2;
+
+    consumed = (size_t)scStreamingParser->process(jsonMove.c_str());
+
+    ASSERT_TRUE(consumed > 0);
+    ASSERT_TRUE(scStreamingParser->hasStarted());
+    ASSERT_FALSE(scStreamingParser->isFinished());
+    ASSERT_FALSE(scStreamingParser->isFailed());
+    ASSERT_FALSE(scStreamingParser->isPaused());
+    ASSERT_EQ(client->actionpacketsCurrent, false);
+    ASSERT_TRUE(isNodeTreeLocked(*client));
+
+    const char* isn = "xyp4UX7xFZ4";
+    handle isnHdl;
+    Base64::atob(isn, (byte*)&isnHdl, sizeof(isnHdl));
+    ASSERT_TRUE(client->scsn.getHandle() == isnHdl);
+
+    // Purge
+    jsonMove.erase(0, consumed);
+
+    // Process the remained
+    jsonMove += jsonSharePart3;
 
     testFinishedProcess(scStreamingParser,
                         *client.get(),
@@ -363,6 +459,8 @@ TEST_F(ScStreamingParserTest, ProcessAndPause)
     ASSERT_TRUE(scStreamingParser->isPaused());
     ASSERT_TRUE(client->scnotifyurl.empty());
     ASSERT_FALSE(client->scsn.ready());
+    ASSERT_EQ(client->actionpacketsCurrent, false);
+    ASSERT_FALSE(isNodeTreeLocked(*client));
 
     // Purge
     json.erase(0, consumed);
@@ -384,7 +482,7 @@ TEST_F(ScStreamingParserTest, ProcessPacketTreeByMove)
     std::string jsonCreate =
         R"({"a":[{"a":"t","st":"!G(<Cq+","t":{"f":[{"h":"i4om2BrJ","t":1,"a":"k8mDAq0-TfskLMyMqcxssQ","k":"vN8A0kvxmC0:cXtlV5RG0QHpBxl-sZWQxA","p":"Ll5VkSJZ","ts":1770364711,"u":"vN8A0kvxmC0","i":0}]},"ou":"vN8A0kvxmC0"}, {"a":"t","st":"!G(<IS$","t":{"f":[{"h":"HtpQjbba","t":1,"a":"STYGCigAjt9fSXwkPSYxVA","k":"vN8A0kvxmC0:3BrxInvwc6gysUP-NmZ8Fg","p":"Ll5VkSJZ","ts":1770364718,"u":"vN8A0kvxmC0","i":0}]},"ou":"vN8A0kvxmC0"}],"w":"https://g.api.mega.co.nz/wsc/WS_LMPJFp8VlKndvCVoSBQ","sn":"JcnE8wc8Xz0"})";
     std::string jsonMove =
-        R"({"a":[{"a":"d","i":"fbtekrfnlb","st":"!G(<L_j","n":"i4om2BrJ","m":1,"ou":"vN8A0kvxmC0"},{"a":"t","i":"fbtekrfnlb","t":{"f":[{"h":"i4om2BrJ","p":"HtpQjbba","u":"vN8A0kvxmC0","t":1,"a":"k8mDAq0-TfskLMyMqcxssQ","k":"vN8A0kvxmC0:cXtlV5RG0QHpBxl-sZWQxA","ts":1770364711}],"u":[{"u":"vN8A0kvxmC0","m":"jye+test3@mega.co.nz","m2":["jye+test3@mega.co.nz"],"pubk":"CADLwMeFsNUFHY5vIHrDF73XMk6lZvRPQlhh67NGgg8WdiZF7vtM4HrCoftYvQEFLM-JF498dEFLNo9f76KydgWSdl_IEFT4KpnuexvJpfwI0eyJRzU1Wt5wegWJw9WPEKxpHGP91VllLPWB31X2FH48angXw9Mf_3nyjNh-q83tMEbT5XEWuL3KqiMdP80XeqJk3TOuCcaSmq5tzj84rzc1sNnsoNkgYPYuGjOqzA8VzURVU6Tp7BV2eJm0x68dCwoJMHiZVNor1fz0I-iB1Vj2Hurr1NmIGLP9AEJOSKE1iwBSmseTOci3KaLcMrwy1rQMx8r9y-KV5eBnt7kPRSCdACAAAAEB","+puCu255":"dLFE7BT0zCf3Q2f0EXVGRUZRtVuY0J_TPZVMkhAI3Hs","+puEd255":"owpFu55NPN4Y93GX8-iDVcbmktEvd-LcYtgMJUILLxU","+sigCu255":"AAAAAGj5nvcOQZQogXSCNe7RkRLP21nkWcr3D3zx2zY0xC0BqY5_Ny_O1JMaN95YtbkO8dgcYFGiHaW1CWnu9njDcGtnKm8A","+sigPubk":"AAAAAGj5nvgwEi2YXMbNhHdsV1IDYs62RzF1p60M4PkVxXx68HGqF7nBQSg69KUbh_yydf36nneGFMm-7UnKr_yZyFei2wsD"}]},"ou":"vN8A0kvxmC0"}],"w":"https://g.api.mega.co.nz/wsc/WS_LMPJFp8VlKndvCVoSBQ","sn":"YydQMr-woLo"})";
+        R"({"a":[{"a":"d","i":"fbtekrfnlb","st":"!G(<L_j","n":"i4om2BrJ","m":1,"ou":"vN8A0kvxmC0"},{"a":"t","i":"fbtekrfnlb","t":{"f":[{"h":"i4om2BrJ","p":"HtpQjbba","u":"vN8A0kvxmC0","t":1,"a":"k8mDAq0-TfskLMyMqcxssQ","k":"vN8A0kvxmC0:cXtlV5RG0QHpBxl-sZWQxA","ts":1770364711}],"u":[{"u":"vN8A0kvxmC0","m":"test@mega.co.nz","m2":["test@mega.co.nz"],"pubk":"CADLwMeFsNUFHY5vIHrDF73XMk6lZvRPQlhh67NGgg8WdiZF7vtM4HrCoftYvQEFLM-JF498dEFLNo9f76KydgWSdl_IEFT4KpnuexvJpfwI0eyJRzU1Wt5wegWJw9WPEKxpHGP91VllLPWB31X2FH48angXw9Mf_3nyjNh-q83tMEbT5XEWuL3KqiMdP80XeqJk3TOuCcaSmq5tzj84rzc1sNnsoNkgYPYuGjOqzA8VzURVU6Tp7BV2eJm0x68dCwoJMHiZVNor1fz0I-iB1Vj2Hurr1NmIGLP9AEJOSKE1iwBSmseTOci3KaLcMrwy1rQMx8r9y-KV5eBnt7kPRSCdACAAAAEB","+puCu255":"dLFE7BT0zCf3Q2f0EXVGRUZRtVuY0J_TPZVMkhAI3Hs","+puEd255":"owpFu55NPN4Y93GX8-iDVcbmktEvd-LcYtgMJUILLxU","+sigCu255":"AAAAAGj5nvcOQZQogXSCNe7RkRLP21nkWcr3D3zx2zY0xC0BqY5_Ny_O1JMaN95YtbkO8dgcYFGiHaW1CWnu9njDcGtnKm8A","+sigPubk":"AAAAAGj5nvgwEi2YXMbNhHdsV1IDYs62RzF1p60M4PkVxXx68HGqF7nBQSg69KUbh_yydf36nneGFMm-7UnKr_yZyFei2wsD"}]},"ou":"vN8A0kvxmC0"}],"w":"https://g.api.mega.co.nz/wsc/WS_LMPJFp8VlKndvCVoSBQ","sn":"YydQMr-woLo"})";
 
     scStreamingParser->init();
 
@@ -532,7 +630,7 @@ TEST_F(ScStreamingParserTest, ProcessPacketTreeMixOthers)
     initNodes();
 
     std::string json =
-        R"({"a":[{"a":"t","st":"!G(<Cq+","t":{"f":[{"h":"i4om2BrJ","t":1,"a":"k8mDAq0-TfskLMyMqcxssQ","k":"vN8A0kvxmC0:cXtlV5RG0QHpBxl-sZWQxA","p":"Ll5VkSJZ","ts":1770364711,"u":"vN8A0kvxmC0","i":0}]},"ou":"vN8A0kvxmC0"}, {"a":"s2","st":"!?>Qzzr","n":"hH4SgJJZ","o":"UH4jcqAYP8o","ok":"AAAAAAAAAAAAAAAAAAAAAA","ha":"AAAAAAAAAAAAAAAAAAAAAA","u":"JoPrmG9jv98","r":1,"ts":1761823710,"p":"ShhP2ZnftRQ","op":1}],"w":"https://g.api.mega.co.nz/wsc/WS_LMPJFp8VlKndvCVoSBQ","sn":"JcnE8wc8Xz0"})";
+        R"({"a":[{"a":"t","st":"!?>Qzzr","t":{"f":[{"h":"i4om2BrJ","t":1,"a":"k8mDAq0-TfskLMyMqcxssQ","k":"vN8A0kvxmC0:cXtlV5RG0QHpBxl-sZWQxA","p":"Ll5VkSJZ","ts":1770364711,"u":"vN8A0kvxmC0","i":0}]},"ou":"vN8A0kvxmC0"}, {"a":"s2","st":"!G(<Cq+","n":"hH4SgJJZ","o":"UH4jcqAYP8o","ok":"AAAAAAAAAAAAAAAAAAAAAA","ha":"AAAAAAAAAAAAAAAAAAAAAA","u":"JoPrmG9jv98","r":1,"ts":1761823710,"p":"ShhP2ZnftRQ","op":1}],"w":"https://g.api.mega.co.nz/wsc/WS_LMPJFp8VlKndvCVoSBQ","sn":"JcnE8wc8Xz0"})";
 
     scStreamingParser->init();
 
@@ -547,12 +645,38 @@ TEST_F(ScStreamingParserTest, ProcessPacketTreeMixOthers)
 
     // Verify "t" packet without "ou" field
     std::string jsonWithoutOu =
-        R"({"a":[{"a":"t","st":"!G(<Cq+","t":{"f":[{"h":"r14EgLRY","t":1,"a":"k8mDAq0-TfskLMyMqcxssQ","k":"vN8A0kvxmC0:cXtlV5RG0QHpBxl-sZWQxA","p":"Ll5VkSJZ","ts":1770364711,"u":"vN8A0kvxmC0","i":0}]}}, {"a":"s2","st":"!?>Qzzr","n":"hH4SgJJZ","o":"UH4jcqAYP8o","ok":"AAAAAAAAAAAAAAAAAAAAAA","ha":"AAAAAAAAAAAAAAAAAAAAAA","u":"JoPrmG9jv98","r":1,"ts":1761823710,"p":"ShhP2ZnftRQ","op":1}],"w":"https://g.api.mega.co.nz/wsc/WS_LMPJFp8VlKndvCVoSBQ","sn":"JcnE8wc8Xz0"})";
+        R"({"a":[{"a":"t","st":"!G(P`#}","t":{"f":[{"h":"r14EgLRY","t":1,"a":"k8mDAq0-TfskLMyMqcxssQ","k":"vN8A0kvxmC0:cXtlV5RG0QHpBxl-sZWQxA","p":"Ll5VkSJZ","ts":1770364711,"u":"vN8A0kvxmC0","i":0}]}}, {"a":"s2","st":"!G(Utm1","n":"hH4SgJJZ","o":"UH4jcqAYP8o","ok":"AAAAAAAAAAAAAAAAAAAAAA","ha":"AAAAAAAAAAAAAAAAAAAAAA","u":"JoPrmG9jv98","r":1,"ts":1761823710,"p":"ShhP2ZnftRQ","op":1}],"w":"https://g.api.mega.co.nz/wsc/WS_LMPJFp8VlKndvCVoSBQ","sn":"JcnE8wc8Xz0"})";
 
     testFinishedProcess(scStreamingParser,
                         *client.get(),
                         jsonWithoutOu,
                         "https://g.api.mega.co.nz/wsc/WS_LMPJFp8VlKndvCVoSBQ",
                         "JcnE8wc8Xz0");
+}
+
+// To run this test case, build release load. Running with debug load, this test case will abort.
+TEST_F(ScStreamingParserTest, DISABLED_ParseError)
+{
+    std::string json = R"({"a":[})";
+
+    scStreamingParser->init();
+
+    ASSERT_TRUE(scStreamingParser->process(json.c_str()) == 0);
+
+    ASSERT_TRUE(scStreamingParser->hasStarted());
+    ASSERT_FALSE(scStreamingParser->isFinished());
+    ASSERT_TRUE(scStreamingParser->isFailed());
+    ASSERT_FALSE(scStreamingParser->isPaused());
+    ASSERT_EQ(client->actionpacketsCurrent, false);
+    ASSERT_TRUE(isNodeTreeLocked(*client));
+
+    scStreamingParser->clear();
+
+    ASSERT_FALSE(scStreamingParser->hasStarted());
+    ASSERT_FALSE(scStreamingParser->isFinished());
+    ASSERT_FALSE(scStreamingParser->isFailed());
+    ASSERT_FALSE(scStreamingParser->isPaused());
+    ASSERT_EQ(client->actionpacketsCurrent, false);
+    ASSERT_FALSE(isNodeTreeLocked(*client));
 }
 }

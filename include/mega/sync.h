@@ -1673,14 +1673,14 @@ public:
     list<weak_ptr<LocalNode::RareFields::BadlyFormedIgnore>> badlyFormedIgnoreFilePaths;
 
     typedef std::function<void(MegaClient&, TransferDbCommitter&)> QueuedClientFunc;
-    ThreadSafeDeque<QueuedClientFunc> clientThreadActions;
+    mutable ThreadSafeDeque<QueuedClientFunc> clientThreadActions;
 
     typedef std::pair<std::function<void()>, string> QueuedSyncFunc;
     ThreadSafeDeque<QueuedSyncFunc> syncThreadActions;
 
     void syncRun(std::function<void()>, const string& actionName);
     void queueSync(std::function<void()>&&, const string& actionName);
-    void queueClient(QueuedClientFunc&&, bool fromAnyThread = false);
+    void queueClient(QueuedClientFunc&&, bool fromAnyThread = false) const;
 
     enum class FromAnyThread
     {

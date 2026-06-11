@@ -33,3 +33,21 @@ unique_ptr<MegaNode> SdkServerTest::uploadFile(unsigned int apiIndex,
     sdk_test::LocalTempFile f(name, contents);
     return sdk_test::uploadFile(megaApi[apiIndex].get(), name, parent);
 }
+
+std::optional<ScopedDestructor> scopedHttpServer(MegaApi* api)
+{
+    if (!api)
+        return std::nullopt;
+
+    if (!api->httpServerStart(true, 0))
+        return std::nullopt;
+
+    if (!api->httpServerIsRunning())
+        return std::nullopt;
+
+    return makeScopedDestructor(
+        [api]()
+        {
+            api->httpServerStop();
+        });
+}
