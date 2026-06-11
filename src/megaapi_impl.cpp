@@ -35325,7 +35325,13 @@ static void onReadComplete(uv_fs_t* req)
 
     if (const auto readSize = req->result; readSize < 0)
     {
+        httpctx->failed = true;
         LOG_err << "Read error: " << uv_strerror((int)req->result);
+    }
+    else if (readSize == 0)
+    {
+        httpctx->failed = true;
+        LOG_fatal << "Unexpected EOF in cache file at offset";
     }
     else if (readSize > 0)
     {
