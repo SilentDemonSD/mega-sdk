@@ -98,6 +98,9 @@ using ::mega::MegaGfxProcessor;
 using ::mega::GfxProc;
 using ::mega::GfxProviderExternal;
 
+#define HTTP_verbose_timed \
+    LOG_verbose_timed(std::chrono::milliseconds{120'000}, std::chrono::milliseconds{100})
+
 std::unique_ptr<GfxProc> createGfxProc(MegaGfxProcessor* processor)
 {
     // createInternalGfxProvider could return nullptr
@@ -35372,8 +35375,8 @@ static void readCacheFile(MegaHTTPContext* httpctx)
                                  static_cast<unsigned int>(availableBytes - consumedBytes));
     const auto offset = httpctx->mCacheFile.mOffset + consumedBytes;
 
-    LOG_verbose << httpctx->getLogName() << "[Streaming] Read more from file: " << offset << ", "
-                << length;
+    HTTP_verbose_timed << httpctx->getLogName() << "[Streaming] Read more from file: " << offset
+                       << ", " << length;
 
     auto ctx = std::make_unique<ReadContext>();
     ctx->read_req.data = ctx.get();
@@ -37471,10 +37474,10 @@ static bool rateLimiting(MegaHTTPContext& httpctx)
     if (delayMs <= 1)
         return false;
 
-    LOG_verbose_timed(milliseconds{120'000}, milliseconds{100})
-        << httpctx.getLogName() << "[Throttle] TCP delay " << delayMs
-        << "ms (expected=" << expectedMs << "ms, elapsed=" << elapsedMs
-        << "ms, written=" << throttleWritten << ", throttle=" << throttleBps << " bps)";
+    HTTP_verbose_timed << httpctx.getLogName() << "[Throttle] TCP delay " << delayMs
+                       << "ms (expected=" << expectedMs << "ms, elapsed=" << elapsedMs
+                       << "ms, written=" << throttleWritten << ", throttle=" << throttleBps
+                       << " bps)";
 
     auto timerHandler = [](uv_timer_t* t)
     {
