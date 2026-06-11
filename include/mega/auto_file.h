@@ -8,7 +8,7 @@ template<typename FileTraits>
 class AutoFile
 {
     using HandleType = typename FileTraits::Type;
-    const HandleType UNSET = FileTraits::InvalidValue;
+    static constexpr HandleType UNSET = FileTraits::InvalidValue;
     HandleType h = UNSET;
 
 public:
