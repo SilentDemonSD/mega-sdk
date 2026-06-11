@@ -35341,10 +35341,12 @@ static void onReadComplete(uv_fs_t* req)
     else if (readSize > 0)
     {
         assert(ctx->iov.len >= static_cast<size_t>(readSize));
+
         uv_mutex_lock(&httpctx->mutex);
         httpctx->streamingBuffer.commitWrite(static_cast<size_t>(readSize));
-        httpctx->mCacheFile.addConsumedBytes(readSize);
         uv_mutex_unlock(&httpctx->mutex);
+
+        httpctx->mCacheFile.addConsumedBytes(readSize);
     }
 
     // Read complete and/or more data is in streaming buffer
@@ -35353,16 +35355,21 @@ static void onReadComplete(uv_fs_t* req)
 
 static void readCacheFile(MegaHTTPContext* httpctx)
 {
-    uv_mutex_lock(&httpctx->mutex);
     const auto availableBytes = httpctx->mCacheFile.availableBytes();
     const auto consumedBytes = httpctx->mCacheFile.consumedBytes();
     const auto fd = httpctx->mCacheFile.fd();
     const auto offset = httpctx->mCacheFile.offset();
+
+    // Cannot read more from fd to stream buffer
+    if (fd < 0 || availableBytes <= consumedBytes)
+        return;
+
+    uv_mutex_lock(&httpctx->mutex);
     const auto iov = httpctx->streamingBuffer.nextWriteBuffer(ReadContext::MAX_READ_SIZE);
     uv_mutex_unlock(&httpctx->mutex);
 
-    // Cannot read more from fd to stream buffer
-    if (fd < 0 || availableBytes <= consumedBytes || !iov.base || !iov.len)
+    // streamingBuffer is full
+    if (!iov.base || !iov.len)
         return;
 
     // Another is reading
@@ -37177,7 +37184,6 @@ bool MegaHTTPServer::startStream(MegaHTTPContext* httpctx,
         }
 
         // More data available in the cached file
-        uv_mutex_lock(&ctxPtr->mutex);
         if (const auto newAvailableBytes =
                 ctxPtr->mCacheFile.onReceived(static_cast<m_off_t>(receivedOffset),
                                               static_cast<m_off_t>(receivedLength));
@@ -37192,7 +37198,6 @@ bool MegaHTTPServer::startStream(MegaHTTPContext* httpctx,
         {
             assert(*newAvailableBytes <= static_cast<m_off_t>(length));
         }
-        uv_mutex_unlock(&ctxPtr->mutex);
 
         // Notify the HTTP server
         uv_async_send(&ctxPtr->asynchandle);
@@ -37668,6 +37673,8 @@ std::optional<m_off_t> MegaHTTPContext::CacheFile::onReceived(m_off_t receivedOf
         return std::nullopt;
     }
 
+    // The file service delivers callbacks sequentially, so mAvailableBytes has no concurrent
+    // writers.
     mAvailableBytes += receivedLength;
     return mAvailableBytes;
 }

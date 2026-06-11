@@ -5983,9 +5983,12 @@ private:
     std::string logname;
 
 public:
+    // mAvailableBytes is atomic: written by the file service callback thread, read on the uv loop
+    // thread.
+    // mOffset is immutable after init() — set once, then read-only.
     class CacheFile
     {
-        m_off_t mAvailableBytes{0};
+        std::atomic<m_off_t> mAvailableBytes{0};
 
         m_off_t mConsumedBytes{0};
 
