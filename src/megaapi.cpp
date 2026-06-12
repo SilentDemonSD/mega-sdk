@@ -3183,16 +3183,6 @@ void MegaApi::submitPurchaseReceipt(int gateway, const char *receipt, MegaReques
     pImpl->submitPurchaseReceipt(gateway, receipt, UNDEF, AFFILIATE_TYPE_INVALID, 0, listener);
 }
 
-void MegaApi::submitPurchaseReceipt(int gateway, const char *receipt, MegaHandle lastPublicHandle, MegaRequestListener *listener)
-{
-    pImpl->submitPurchaseReceipt(gateway, receipt, lastPublicHandle, AFFILIATE_TYPE_INVALID, 0, listener);
-}
-
-void MegaApi::submitPurchaseReceipt(int gateway, const char *receipt, MegaHandle lastPublicHandle, int lastPublicHandleType, int64_t lastAccessTimestamp, MegaRequestListener *listener)
-{
-    pImpl->submitPurchaseReceipt(gateway, receipt, lastPublicHandle, lastPublicHandleType, lastAccessTimestamp, listener);
-}
-
 void MegaApi::creditCardStore(const char* address1, const char* address2, const char* city,
                      const char* province, const char* country, const char *postalcode,
                      const char* firstname, const char* lastname, const char* creditcard,
