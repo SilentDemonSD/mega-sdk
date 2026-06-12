@@ -241,8 +241,10 @@ pipeline {
                                                 tar czf dumps.tgz dumps || true
 
                                                 # Compress procdump logs for archive
-                                                mkdir -p ./procdump_dir
-                                                (mv procdump*.log procdump_dir/ && tar czf procdump.tgz procdump_dir) || true
+                                                mkdir -p procdumps
+                                                # Use find to avoid error with too many files
+                                                find . -maxdepth 1 -name 'procdump*.log' -exec mv '{}' procdumps/ ';' || true
+                                                tar czf procdumps.tgz procdumps
 
                                                 # Compress pdbs for archive
                                                 tar czf pdbs.tgz $BUILD_DIR/Debug/*.pdb $BUILD_DIR/tests/integration/Debug/*.pdb
@@ -272,7 +274,7 @@ pipeline {
                     archiveArtifacts artifacts: "build_dir_x86/*.log.gz", allowEmptyArchive: true, fingerprint: true
                     archiveArtifacts artifacts: 'dumps.tgz', allowEmptyArchive: true, fingerprint: true
                     archiveArtifacts artifacts: 'pdbs.tgz', allowEmptyArchive: true, fingerprint: true
-                    archiveArtifacts artifacts: 'procdump.tgz', allowEmptyArchive: true, fingerprint: true
+                    archiveArtifacts artifacts: 'procdumps.tgz', allowEmptyArchive: true, fingerprint: true
                     archiveArtifacts artifacts: 'test_integration*.log.gz', allowEmptyArchive: true, fingerprint: true
                     archiveArtifacts artifacts: 'test_integration*.tgz', allowEmptyArchive: true, fingerprint: true
                     deleteDir()
