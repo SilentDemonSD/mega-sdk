@@ -1024,8 +1024,8 @@ FileServiceContext::FileServiceContext(Client& client,
     mReclaimTaskLock(),
     mEventEmitter(),
     mService(service),
-    mActivities(),
-    mExecutor(TaskExecutorFlags(), logger())
+    mExecutor(TaskExecutorFlags(), logger()),
+    mActivities()
 {
     // Let the client know we want to receive node change events.
     mClient.addEventObserver(*this);
