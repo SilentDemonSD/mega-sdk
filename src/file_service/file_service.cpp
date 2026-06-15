@@ -142,7 +142,7 @@ auto FileService::databasePath() const -> FileServiceResultOr<LocalPath>
     return unexpected(FILE_SERVICE_UNINITIALIZED);
 }
 
-void FileService::deinitialize(bool cleanCache)
+void FileService::deinitialize(bool cleanCache, bool isDestructing)
 {
     UniqueLock guard(mContextLock);
 
@@ -162,7 +162,8 @@ void FileService::deinitialize(bool cleanCache)
     mContext.reset();
 
     // Reconstruct a context using public client
-    construct();
+    if (!isDestructing)
+        construct();
 
     // Not initialized anymore
     mInitialized = false;

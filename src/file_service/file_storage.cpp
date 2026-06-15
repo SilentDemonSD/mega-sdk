@@ -54,7 +54,7 @@ FileAccessPtr FileStorage::addFile(FileID id)
 
 LocalPath FileStorage::databasePath() const
 {
-    static const auto name = LocalPath::fromRelativePath("metadata");
+    const auto name = LocalPath::fromRelativePath("metadata");
 
     auto path = mUserStorageDirectory.path();
 
