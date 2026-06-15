@@ -1236,10 +1236,18 @@ try
     // Otherwise execute the request.
     execute(request);
 }
-catch (std::runtime_error& exception)
+catch (std::exception& exception)
 {
     // Encountered an unhandled exception while executing request.
     FSErrorF("Unable to execute %s request: %s", request.name(), exception.what());
+
+    // Try and fail the request.
+    completed(std::move(request), FILE_FAILED);
+}
+catch (...)
+{
+    // Encountered an unknown exception while executing request.
+    FSErrorF("Unable to execute %s request: %s", request.name(), "Unknown exception");
 
     // Try and fail the request.
     completed(std::move(request), FILE_FAILED);
@@ -2519,6 +2527,10 @@ Callback swallow(Callback callback, const char* name)
         {
             // User's callback threw an exception we can log.
             FSErrorF("User %s callback threw an exception: %s", name, exception.what());
+        }
+        catch (...)
+        {
+            FSErrorF("User %s callback threw an unknown exception", name);
         }
     };
 }
