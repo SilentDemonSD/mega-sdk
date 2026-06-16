@@ -1068,6 +1068,9 @@ FileServiceContext::FileServiceContext(Client& client,
 
 FileServiceContext::~FileServiceContext()
 {
+    // Cancel any scheduled reclamations.
+    reclaimOptionsChanged(ReclaimOptions());
+
     // Cancel in-memory pins that might be keeping contexts alive.
     {
         // So we can safely iterate over mFileContexts.
