@@ -5,6 +5,7 @@
 
 #include "integration_test_utils.h"
 #include "mega/utils.h"
+#include "megaapi_impl.h"
 #include "sdk_test_utils.h"
 #include "SdkTest_test.h"
 

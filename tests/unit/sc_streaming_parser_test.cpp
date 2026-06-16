@@ -23,7 +23,6 @@
 #include "mega/sc_streaming_parser.h"
 #include "utils.h"
 
-#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 using namespace mega;

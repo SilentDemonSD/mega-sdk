@@ -7,6 +7,7 @@
 #include <mega/common/testing/model.h>
 #include <mega/fuse/common/logging.h>
 #include <mega/fuse/common/mount_info.h>
+#include <mega/fuse/common/mount_result.h>
 #include <mega/fuse/common/testing/parameters.h>
 #include <mega/fuse/common/testing/real_client.h>
 #include <mega/fuse/common/testing/test.h>

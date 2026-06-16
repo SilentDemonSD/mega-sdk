@@ -31,6 +31,7 @@
 #include "mega/testhooks.h"
 #include "mega/types.h"
 #include "megaapi.h"
+#include "megaapi_impl.h"
 #include "megautils.h"
 #include "mock_listeners.h"
 #include "sdk_test_utils.h"
@@ -230,6 +231,7 @@ namespace
     //      2. A test job can run tests in parallel
     // Use current process ID so names are unique between different jobs (processes)
     // Use a static incremental counter so names are unique in the same job (process)
+#ifdef ENABLE_ISOLATED_GFX
     std::string newEndpointName()
     {
         static std::atomic_int counter{0};
@@ -242,12 +244,13 @@ namespace
 
     std::string executableName(const std::string& name)
     {
-    #ifdef WIN32
+#ifdef WIN32
         return name + ".exe";
-    #else
+#else
         return name;
-    #endif
+#endif
     }
+#endif
 
     MegaApiTestPointer newMegaApi(const char* appKey,
                                   const char* basePath,

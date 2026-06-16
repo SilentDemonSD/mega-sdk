@@ -7,6 +7,7 @@
  *   - Delete attribute
  */
 
+#include "megaapi_impl.h"
 #include "SdkTest_test.h"
 
 #include <gmock/gmock.h>

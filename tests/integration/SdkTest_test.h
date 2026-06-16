@@ -23,7 +23,6 @@
 #define SDKTEST_TEST_H
 
 #include "../include/megaapi.h"
-#include "../include/megaapi_impl.h"
 #include "gtest/gtest.h"
 #include "mega.h"
 #include "mega/scoped_helpers.h"

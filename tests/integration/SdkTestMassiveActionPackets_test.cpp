@@ -112,13 +112,6 @@ constexpr unsigned int AP_WAIT_TIMEOUT_SECONDS = 300; // 5 minutes for massive A
 
 const char* TEST_FILE_NAME = "test.png";
 
-// Helper to generate unique names
-std::string generateUniqueName(const std::string& prefix, int index)
-{
-    return prefix + "_" + std::to_string(index) + "_" +
-           std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
-}
-
 } // anonymous namespace
 
 /**

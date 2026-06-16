@@ -6,8 +6,6 @@
 #include "mock_listeners.h"
 #include "SdkTestPasswordManager.h"
 
-#include <gmock/gmock.h>
-
 using namespace testing;
 
 TEST_F(SdkTestPasswordManager, CreateNewPassFolderNode)

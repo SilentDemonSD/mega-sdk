@@ -1,7 +1,5 @@
 #include "SdkTest_test.h"
 
-#include <gmock/gmock.h>
-
 /**
  * Test for FTP server using port 0, which also consist of:
  * - start two FTP servers from a thread and no ports conflicting

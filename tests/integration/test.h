@@ -2,24 +2,22 @@
 #ifndef TEST_H
 #define TEST_H 1
 
+#include "../stdfs.h"
+#include "gtest/gtest.h"
+
+#include <atomic>
 #include <chrono>
+#include <fstream>
+#include <functional>
+#include <future>
+#include <map>
+#include <mega.h>
+#include <random>
 #include <sstream>
+#include <stdio.h>
 #include <string>
 #include <thread>
 #include <vector>
-#include <functional>
-#include <stdio.h>
-#include <map>
-#include <future>
-#include <fstream>
-#include <atomic>
-#include <random>
-
-#include "gtest/gtest.h"
-
-#include <mega.h>
-#include <megaapi_impl.h>
-#include "../stdfs.h"
 
 using namespace ::mega;
 using namespace ::std;
