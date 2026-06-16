@@ -9723,6 +9723,15 @@ void MegaApiImpl::abortPendingActions(error preverror)
         {
             continue; // this request is deleted in MegaApiImpl dtor, its finish is the Impl destructor exiting.
         }
+        if (request->performFireOnRequestFinish)
+        {
+            // A cross-thread fireOnRequestFinish already re-queued this request
+            // into requestQueue with a deferred finish (see fireOnRequestFinish).
+            // Finishing and deleting it here would leave a dangling pointer in
+            // requestQueue that sendPendingRequests later pops and dereferences.
+            // Let the queued deferred finish own the completion instead.
+            continue;
+        }
         fireOnRequestFinish(request, std::make_unique<MegaErrorPrivate>(preverror));
     }
     requestMap.clear();
