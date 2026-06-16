@@ -1185,33 +1185,13 @@ void FileContext::execute(FileWriteRequest& request)
 
 void FileContext::execute(FileRequest& request)
 {
-    // Executes a user's request.
-    auto execute = [this](auto& request)
-    {
-        try
-        {
-            // Sanity.
-            assert(request.mCallback);
-
-            // Immediately reject the request if necessary.
-            if (auto result = reject(request); result != FILE_SUCCESS)
-                return completed(std::move(request), result);
-
-            // Try and execute the request.
-            this->execute(request);
-        }
-        catch (std::exception& exception)
-        {
-            // Threw an exception while executing request.
-            FSErrorF("Unable to execute %s request: %s", request.name(), exception.what());
-
-            // Try and fail the request.
-            completed(std::move(request), FILE_FAILED);
-        }
-    }; // execute
-
     // Execute the user's request.
-    std::visit(std::move(execute), request);
+    std::visit(
+        [this](auto& request)
+        {
+            executeCommon(std::move(request));
+        },
+        request);
 }
 
 void FileContext::execute()
@@ -1244,6 +1224,36 @@ void FileContext::execute()
 }
 
 template<typename Request>
+auto FileContext::executeCommon(Request&& request) -> std::enable_if_t<IsFileRequestV<Request>>
+try
+{
+    // Immediately reject the request if necessary.
+    //
+    // completed(...) needs to be called here as it expects a request to hold some lock.
+    if (auto result = reject(request); result != FILE_SUCCESS)
+        return completed(std::forward<Request>(request), result);
+
+    // Otherwise execute the request.
+    execute(request);
+}
+catch (std::exception& exception)
+{
+    // Encountered an unhandled exception while executing request.
+    FSErrorF("Unable to execute %s request: %s", request.name(), exception.what());
+
+    // Try and fail the request.
+    completed(std::move(request), FILE_FAILED);
+}
+catch (...)
+{
+    // Encountered an unknown exception while executing request.
+    FSErrorF("Unable to execute %s request: %s", request.name(), "Unknown exception");
+
+    // Try and fail the request.
+    completed(std::move(request), FILE_FAILED);
+}
+
+template<typename Request>
 auto FileContext::executeOrQueue(Request&& request) -> std::enable_if_t<IsFileRequestV<Request>>
 {
     // Sanity.
@@ -1258,14 +1268,8 @@ auto FileContext::executeOrQueue(Request&& request) -> std::enable_if_t<IsFileRe
     if (std::unique_lock lock(mRequestsLock); !executable(lock, true, request))
         return queue(std::move(lock), std::forward<Request>(request));
 
-    // Immediately reject the request if necessary.
-    //
-    // completed(...) needs to be called here as it expects a request to hold some lock.
-    if (auto result = reject(request); result != FILE_SUCCESS)
-        return completed(std::forward<Request>(request), result);
-
     // Otherwise execute the request.
-    execute(request);
+    executeCommon(std::forward<Request>(request));
 }
 
 void FileContext::executed(FileReadRequestTag)
@@ -2523,6 +2527,10 @@ Callback swallow(Callback callback, const char* name)
         {
             // User's callback threw an exception we can log.
             FSErrorF("User %s callback threw an exception: %s", name, exception.what());
+        }
+        catch (...)
+        {
+            FSErrorF("User %s callback threw an unknown exception", name);
         }
     };
 }

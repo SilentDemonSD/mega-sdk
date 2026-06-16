@@ -150,6 +150,10 @@ class FileContext final: public std::enable_shared_from_this<FileContext>
     // Execute zero or more queued requests.
     void execute();
 
+    // Execute a request, translating any uncaught exceptions into an error code.
+    template<typename Request>
+    auto executeCommon(Request&& request) -> std::enable_if_t<IsFileRequestV<Request>>;
+
     // Execute a request if possible otherwise queue it for later execution.
     template<typename Request>
     auto executeOrQueue(Request&& request) -> std::enable_if_t<IsFileRequestV<Request>>;
