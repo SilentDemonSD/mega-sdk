@@ -1,6 +1,9 @@
+#include "mega/db.h"
+#include "mega/file.h"
 #include "mega/megaapp.h"
 #include "mega/megaclient.h"
 #include "mega/testhooks.h"
+#include "mega/transfer.h"
 #include "sdk_test_utils.h"
 #include "utils.h"
 
@@ -161,5 +164,111 @@ TEST_F(MegaClientTest, chooseScParsingMode_DoesNothingForShortPayload)
     EXPECT_FALSE(pendingScHolder->mChunked);
 }
 #endif
+
+// Reproduction: UAF in TransferList::nexttransfers when a transfer callback re-enters a
+// transfers-list getter. file_removed() stands in for the app re-entering getTransfers():
+// it tombstones the deque front and calls size() -> applyErase() frees the block the
+// nexttransfers iterator points into. Run under ASan (-DENABLE_ASAN=ON);
+class ReentrantCompactApp: public MegaApp
+{
+public:
+    MegaClient* client = nullptr;
+    bool done = false;
+
+    void file_removed(File*, const Error&) override
+    {
+        if (done || !client)
+        {
+            return;
+        }
+        done = true;
+
+        auto& dq = client->transferlist.transfers[GET];
+
+        // Tombstone the front of the deque. This is the exact same call the SDK makes in
+        // production: TransferList::removetransfer() -> transfers[type].erase(it)
+        // (transfer.cpp), reached via Transfer::removeAndDeleteSelf() when a cancelled transfer
+        // is cleaned up inside this very nexttransfers() loop. erase() only sets the erased flag
+        // + bumps nErased; it does not modify the deque structure, so the iterator used here
+        // stays valid until the size() below flushes it.
+        std::size_t n = 0;
+        for (auto i = dq.begin(/*canHandleErasedElements*/ true);
+             i != dq.end(/*canHandleErasedElements*/ true) && n < 1000;
+             ++i, ++n)
+        {
+            dq.erase(i);
+        }
+
+        // Trigger the compaction the way getTransfers()/getNumPendingDownloads() do.
+        // applyErase() pop_front-frees the now-empty front blocks, invalidating the iterator
+        // nexttransfers is currently holding.
+        (void)dq.size();
+    }
+};
+
+TEST(TransferListReentrancy, nexttransfers_UAF_when_getter_compacts_deque_in_callback)
+{
+    auto app = std::make_shared<ReentrantCompactApp>();
+    auto client = mt::makeClient(*app);
+    app->client = client.get();
+
+    std::vector<Transfer*> transfers;
+    std::vector<File*> files;
+
+    // Enough transfers to span several libc++ deque blocks, so the pop_front compaction
+    // actually frees the block the iterator points into (a single-block deque would only read
+    // shifted-but-valid memory and might not fault under ASan).
+    constexpr int kCount = 1024;
+    for (int i = 0; i < kCount; ++i)
+    {
+        Transfer* t = new Transfer(client.get(), GET);
+        transfers.push_back(t);
+        client->transferlist.transfers[GET].push_back(t);
+
+        // Every transfer keeps one non-cancelled file so it is never emptied, and therefore
+        // never removeAndDeleteSelf()'d during the loop (which would delete it out from under
+        // the teardown below). This isolates the iterator bug from the transfer-deletion path.
+        File* keep = new File();
+        keep->transfer = t;
+        keep->file_it = t->files.insert(t->files.end(), keep);
+        files.push_back(keep);
+    }
+
+    // The first transfer additionally carries a cancelled file, so removeCancelledTransferFiles()
+    // removes it and fires file_removed() -> our stand-in for the app's re-entrant getTransfers().
+    // Its surviving 'keep' file means t0 itself is not emptied.
+    Transfer* t0 = transfers.front();
+    File* cancelled = new File();
+    cancelled->transfer = t0;
+    cancelled->cancelToken = CancelToken(true); // cancelled
+    cancelled->file_it = t0->files.insert(t0->files.begin(), cancelled); // processed first
+    files.push_back(cancelled);
+
+    std::function<bool(Transfer*)> cont = [](Transfer*)
+    {
+        return false;
+    };
+    std::function<bool(direction_t)> dirCont = [](direction_t)
+    {
+        return true;
+    };
+    TransferDbCommitter committer(client->tctable);
+
+    // The nexttransfers iterates a copy of the pointers, so the compaction is
+    // harmless and this returns normally.
+    client->transferlist.nexttransfers(cont, dirCont, committer);
+
+    // Clear the deque first so ~Transfer's removetransfer() is a no-op (transfers_it is already
+    // end() from the ctor, slot is null, finished is false -> ~Transfer is otherwise safe).
+    client->transferlist.transfers[GET].clear();
+    for (Transfer* t: transfers)
+    {
+        delete t;
+    }
+    for (File* f: files)
+    {
+        delete f;
+    }
+}
 
 } // namespace
