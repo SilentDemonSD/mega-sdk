@@ -175,6 +175,9 @@ class FileServiceContext: common::NodeEventObserver
     // What service does this context belong to?
     FileService& mService;
 
+    // Lets us execute tasks on a thread pool.
+    common::TaskExecutor mExecutor;
+
     // This member will ensure the context isn't destroyed until any related
     // activities have been completed.
     //
@@ -183,9 +186,6 @@ class FileServiceContext: common::NodeEventObserver
     // until all File(Info)?Contexts that refer to this context have been
     // destroyed before allowing this context itself to be destroyed.
     common::ActivityMonitor mActivities;
-
-    // Lets us execute tasks on a thread pool.
-    common::TaskExecutor mExecutor;
 
 public:
     FileServiceContext(common::Client& client,
