@@ -1024,8 +1024,8 @@ FileServiceContext::FileServiceContext(Client& client,
     mReclaimTaskLock(),
     mEventEmitter(),
     mService(service),
-    mActivities(),
-    mExecutor(TaskExecutorFlags(), logger())
+    mExecutor(TaskExecutorFlags(), logger()),
+    mActivities()
 {
     // Let the client know we want to receive node change events.
     mClient.addEventObserver(*this);
@@ -1068,6 +1068,9 @@ FileServiceContext::FileServiceContext(Client& client,
 
 FileServiceContext::~FileServiceContext()
 {
+    // Cancel any scheduled reclamations.
+    reclaimOptionsChanged(ReclaimOptions());
+
     // Cancel in-memory pins that might be keeping contexts alive.
     {
         // So we can safely iterate over mFileContexts.
