@@ -181,8 +181,7 @@ protected:
                                   m_time_t mtime = 0)
     {
         NodeHandle handle = NodeHandle().set6byte(mNextHandle++);
-        Node& nodeRef = mt::makeNode(*mClient, nodeType, handle, parent.get());
-        auto node = std::shared_ptr<Node>(&nodeRef);
+        auto node = mt::makeNode(*mClient, nodeType, handle, parent.get());
 
         static const nameid nameId = AttrMap::string2nameid("n");
         node->attrs.map[nameId] = name;

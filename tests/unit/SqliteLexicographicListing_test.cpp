@@ -79,8 +79,7 @@ protected:
     std::shared_ptr<Node> make(nodetype_t type, const std::string& name, Node* parent)
     {
         NodeHandle h = NodeHandle().set6byte(mNextHandle++);
-        Node& nodeRef = mt::makeNode(*mClient, type, h, parent);
-        auto node = std::shared_ptr<Node>(&nodeRef);
+        auto node = mt::makeNode(*mClient, type, h, parent);
 
         static const nameid nameId = AttrMap::string2nameid("n");
         node->attrs.map[nameId] = name;

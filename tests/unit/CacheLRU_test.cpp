@@ -91,12 +91,11 @@ public:
                                         bool isFetching,
                                         std::function<void(mega::Node&)> nodeSetupCb = nullptr)
     {
-        auto& nodeRef =
+        auto node =
             mt::makeNode(*mClient, nodeType, mega::NodeHandle().set6byte(mIndex++), parent.get());
-        std::shared_ptr<mega::Node> node(&nodeRef);
         if (nodeSetupCb)
         {
-            nodeSetupCb(nodeRef);
+            nodeSetupCb(*node);
         }
 
         node->serializefingerprint(&node->attrs.map['c']);
@@ -940,12 +939,11 @@ TEST_F(CacheLRU, getChildrenIncludesEvictedChildrenParentFromBlob)
     // the parent in the state this test wants to exercise.
     std::string parentBlob;
     {
-        auto& parentRef = mt::makeNode(*mClient,
-                                       mega::nodetype_t::FOLDERNODE,
-                                       mega::NodeHandle().set6byte(mIndex++),
-                                       rootNode.get());
-        std::shared_ptr<mega::Node> tmp(&parentRef);
-        ASSERT_TRUE(tmp->serialize(&parentBlob));
+        auto parent = mt::makeNode(*mClient,
+                                   mega::nodetype_t::FOLDERNODE,
+                                   mega::NodeHandle().set6byte(mIndex++),
+                                   rootNode.get());
+        ASSERT_TRUE(parent->serialize(&parentBlob));
     }
 
     auto parent = mClient->mNodeManager.getNodeFromBlob(&parentBlob);
@@ -1000,12 +998,11 @@ TEST_F(CacheLRU, getChildrenConsistentAcrossCalls)
 
     std::string parentBlob;
     {
-        auto& parentRef = mt::makeNode(*mClient,
-                                       mega::nodetype_t::FOLDERNODE,
-                                       mega::NodeHandle().set6byte(mIndex++),
-                                       rootNode.get());
-        std::shared_ptr<mega::Node> tmp(&parentRef);
-        ASSERT_TRUE(tmp->serialize(&parentBlob));
+        auto parent = mt::makeNode(*mClient,
+                                   mega::nodetype_t::FOLDERNODE,
+                                   mega::NodeHandle().set6byte(mIndex++),
+                                   rootNode.get());
+        ASSERT_TRUE(parent->serialize(&parentBlob));
     }
     auto parent = mClient->mNodeManager.getNodeFromBlob(&parentBlob);
     ASSERT_NE(parent, nullptr);
@@ -1035,12 +1032,11 @@ TEST_F(CacheLRU, getChildrenSkipsInMemoryMoveNotFlushedToDb)
     // is the only branch where the move-not-flushed check is reached.
     std::string parentBlob;
     {
-        auto& parentRef = mt::makeNode(*mClient,
-                                       mega::nodetype_t::FOLDERNODE,
-                                       mega::NodeHandle().set6byte(mIndex++),
-                                       rootNode.get());
-        std::shared_ptr<mega::Node> tmp(&parentRef);
-        ASSERT_TRUE(tmp->serialize(&parentBlob));
+        auto parent = mt::makeNode(*mClient,
+                                   mega::nodetype_t::FOLDERNODE,
+                                   mega::NodeHandle().set6byte(mIndex++),
+                                   rootNode.get());
+        ASSERT_TRUE(parent->serialize(&parentBlob));
     }
     auto parentA = mClient->mNodeManager.getNodeFromBlob(&parentBlob);
     ASSERT_NE(parentA, nullptr);
@@ -1081,12 +1077,11 @@ TEST_F(CacheLRU, getChildrenReturnsNoDuplicatesAfterEviction)
 
     std::string parentBlob;
     {
-        auto& parentRef = mt::makeNode(*mClient,
-                                       mega::nodetype_t::FOLDERNODE,
-                                       mega::NodeHandle().set6byte(mIndex++),
-                                       rootNode.get());
-        std::shared_ptr<mega::Node> tmp(&parentRef);
-        ASSERT_TRUE(tmp->serialize(&parentBlob));
+        auto parent = mt::makeNode(*mClient,
+                                   mega::nodetype_t::FOLDERNODE,
+                                   mega::NodeHandle().set6byte(mIndex++),
+                                   rootNode.get());
+        ASSERT_TRUE(parent->serialize(&parentBlob));
     }
     auto parent = mClient->mNodeManager.getNodeFromBlob(&parentBlob);
     ASSERT_NE(parent, nullptr);

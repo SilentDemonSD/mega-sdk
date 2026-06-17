@@ -182,8 +182,7 @@ protected:
                                   bool isFetching = true)
     {
         NodeHandle h = NodeHandle().set6byte(mNextHandle++);
-        Node& ref = mt::makeNode(*mClient, type, h, parent.get());
-        auto node = std::shared_ptr<Node>(&ref);
+        auto node = mt::makeNode(*mClient, type, h, parent.get());
 
         node->attrs.map[kNameId] = meta.name;
 
