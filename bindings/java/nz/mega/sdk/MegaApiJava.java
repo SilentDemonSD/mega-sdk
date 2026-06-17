@@ -118,6 +118,9 @@ public class MegaApiJava {
     public final static int USER_ATTR_MY_BACKUPS_FOLDER = MegaApi.USER_ATTR_MY_BACKUPS_FOLDER;
     public final static int USER_ATTR_APPS_PREFS = MegaApi.USER_ATTR_APPS_PREFS;
     public final static int USER_ATTR_CC_PREFS = MegaApi.USER_ATTR_CC_PREFS;
+    public final static int USER_ATTR_DEV_OPT = MegaApi.USER_ATTR_DEV_OPT;
+    public final static int USER_ATTR_LAST_PURGE_ACKNOWLEDGED =
+        MegaApi.USER_ATTR_LAST_PURGE_ACKNOWLEDGED;
 
     // deprecated: public final static int USER_ATTR_BACKUP_NAMES = MegaApi.USER_ATTR_BACKUP_NAMES;
     public final static int USER_ATTR_COOKIE_SETTINGS = MegaApi.USER_ATTR_COOKIE_SETTINGS;
@@ -11147,6 +11150,29 @@ public class MegaApiJava {
     public void setCookieSettings(int settings) {
         megaApi.setCookieSettings(settings);
     }
+
+    /**
+     * Acknowledge the last purge notification so it is not shown again on any device.
+     * <p>
+     * Pass the timestamp from EVENT_LAST_PURGE (getNumber("ts")). It is stored in the
+     * USER_ATTR_LAST_PURGE_ACKNOWLEDGED (^!lpack) attribute; on later logins from any device a
+     * matching lastpurge timestamp suppresses EVENT_LAST_PURGE.
+     *
+     * @param ts       Unix timestamp of the purge to acknowledge (from EVENT_LAST_PURGE)
+     * @param listener MegaRequestListener to track this request
+     */
+    public void setLastPurgeAcknowledged(long ts, MegaRequestListenerInterface listener) {
+        megaApi.setLastPurgeAcknowledged(ts, createDelegateRequestListener(listener));
+    }
+
+    /**
+     * Acknowledge the last purge notification so it is not shown again on any device.
+     * <p>
+     * See {@link #setLastPurgeAcknowledged(long, MegaRequestListenerInterface)}.
+     *
+     * @param ts Unix timestamp of the purge to acknowledge (from EVENT_LAST_PURGE)
+     */
+    public void setLastPurgeAcknowledged(long ts) { megaApi.setLastPurgeAcknowledged(ts); }
 
     /**
      * Get a bitmap to indicate whether some cookies are enabled or not
