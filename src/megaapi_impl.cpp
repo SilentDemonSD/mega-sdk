@@ -37331,6 +37331,9 @@ auto MegaHTTPContext::processFileStreamResult() -> std::unique_ptr<TaskContext>
     // Instantiate task context.
     auto task = std::make_unique<TaskContext>();
 
+    // Sanity check we can cast back
+    assert(reinterpret_cast<TaskContext*>(&task->mRequest) == task.get());
+
     // Populate task context.
     task->mCookie = weak_from_this();
     task->mResult = std::move(consumption.mFileStreamResult);
