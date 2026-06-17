@@ -21223,16 +21223,32 @@ void MegaApiImpl::moveNode(MegaNode* node, MegaNode* newParent, const char* newN
                 return API_EARGS;
             }
 
-            if (node->parent == newParent)
+            // Move to the current parent: compare parent handles, not node->parent.
+            // parentHandle() comes from the node record and stays valid even when
+            // node->parent is null; newParent from nodebyhandle() may be another
+            // shared_ptr for the same folder (typical for in-shares).
+            const bool sameParent = (node->parentHandle() == newParent->nodeHandle());
+
+            if (sameParent)
             {
-                fireOnRequestFinish(request, std::make_unique<MegaErrorPrivate>(API_OK));
-                return API_OK;
+                const bool keepCurrentName = (name == nullptr || *name == '\0');
+                bool sameName = keepCurrentName;
+                if (!keepCurrentName)
+                {
+                    string normalized(name);
+                    LocalPath::utf8_normalize(&normalized);
+                    sameName = node->hasName(normalized);
+                }
+
+                if (sameName)
+                {
+                    fireOnRequestFinish(request, std::make_unique<MegaErrorPrivate>(API_OK));
+                    return API_OK;
+                }
             }
 
-            if (node->type == ROOTNODE
-                    || node->type == VAULTNODE
-                    || node->type == RUBBISHNODE
-                    || !node->parent) // rootnodes cannot be moved
+            if (node->type == ROOTNODE || node->type == VAULTNODE || node->type == RUBBISHNODE ||
+                !node->parent) // rootnodes cannot be moved
             {
                 return API_EACCESS;
             }
@@ -21307,10 +21323,19 @@ void MegaApiImpl::moveNode(MegaNode* node, MegaNode* newParent, const char* newN
                     }
                     if (!newName.empty())
                     {
-                        shared_ptr<Node> ovn = client->childnodebyname(newParent.get(), newName.c_str(), true);
+                        shared_ptr<Node> ovn =
+                            client->childnodebyname(newParent.get(), newName.c_str(), true);
                         if (ovn)
                         {
-                            if (node->isvalid && ovn->isvalid && *(FileFingerprint*)node.get() == *(FileFingerprint*)ovn.get())
+                            if (ovn->nodeHandle() == node->nodeHandle())
+                            {
+                                fireOnRequestFinish(request,
+                                                    std::make_unique<MegaErrorPrivate>(API_OK));
+                                return API_OK;
+                            }
+
+                            if (node->isvalid && ovn->isvalid &&
+                                *(FileFingerprint*)node.get() == *(FileFingerprint*)ovn.get())
                             {
                                 request->setNodeHandle(UNDEF);
                                 e = client->unlink(node.get(), false, request->getTag(), false);
