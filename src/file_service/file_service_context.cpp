@@ -1090,7 +1090,7 @@ FileServiceContext::~FileServiceContext()
             auto when = std::chrono::steady_clock::time_point::min();
 
             // Cancel any in-memory pins on the context.
-            context->pinUntil(when);
+            context->pinUntil(context, when);
         }
     }
 
