@@ -1359,6 +1359,10 @@ template<typename Request>
 auto FileContext::reject([[maybe_unused]] const Request& request)
     -> std::enable_if_t<IsFileRequestV<Request>, FileResult>
 {
+    // File Service is being torn down.
+    if (mService.deinitializing())
+        return FILE_CANCELLED;
+
     if constexpr (!IsFileReclaimRequestV<Request> && IsFileWriteRequestV<Request>)
     {
         if constexpr (IsFileRemoveRequestV<Request>)

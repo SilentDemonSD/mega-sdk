@@ -1010,6 +1010,7 @@ FileServiceContext::FileServiceContext(Client& client,
     NodeEventObserver(),
     mInstanceLogger("FileServiceContext", *this, logger()),
     mClient(client),
+    mDeinitialized{false},
     mStorage(userStoragePath),
     mDatabase(createDatabase(mStorage.databasePath())),
     mQueries(mDatabase),
@@ -1068,6 +1069,9 @@ FileServiceContext::FileServiceContext(Client& client,
 
 FileServiceContext::~FileServiceContext()
 {
+    // Let any active file contexts know we're shutting down.
+    mDeinitialized = true;
+
     // Cancel any scheduled reclamations.
     reclaimOptionsChanged(ReclaimOptions());
 
@@ -1324,6 +1328,11 @@ Database& FileServiceContext::database()
 LocalPath FileServiceContext::databasePath() const
 {
     return mStorage.databasePath();
+}
+
+bool FileServiceContext::deinitializing() const
+{
+    return mDeinitialized.load();
 }
 
 TaskExecutor& FileServiceContext::executor()

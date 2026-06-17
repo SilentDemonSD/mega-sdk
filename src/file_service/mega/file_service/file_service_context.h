@@ -29,6 +29,7 @@
 #include <mega/file_service/storage_info.h>
 #include <mega/scoped_helpers.h>
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <memory>
@@ -128,6 +129,9 @@ class FileServiceContext: common::NodeEventObserver
 
     common::Client& mClient;
 
+    // Are we being destructed?
+    std::atomic<bool> mDeinitialized;
+
     // No locks are needed in order to make use of this member.
     //
     // As far as invariants are concerned, the member is sane as soon as it
@@ -139,6 +143,7 @@ class FileServiceContext: common::NodeEventObserver
     FileStorage mStorage;
 
     common::Database mDatabase;
+
     FileServiceQueries mQueries;
 
     // Responsible for cleaning the service's cache on destruction.
@@ -219,6 +224,9 @@ public:
 
     // Where is the service storing this user's database?
     LocalPath databasePath() const;
+
+    // Is this service being destroyed?
+    bool deinitializing() const;
 
     // Get a reference to this context's task executor.
     common::TaskExecutor& executor();
