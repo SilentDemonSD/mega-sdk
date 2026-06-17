@@ -6812,12 +6812,28 @@ public:
      *     - getNumber("lastActiveTs") returns the Unix timestamp of the user's last activity
      *       prior to the warning, present only alongside warningTs.
      *
+     * Returns a plain int64_t paired with MegaEvent::hasNumber() rather than an optional, because
+     * some language bindings don't support std::optional.
+     *
      * @param key The key identifying the numeric data.
      *
-     * @return An optional containing the numeric value corresponding to the provided key,
-     *         or an empty optional if not available.
+     * @return The numeric value corresponding to the provided key, or 0 if the key is not
+     *         present for this event. Use MegaEvent::hasNumber() to distinguish an absent key
+     *         from a value that happens to be 0.
      */
-    virtual std::optional<int64_t> getNumber(const std::string& key) const;
+    virtual int64_t getNumber(const std::string& key) const;
+
+    /**
+     * @brief Returns true if a numeric value is associated with the specified key for this event.
+     *
+     * Use this to tell apart a key that is absent from one whose value is 0. Refer to
+     * MegaEvent::getNumber(const std::string& key) for the keys available per event type.
+     *
+     * @param key The key identifying the numeric data.
+     *
+     * @return True if the key has an associated numeric value, false otherwise.
+     */
+    virtual bool hasNumber(const std::string& key) const;
 
     /**
      * @brief Returns a MegaIntegerList associated with this event

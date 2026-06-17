@@ -40887,13 +40887,18 @@ void MegaEventPrivate::setNumber(int64_t newNumber)
     number = newNumber;
 }
 
-std::optional<int64_t> MegaEventPrivate::getNumber(const std::string& key) const
+int64_t MegaEventPrivate::getNumber(const std::string& key) const
 {
     if (auto it = numberMap.find(key); it != numberMap.end())
     {
         return it->second;
     }
-    return std::nullopt;
+    return 0;
+}
+
+bool MegaEventPrivate::hasNumber(const std::string& key) const
+{
+    return numberMap.find(key) != numberMap.end();
 }
 
 void MegaEventPrivate::setNumber(const std::string& key, int64_t value)

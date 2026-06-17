@@ -41,16 +41,16 @@ public:
             return;
         }
 
-        auto ch = event->getNumber("channel");
-        auto at = event->getNumber("activity_type");
-        auto ec = event->getNumber("error_code");
-        if (!ch || !at || !ec)
+        if (!event->hasNumber("channel") || !event->hasNumber("activity_type") ||
+            !event->hasNumber("error_code"))
         {
             return;
         }
 
         std::lock_guard<std::mutex> lock(mMutex);
-        mEvents.push_back({static_cast<int>(*ch), static_cast<int>(*at), static_cast<int>(*ec)});
+        mEvents.push_back({static_cast<int>(event->getNumber("channel")),
+                           static_cast<int>(event->getNumber("activity_type")),
+                           static_cast<int>(event->getNumber("error_code"))});
     }
 
     /**

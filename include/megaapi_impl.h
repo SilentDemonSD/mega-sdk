@@ -2361,7 +2361,8 @@ public:
     int64_t getNumber() const override;
     MegaHandle getHandle() const override;
     const char* getEventString() const override;
-    std::optional<int64_t> getNumber(const std::string& key) const override;
+    int64_t getNumber(const std::string& key) const override;
+    bool hasNumber(const std::string& key) const override;
     MegaIntegerList* getIntegerList() const override;
 
     std::string getValidDataToString() const;

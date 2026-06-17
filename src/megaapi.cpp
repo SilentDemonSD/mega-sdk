@@ -8044,9 +8044,14 @@ const char *MegaEvent::getEventString() const
     return NULL;
 }
 
-std::optional<int64_t> MegaEvent::getNumber(const std::string& /* key */) const
+int64_t MegaEvent::getNumber(const std::string& /* key */) const
 {
-    return std::nullopt;
+    return 0;
+}
+
+bool MegaEvent::hasNumber(const std::string& /* key */) const
+{
+    return false;
 }
 
 MegaIntegerList* MegaEvent::getIntegerList() const

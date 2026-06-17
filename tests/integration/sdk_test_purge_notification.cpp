@@ -65,18 +65,23 @@ public:
         }
 
         std::unique_ptr<MegaEvent> event(original->copy());
-        const auto ts = event->getNumber("ts");
-        const auto reason = event->getNumber("reason");
-        if (!ts || !reason)
+        if (!event->hasNumber("ts") || !event->hasNumber("reason"))
         {
             return;
         }
 
+        auto optionalNumber = [&event](const char* key) -> std::optional<int64_t>
+        {
+            if (event->hasNumber(key))
+                return event->getNumber(key);
+            return std::nullopt;
+        };
+
         std::lock_guard<std::mutex> lock(mMutex);
-        mTs = *ts;
-        mReason = static_cast<int>(*reason);
-        mWarningTs = event->getNumber("warningTs");
-        mLastActiveTs = event->getNumber("lastActiveTs");
+        mTs = event->getNumber("ts");
+        mReason = static_cast<int>(event->getNumber("reason"));
+        mWarningTs = optionalNumber("warningTs");
+        mLastActiveTs = optionalNumber("lastActiveTs");
         mFired = true;
     }
 
