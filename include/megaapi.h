@@ -8554,6 +8554,8 @@ public:
      * This method creates and returns a MegaHandleList containing all the keys
      * currently present in the internal map of stalls.
      *
+     * You take the ownership of the returned value.
+     *
      * @return A MegaHandleList containing all keys(BackupId's) from the stalls map.
      */
     virtual MegaHandleList* getKeys() const;

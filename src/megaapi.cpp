@@ -7083,7 +7083,7 @@ size_t MegaSyncStallMap::size() const
 size_t MegaSyncStallMap::getHash() const
 {
     uint64_t hash = 0;
-    const MegaHandleList* keys = getKeys();
+    std::unique_ptr<MegaHandleList> keys{getKeys()};
     for (unsigned int i = 0; i < keys->size(); ++i)
     {
         hash = hashCombine(hash, get(keys->get(i))->getHash());
