@@ -19,6 +19,7 @@
 #include "../src/crypto/sodium.cpp"
 #include "gtest/gtest.h"
 #include "mega.h"
+#include "utils.h"
 
 #include <cryptopp/hex.h>
 
@@ -1207,4 +1208,133 @@ TEST(Crypto, ECDH_SharedSecret_RoundTrip)
 
     EXPECT_EQ(secretA, secretB) << "ECDH parties must agree on the shared secret";
     EXPECT_EQ(secretA.size(), static_cast<size_t>(ECDH::DERIVED_KEY_LENGTH));
+}
+
+// A public key whose modulus is below MINKEYLENGTH must be rejected: it is smaller than the
+// supported RSA key size and would underflow encrypt()'s padding length.
+TEST(Crypto, AsymmCipher_isvalid_RejectsTinyModulus)
+{
+    AsymmCipher cipher;
+    const std::string blob = mt::makePubKeyBlob(1); // 1-byte modulus
+    ASSERT_NE(cipher.setkey(AsymmCipher::PUBKEY,
+                            reinterpret_cast<const byte*>(blob.data()),
+                            static_cast<int>(blob.size())),
+              0);
+    EXPECT_FALSE(cipher.isvalid(AsymmCipher::PUBKEY))
+        << "A modulus below MINKEYLENGTH must be treated as invalid";
+}
+
+// A modulus that is non-trivial but still below MINKEYLENGTH (here 1024-bit) must be rejected too:
+// only keys >= MINKEYLENGTH (2048-bit) are accepted.
+TEST(Crypto, AsymmCipher_isvalid_RejectsUndersizedModulus)
+{
+    AsymmCipher cipher;
+    const std::string blob =
+        mt::makePubKeyBlob(128); // 1024-bit modulus, below the 256-byte minimum
+    ASSERT_NE(cipher.setkey(AsymmCipher::PUBKEY,
+                            reinterpret_cast<const byte*>(blob.data()),
+                            static_cast<int>(blob.size())),
+              0);
+    EXPECT_FALSE(cipher.isvalid(AsymmCipher::PUBKEY))
+        << "A modulus below MINKEYLENGTH (2048-bit) must be treated as invalid";
+}
+
+// A normally-sized public key must still validate.
+TEST(Crypto, AsymmCipher_isvalid_AcceptsNormalModulus)
+{
+    AsymmCipher cipher;
+    const std::string blob = mt::makePubKeyBlob(256); // 2048-bit modulus
+    ASSERT_NE(cipher.setkey(AsymmCipher::PUBKEY,
+                            reinterpret_cast<const byte*>(blob.data()),
+                            static_cast<int>(blob.size())),
+              0);
+    EXPECT_TRUE(cipher.isvalid(AsymmCipher::PUBKEY));
+}
+
+// A plaintext longer than (modulus - 2) bytes must fail cleanly with 0 instead of
+// underflowing (modBytes - plainlen - 2) and corrupting memory in genblock().
+TEST(Crypto, AsymmCipher_encrypt_RejectsOversizePlaintext)
+{
+    PrnGen rng;
+    AsymmCipher cipher;
+    const std::string blob = mt::makePubKeyBlob(256); // modulus is 256 bytes -> max plaintext 254
+    ASSERT_NE(cipher.setkey(AsymmCipher::PUBKEY,
+                            reinterpret_cast<const byte*>(blob.data()),
+                            static_cast<int>(blob.size())),
+              0);
+
+    std::vector<byte> plain(300, 0x5a); // 300 > 254
+    std::vector<byte> out(AsymmCipher::MAXKEYLENGTH,
+                          0); // ample output room, so length is the only issue
+    EXPECT_EQ(cipher.encrypt(rng, plain.data(), plain.size(), out.data(), out.size()), 0)
+        << "Plaintext larger than modulus - 2 must be rejected, not overflow the buffer";
+}
+
+// The existing output-buffer guard: a buffer too small for the worst-case ciphertext returns 0.
+TEST(Crypto, AsymmCipher_encrypt_RejectsSmallOutputBuffer)
+{
+    PrnGen rng;
+    AsymmCipher cipher;
+    const std::string blob = mt::makePubKeyBlob(256); // needs at least 256 + 2 output bytes
+    ASSERT_NE(cipher.setkey(AsymmCipher::PUBKEY,
+                            reinterpret_cast<const byte*>(blob.data()),
+                            static_cast<int>(blob.size())),
+              0);
+
+    const std::array<byte, 16> plain{};
+    std::vector<byte> tooSmall(100, 0); // < 258
+    EXPECT_EQ(cipher.encrypt(rng, plain.data(), plain.size(), tooSmall.data(), tooSmall.size()), 0);
+}
+
+TEST(Crypto, AsymmCipher_encrypt_RejectsUndersizedModulus)
+{
+    PrnGen rng;
+    AsymmCipher cipher;
+    const std::string blob = mt::makePubKeyBlob(1); // 1-byte modulus, set without validation
+    ASSERT_NE(cipher.setkey(AsymmCipher::PUBKEY,
+                            reinterpret_cast<const byte*>(blob.data()),
+                            static_cast<int>(blob.size())),
+              0);
+
+    const std::array<byte, 16> plain{};
+    std::vector<byte> out(AsymmCipher::MAXKEYLENGTH, 0); // ample room, so modulus size is the issue
+    EXPECT_EQ(cipher.encrypt(rng, plain.data(), plain.size(), out.data(), out.size()), 0)
+        << "A modulus below MINKEYLENGTH must be rejected by encrypt(), not overflow the buffer";
+}
+
+// Positive control: a real generated key pair round-trips through encrypt()/decrypt(), proving the
+// new guards don't break the normal path.
+TEST(Crypto, AsymmCipher_encrypt_decrypt_RoundTrip)
+{
+    PrnGen rng;
+
+    AsymmCipher priv;
+    CryptoPP::Integer pubk[2];
+    priv.genkeypair(rng, pubk, 2048); // private key kept in 'priv', public key written to pubk[]
+
+    std::string pubBlob;
+    AsymmCipher::serializeintarray(pubk, AsymmCipher::PUBKEY, &pubBlob, true);
+
+    AsymmCipher pub;
+    ASSERT_NE(pub.setkey(AsymmCipher::PUBKEY,
+                         reinterpret_cast<const byte*>(pubBlob.data()),
+                         static_cast<int>(pubBlob.size())),
+              0);
+    ASSERT_TRUE(pub.isvalid(AsymmCipher::PUBKEY));
+
+    std::array<byte, 32> secret{};
+    std::iota(secret.begin(), secret.end(), static_cast<byte>(1));
+
+    std::array<byte, AsymmCipher::MAXKEYLENGTH> cipherText{};
+    const int cipherLen =
+        pub.encrypt(rng, secret.data(), secret.size(), cipherText.data(), cipherText.size());
+    ASSERT_GT(cipherLen, 0);
+
+    std::array<byte, 32> recovered{};
+    ASSERT_EQ(priv.decrypt(cipherText.data(),
+                           static_cast<size_t>(cipherLen),
+                           recovered.data(),
+                           recovered.size()),
+              1);
+    EXPECT_EQ(secret, recovered);
 }

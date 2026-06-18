@@ -102,4 +102,27 @@ mega::byte nextRandomByte()
     return static_cast<mega::byte>(dist(gRandomGenerator));
 }
 
+std::string makePubKeyBlob(size_t modulusBytes)
+{
+    // MPI-encode a magnitude: 2-byte big-endian bit count followed by the big-endian bytes.
+    const auto mpiEncode = [](const std::vector<mega::byte>& magnitude)
+    {
+        const size_t bits = magnitude.size() * 8;
+        std::string out;
+        out.push_back(static_cast<char>((bits >> 8) & 0xff));
+        out.push_back(static_cast<char>(bits & 0xff));
+        out.append(reinterpret_cast<const char*>(magnitude.data()), magnitude.size());
+        return out;
+    };
+
+    std::vector<mega::byte> modulus(modulusBytes, 0xab);
+    if (modulusBytes)
+    {
+        // ensure a non-zero most-significant byte so the modulus has the full size
+        modulus[0] = 0xc0;
+    }
+    const std::vector<mega::byte> exponent{0x11}; // 17, MEGA's public exponent
+    return mpiEncode(modulus) + mpiEncode(exponent);
+}
+
 } // mt
