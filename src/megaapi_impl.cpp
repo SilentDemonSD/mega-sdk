@@ -35079,7 +35079,7 @@ using file_service::FileStreamResult;
 void MegaHTTPContext::afterContinueStream(uv_work_t* request, int)
 {
     // Destroy our work context.
-    delete reinterpret_cast<TaskContext*>(request);
+    delete reinterpret_cast<TaskContext*>(request->data);
 }
 
 // A work continue stream for uv_work_queue, as it may take times
@@ -35087,7 +35087,7 @@ void MegaHTTPContext::afterContinueStream(uv_work_t* request, int)
 void MegaHTTPContext::continueStream(uv_work_t* request)
 {
     // Get our hands on our task context.
-    auto* task = reinterpret_cast<TaskContext*>(request);
+    auto* task = reinterpret_cast<TaskContext*>(request->data);
 
     // Check if our HTTP context is still alive.
     auto context = task->mCookie.lock();
@@ -37331,11 +37331,9 @@ auto MegaHTTPContext::processFileStreamResult() -> std::unique_ptr<TaskContext>
     // Instantiate task context.
     auto task = std::make_unique<TaskContext>();
 
-    // Sanity check we can cast back
-    assert(reinterpret_cast<TaskContext*>(&task->mRequest) == task.get());
-
     // Populate task context.
     task->mCookie = weak_from_this();
+    task->mRequest.data = task.get();
     task->mResult = std::move(consumption.mFileStreamResult);
 
     // Release current result.
