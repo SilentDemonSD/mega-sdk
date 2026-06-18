@@ -60,36 +60,59 @@ if (FUSE_INCLUDE_DIR AND FUSE_LIBRARY)
         target_include_directories(FUSE INTERFACE ${FUSE_INCLUDE_DIRS})
     endif()
 
-    # Assume we've found libfuse 3.x.
-    set(FUSE_VERSION_PATH "${FUSE_INCLUDE_DIR}/libfuse_config.h")
+    # libfuse version macros may live in libfuse_config.h (3.18+) or
+    # fuse_common.h (3.14 and earlier). libfuse_config.h can exist without
+    # version macros, so probe each header until a match is found.
+    set(FUSE_VERSION_MAJOR)
+    set(FUSE_VERSION_MINOR)
 
-    # We've actually found libfuse 2.x.
-    if (NOT EXISTS "${FUSE_VERSION_PATH}")
-        set(FUSE_VERSION_PATH "${FUSE_INCLUDE_DIR}/fuse_common.h")
+    foreach(_FUSE_VERSION_HEADER IN ITEMS libfuse_config.h fuse_common.h)
+        set(_FUSE_VERSION_PATH "${FUSE_INCLUDE_DIR}/${_FUSE_VERSION_HEADER}")
+
+        if (NOT EXISTS "${_FUSE_VERSION_PATH}")
+            continue()
+        endif()
+
+        file(READ "${_FUSE_VERSION_PATH}" _FUSE_VERSION_CONTENT)
+
+        string(REGEX MATCH "#define[ \t]+FUSE_MAJOR_VERSION[ \t]+([0-9]+)"
+               _
+               "${_FUSE_VERSION_CONTENT}"
+        )
+
+        if (NOT CMAKE_MATCH_1)
+            continue()
+        endif()
+
+        set(FUSE_VERSION_MAJOR ${CMAKE_MATCH_1})
+
+        string(REGEX MATCH "#define[ \t]+FUSE_MINOR_VERSION[ \t]+([0-9]+)"
+               _
+               "${_FUSE_VERSION_CONTENT}"
+        )
+
+        if (CMAKE_MATCH_1)
+            set(FUSE_VERSION_MINOR ${CMAKE_MATCH_1})
+        endif()
+
+        break()
+    endforeach()
+
+    if (NOT FUSE_VERSION_MINOR)
+        set(FUSE_VERSION_MINOR 0)
     endif()
 
-    # Read the version file.
-    file(READ "${FUSE_VERSION_PATH}" CONTENT)
+    if (NOT FUSE_VERSION_MAJOR MATCHES "^[0-9]+$")
+        message(FATAL_ERROR
+                "Could not determine libfuse major version from ${FUSE_INCLUDE_DIR}")
+    endif()
 
-    # Parse version.
-    string(REGEX REPLACE ".*#define FUSE_MAJOR_VERSION +([0-9]+).*$"
-                         "\\1"
-                         FUSE_VERSION_MAJOR
-                         ${CONTENT}
-    )
-
-    string(REGEX REPLACE ".*define FUSE_MINOR_VERSION +([0-9]+).*$"
-                         "\\1"
-                         FUSE_VERSION_MINOR
-                         ${CONTENT}
-    )
-
-    # Latch full version.
     set(FUSE_VERSION "${FUSE_VERSION_MAJOR}.${FUSE_VERSION_MINOR}")
 
     # Cleanup after ourselves.
-    unset(CONTENT)
-    unset(FUSE_VERSION_PATH)
+    unset(_FUSE_VERSION_CONTENT)
+    unset(_FUSE_VERSION_HEADER)
+    unset(_FUSE_VERSION_PATH)
     unset(_FUSE_HEADER_PREFIX)
     unset(_FUSE_INCLUDE_PARENT)
 endif()
