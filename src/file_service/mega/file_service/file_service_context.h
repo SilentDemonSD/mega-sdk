@@ -190,7 +190,11 @@ class FileServiceContext: common::NodeEventObserver
     // instantiated, this means that this member's destructor will wait
     // until all File(Info)?Contexts that refer to this context have been
     // destroyed before allowing this context itself to be destroyed.
-    common::ActivityMonitor mActivities;
+    common::ActivityMonitor mContextMonitor;
+
+    // This member will ensure that the context isn't destroyed until any
+    // automatic reclamations it has scheduled have completed.
+    common::ActivityMonitor mReclaimMonitor;
 
 public:
     FileServiceContext(common::Client& client,
