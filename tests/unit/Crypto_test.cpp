@@ -1111,3 +1111,100 @@ TEST(Crypto, CtrCrypt_RegressionVectors)
         EXPECT_EQ(decMac, expectedMac) << "Case 5: decrypt MAC mismatch";
     }
 }
+
+namespace
+{
+std::string keyBytesToString(const unsigned char* key, int len)
+{
+    return std::string(reinterpret_cast<const char*>(key), static_cast<size_t>(len));
+}
+}
+
+TEST(Crypto, ECDH_DefaultCtor_Initializes)
+{
+    ECDH ecdh;
+    EXPECT_TRUE(ecdh.initializationOK);
+}
+
+// The private-key constructor rejects a wrong-sized key and accepts a correct one.
+TEST(Crypto, ECDH_PrivKeyCtor_ValidatesSize)
+{
+    ECDH bad(std::string(ECDH::PRIVATE_KEY_LENGTH - 1, '\x01'));
+    EXPECT_FALSE(bad.initializationOK);
+
+    ECDH good(std::string(ECDH::PRIVATE_KEY_LENGTH, '\x01'));
+    EXPECT_TRUE(good.initializationOK);
+}
+
+TEST(Crypto, ECDH_PrivPubCtor_SetsInitializationOK)
+{
+    ECDH generated; // a valid key pair to source bytes from
+    ASSERT_TRUE(generated.initializationOK);
+
+    const std::string pub = keyBytesToString(generated.getPubKey(), ECDH::PUBLIC_KEY_LENGTH);
+    ECDH ecdh(generated.getPrivKey(), pub);
+
+    EXPECT_TRUE(ecdh.initializationOK);
+    EXPECT_EQ(keyBytesToString(ecdh.getPrivKey(), ECDH::PRIVATE_KEY_LENGTH),
+              keyBytesToString(generated.getPrivKey(), ECDH::PRIVATE_KEY_LENGTH));
+    EXPECT_EQ(keyBytesToString(ecdh.getPubKey(), ECDH::PUBLIC_KEY_LENGTH), pub);
+}
+
+// The (privk, pubk) constructor must reject a too-short public key instead of reading
+// PUBLIC_KEY_LENGTH bytes past the end of the string (out-of-bounds read, caught under ASan).
+TEST(Crypto, ECDH_PrivPubCtor_RejectsShortPubKey)
+{
+    ECDH generated;
+    ASSERT_TRUE(generated.initializationOK);
+
+    const std::string shortPub =
+        keyBytesToString(generated.getPubKey(), ECDH::PUBLIC_KEY_LENGTH - 1); // one byte short
+    ECDH ecdh(generated.getPrivKey(), shortPub);
+
+    EXPECT_FALSE(ecdh.initializationOK);
+}
+
+// The copy constructor must propagate the source's validity
+TEST(Crypto, ECDH_CopyCtor_PropagatesInitializationOK)
+{
+    ECDH original;
+    ASSERT_TRUE(original.initializationOK);
+
+    ECDH copyOfValid(original);
+    EXPECT_TRUE(copyOfValid.initializationOK);
+    EXPECT_EQ(keyBytesToString(copyOfValid.getPrivKey(), ECDH::PRIVATE_KEY_LENGTH),
+              keyBytesToString(original.getPrivKey(), ECDH::PRIVATE_KEY_LENGTH));
+    EXPECT_EQ(keyBytesToString(copyOfValid.getPubKey(), ECDH::PUBLIC_KEY_LENGTH),
+              keyBytesToString(original.getPubKey(), ECDH::PUBLIC_KEY_LENGTH));
+
+    ECDH invalid(std::string("too short")); // initializationOK == false
+    ASSERT_FALSE(invalid.initializationOK);
+    ECDH copyOfInvalid(invalid);
+    EXPECT_FALSE(copyOfInvalid.initializationOK);
+}
+
+// Positive control: two parties derive the same shared secret, proving the (privk, pubk)
+// constructor yields a working key and the new guards don't break X25519 agreement.
+TEST(Crypto, ECDH_SharedSecret_RoundTrip)
+{
+    ECDH alice;
+    ECDH bob;
+    ASSERT_TRUE(alice.initializationOK);
+    ASSERT_TRUE(bob.initializationOK);
+
+    const std::string alicePub = keyBytesToString(alice.getPubKey(), ECDH::PUBLIC_KEY_LENGTH);
+    const std::string bobPub = keyBytesToString(bob.getPubKey(), ECDH::PUBLIC_KEY_LENGTH);
+
+    ECDH aliceWithBobPub(alice.getPrivKey(), bobPub);
+    ECDH bobWithAlicePub(bob.getPrivKey(), alicePub);
+    ASSERT_TRUE(aliceWithBobPub.initializationOK);
+    ASSERT_TRUE(bobWithAlicePub.initializationOK);
+
+    std::string secretA;
+    std::string secretB;
+    ASSERT_EQ(aliceWithBobPub.computeSymmetricKey(secretA), 1);
+    ASSERT_EQ(bobWithAlicePub.computeSymmetricKey(secretB), 1);
+
+    EXPECT_EQ(secretA, secretB) << "ECDH parties must agree on the shared secret";
+    EXPECT_EQ(secretA.size(), static_cast<size_t>(ECDH::DERIVED_KEY_LENGTH));
+}
