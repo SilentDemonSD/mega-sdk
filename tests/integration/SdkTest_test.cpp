@@ -16339,7 +16339,7 @@ void SdkTest::runVersionManagementSequence(std::function<void()> preDeleteInject
     string destinationPath = '/' + folder2 + '/' + UPFILE;
     for (int i = 0; i < allVersions->size(); ++i)
     {
-        unique_ptr<char> filePath(api->getNodePath(allVersions->get(i)));
+        unique_ptr<char[]> filePath(api->getNodePath(allVersions->get(i)));
         ASSERT_STREQ(destinationPath.c_str(), filePath.get()) << "Wrong file path (1) for version " << (i + 1);
         destinationPath += '/' + UPFILE;
     }
@@ -16349,7 +16349,7 @@ void SdkTest::runVersionManagementSequence(std::function<void()> preDeleteInject
     destinationPath = '/' + folder1 + '/' + folder2 + '/' + UPFILE;
     for (int i = 0; i < allVersions->size(); ++i)
     {
-        unique_ptr<char> filePath(api->getNodePath(allVersions->get(i)));
+        unique_ptr<char[]> filePath(api->getNodePath(allVersions->get(i)));
         ASSERT_STREQ(destinationPath.c_str(), filePath.get()) << "Wrong file path (2) for version " << (i + 1);
         destinationPath += '/' + UPFILE;
     }
