@@ -16863,6 +16863,8 @@ error MegaClient::trackKey(attr_t keyType, handle uh, const std::string &pubKey)
                     LOG_warn << "Clearing trusted status in " << User::attr2string(authringType)
                              << " for user " << userID << " after a key change";
                     authring->update(uh, AUTH_METHOD_UNKNOWN);
+                    // apply the downgrade right away, don't wait for it to be persisted
+                    updateActiveAuthring(authringType, uh, AUTH_METHOD_UNKNOWN);
                     downgraded = true;
                 }
 
@@ -17036,6 +17038,8 @@ error MegaClient::trackSignature(attr_t signatureType, handle uh, const std::str
                 if (authring->getAuthMethod(uh) == AUTH_METHOD_SIGNATURE)
                 {
                     authring->update(uh, AUTH_METHOD_UNKNOWN);
+                    // apply the downgrade right away, don't wait for it to be persisted
+                    updateActiveAuthring(authringType, uh, AUTH_METHOD_UNKNOWN);
                     updateAuthring(authring, authringType, temporalAuthring, uh);
                 }
 
@@ -17079,6 +17083,8 @@ error MegaClient::trackSignature(attr_t signatureType, handle uh, const std::str
             LOG_warn << "Clearing verified status in " << User::attr2string(authringType)
                      << " for user " << userID << " after signature verification failure";
             authring->update(uh, AUTH_METHOD_UNKNOWN);
+            // apply the downgrade right away, don't wait for it to be persisted
+            updateActiveAuthring(authringType, uh, AUTH_METHOD_UNKNOWN);
             downgraded = true;
         }
 
@@ -17091,6 +17097,18 @@ error MegaClient::trackSignature(attr_t signatureType, handle uh, const std::str
     }
 
     return API_OK;
+}
+
+void MegaClient::updateActiveAuthring(attr_t authringType, handle uh, AuthMethod newValue)
+{
+    // Update the user's entry in the active in-memory authring, so the change takes effect
+    // immediately instead of only after it is persisted and received back.
+    auto it = mAuthRings.find(authringType);
+    if (it != mAuthRings.end() && it->second.isTracked(uh) &&
+        it->second.getAuthMethod(uh) != newValue)
+    {
+        it->second.update(uh, newValue);
+    }
 }
 
 error MegaClient::updateAuthring(AuthRing *authring, attr_t authringType, bool temporalAuthring, handle updateduh)

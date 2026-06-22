@@ -760,6 +760,10 @@ public:
     // track the signature of a public key in the authring for a given user
     error trackSignature(attr_t signatureType, handle uh, const std::string &signature);
 
+    // Apply an authentication-method change to a contact's entry in the live in-memory authring
+    // immediately, without waiting for the ^!keys round-trip
+    void updateActiveAuthring(attr_t authringType, handle uh, AuthMethod newValue);
+
     // update the authring if needed on the server and manage the deactivation of the temporal authring
     error updateAuthring(AuthRing *authring, attr_t authringType, bool temporalAuthring, handle updateduh);
 
