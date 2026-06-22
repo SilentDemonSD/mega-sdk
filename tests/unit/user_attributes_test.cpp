@@ -16,6 +16,7 @@
  * program.
  */
 
+#include "mega/types.h"
 #include "mega/user.h"
 #include "mega/user_attribute.h"
 
@@ -305,3 +306,39 @@ INSTANTIATE_TEST_SUITE_P(UserAttributeTests,
                                          mega::ATTR_FIRSTNAME,
                                          mega::ATTR_AUTHRING,
                                          mega::ATTR_ED25519_PUBK));
+
+// PurgeReason enum values match the documented API reason codes
+TEST(PurgeReasonTest, EnumValuesMatchSpec)
+{
+    EXPECT_EQ(mega::PURGE_REASON_UNKNOWN, 0);
+    EXPECT_EQ(mega::PURGE_REASON_PARKED, 1);
+    EXPECT_EQ(mega::PURGE_REASON_BLOCKED, 2);
+    EXPECT_EQ(mega::PURGE_REASON_INACTIVE, 4);
+    EXPECT_EQ(mega::PURGE_REASON_STOPLIGHT, 5);
+    EXPECT_EQ(mega::PURGE_REASON_CREDENTIALSTUFFED, 6);
+    EXPECT_EQ(mega::PURGE_REASON_ODQPAYWALL, 7);
+    EXPECT_EQ(mega::PURGE_REASON_BUSINESSBLACKLISTED, 8);
+    EXPECT_EQ(mega::PURGE_REASON_BUSINESSPAYMENTOVERDUE, 9);
+}
+
+// LastPurgeInfo defaults to zero/unknown
+TEST(LastPurgeInfoTest, DefaultInitialization)
+{
+    mega::LastPurgeInfo info;
+    EXPECT_EQ(info.ts, 0);
+    EXPECT_EQ(info.reason, mega::PURGE_REASON_UNKNOWN);
+    EXPECT_EQ(info.warningTs, 0);
+    EXPECT_EQ(info.lastActiveTs, 0);
+}
+
+// ATTR_LAST_PURGE_ACKNOWLEDGED maps to the correct attribute name
+TEST(PurgeAttributeTest, AttrNameIsLpurge)
+{
+    EXPECT_EQ(mega::User::attr2string(mega::ATTR_LAST_PURGE_ACKNOWLEDGED), "^!lpack");
+}
+
+TEST(PurgeAttributeTest, AttrLongNameIsCorrect)
+{
+    EXPECT_EQ(mega::User::attr2longname(mega::ATTR_LAST_PURGE_ACKNOWLEDGED),
+              "LAST_PURGE_ACKNOWLEDGED");
+}

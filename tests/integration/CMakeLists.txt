@@ -32,6 +32,7 @@ target_sources(test_integration
     SdkTestSyncPrevalidation_test.cpp
     Sync_test.cpp
     one_question_survey_test.cpp
+    sdk_test_purge_notification.cpp
     integration_test_utils.cpp
     DisableBackupSync_test.cpp
     SdkTestPersistConnections_test.cpp

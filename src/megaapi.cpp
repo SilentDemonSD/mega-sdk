@@ -6369,6 +6369,16 @@ void MegaApi::getLastActionedBanner(MegaRequestListener* listener)
     pImpl->getLastActionedBanner(listener);
 }
 
+void MegaApi::setLastPurgeAcknowledged(int64_t ts, MegaRequestListener* listener)
+{
+    pImpl->setLastPurgeAcknowledged(ts, listener);
+}
+
+void MegaApi::getLastPurgeAcknowledged(MegaRequestListener* listener)
+{
+    pImpl->getLastPurgeAcknowledged(listener);
+}
+
 MegaFlag* MegaApi::getFlag(const char* flagName, bool commit, MegaRequestListener* listener)
 {
     return pImpl->getFlag(flagName, commit, listener);
@@ -8034,9 +8044,14 @@ const char *MegaEvent::getEventString() const
     return NULL;
 }
 
-std::optional<int64_t> MegaEvent::getNumber(const std::string& /* key */) const
+int64_t MegaEvent::getNumber(const std::string& /* key */) const
 {
-    return std::nullopt;
+    return 0;
+}
+
+bool MegaEvent::hasNumber(const std::string& /* key */) const
+{
+    return false;
 }
 
 MegaIntegerList* MegaEvent::getIntegerList() const

@@ -8763,6 +8763,7 @@ void MegaApiImpl::getUserAttribute(const char* email_or_handle, int type, MegaRe
         case ATTR_LAST_READ_NOTIFICATION:
         case ATTR_LAST_ACTIONED_BANNER:
         case ATTR_RECENT_CLEAR_TIMESTAMP:
+        case ATTR_LAST_PURGE_ACKNOWLEDGED:
         // undocumented types, allowed only for testing:
         case ATTR_KEYS:
         case ATTR_DEV_OPT:
@@ -8796,6 +8797,7 @@ void MegaApiImpl::setUserAttribute(int type, const char *value, MegaRequestListe
         case ATTR_VISIBLE_TERMS_OF_SERVICE:
         case ATTR_LAST_READ_NOTIFICATION:
         case ATTR_LAST_ACTIONED_BANNER:
+        case ATTR_LAST_PURGE_ACKNOWLEDGED:
         // undocumented types, allowed only for testing:
         case ATTR_ENABLE_TEST_NOTIFICATIONS:
         case ATTR_ENABLE_TEST_SURVEYS:
@@ -16241,6 +16243,11 @@ void MegaApiImpl::userdata_result(string* name,
         fireOnEvent(event);
     }
 
+    if (result == API_OK)
+    {
+        checkLastPurgeNotification();
+    }
+
     if(requestMap.find(client->restag) == requestMap.end()) return;
     MegaRequestPrivate* request = requestMap.at(client->restag);
     if(!request || (request->getType() != MegaRequest::TYPE_GET_USER_DATA)) return;
@@ -16834,6 +16841,12 @@ void MegaApiImpl::getua_completion(byte* data, unsigned len, attr_t type, MegaRe
         }
         break;
 
+        case MegaApi::USER_ATTR_LAST_PURGE_ACKNOWLEDGED:
+        {
+            e = getLastPurgeAcknowledged_getua_result(data, len, request);
+        }
+        break;
+
         // byte arrays with possible nulls in the middle --> to Base64
         case MegaApi::USER_ATTR_ED25519_PUBLIC_KEY: // fall-through
         {
@@ -17119,6 +17132,87 @@ void MegaApiImpl::nodes_current()
 {
     MegaEventPrivate *event = new MegaEventPrivate(MegaEvent::EVENT_NODES_CURRENT);
     fireOnEvent(event);
+
+    // deliver any purge notification deferred because the node tree wasn't current yet
+    checkLastPurgeNotification();
+}
+
+void MegaApiImpl::checkLastPurgeNotification()
+{
+    // Only surface an inactivity purge that carries a last-active time. The server zeroes
+    // lastActiveTs to suppress (e.g. the user is active on another session) while keeping reason,
+    // so reason alone isn't enough; (now - lastActiveTs) is the inactivity period the app shows.
+    if (client->mLastPurge.reason != PURGE_REASON_INACTIVE || client->mLastPurge.lastActiveTs == 0)
+    {
+        return;
+    }
+
+    // The newer-node check needs a loaded tree; defer (without marking) until statecurrent.
+    if (!(client->mLastPurge.ts > 0 && client->mLastPurge.ts != client->mLastPurgeNotifiedTs &&
+          client->statecurrent))
+    {
+        return;
+    }
+
+    // ^!lpack lives on the own user; if not loaded yet, defer rather than fire blind.
+    const User* u = client->ownuser();
+    if (!u)
+    {
+        return;
+    }
+
+    // Mark now (fire or suppress) so this ts is evaluated at most once per session.
+    client->mLastPurgeNotifiedTs = client->mLastPurge.ts;
+
+    // Suppress if already acknowledged on any device (^!lpack).
+    const UserAttribute* attr = u->getAttribute(ATTR_LAST_PURGE_ACKNOWLEDGED);
+    if (attr && attr->isValid() && !attr->value().empty())
+    {
+        try
+        {
+            if (std::stoll(attr->value()) == client->mLastPurge.ts)
+                return;
+        }
+        catch (...)
+        {}
+    }
+
+    // Suppress if any own node (any type, under Cloud Drive / Vault / Rubbish, not in-shares) is
+    // newer than the purge. Descending only into folders skips versions; the early-exit on the
+    // first newer node keeps this fast in practice.
+    std::vector<std::shared_ptr<Node>> stack;
+    for (const NodeHandle root: {client->mNodeManager.getRootNodeFiles(),
+                                 client->mNodeManager.getRootNodeVault(),
+                                 client->mNodeManager.getRootNodeRubbish()})
+    {
+        if (std::shared_ptr<Node> n = client->nodeByHandle(root))
+            stack.push_back(std::move(n));
+    }
+    while (!stack.empty())
+    {
+        const std::shared_ptr<Node> n = std::move(stack.back());
+        stack.pop_back();
+        if (n->ctime > client->mLastPurge.ts)
+        {
+            return; // a node newer than the purge exists -> the notification is obsolete
+        }
+        if (n->type != FILENODE)
+        {
+            for (auto& child: client->mNodeManager.getChildren(n.get()))
+                stack.push_back(child);
+        }
+    }
+
+    MegaEventPrivate* purgeEvent = new MegaEventPrivate(MegaEvent::EVENT_LAST_PURGE);
+    purgeEvent->setNumber("ts", static_cast<int64_t>(client->mLastPurge.ts));
+    purgeEvent->setNumber("reason", static_cast<int64_t>(client->mLastPurge.reason));
+    // Optional, present only for PURGE_REASON_INACTIVE; omit when absent so getNumber() is empty.
+    if (client->mLastPurge.warningTs > 0)
+        purgeEvent->setNumber("warningTs", static_cast<int64_t>(client->mLastPurge.warningTs));
+    if (client->mLastPurge.lastActiveTs > 0)
+        purgeEvent->setNumber("lastActiveTs",
+                              static_cast<int64_t>(client->mLastPurge.lastActiveTs));
+    fireOnEvent(purgeEvent);
 }
 
 void MegaApiImpl::catchup_result()
@@ -22720,6 +22814,10 @@ error MegaApiImpl::performRequest_setAttrUser(MegaRequestPrivate* request)
                 else if (type == ATTR_LAST_ACTIONED_BANNER)
                 {
                     performRequest_setLastActionedBanner(request);
+                }
+                else if (type == ATTR_LAST_PURGE_ACKNOWLEDGED)
+                {
+                    performRequest_setLastPurgeAcknowledged(request);
                 }
                 else if (type == ATTR_ENABLE_TEST_SURVEYS)
                 {
@@ -29335,6 +29433,84 @@ error MegaApiImpl::getLastActionedBanner_getua_result(byte* data, unsigned len, 
 
     request->setNumber(static_cast<long long>(value));
 
+    return e;
+}
+
+void MegaApiImpl::setLastPurgeAcknowledged(int64_t ts, MegaRequestListener* listener)
+{
+    MegaRequestPrivate* request = new MegaRequestPrivate(MegaRequest::TYPE_SET_ATTR_USER, listener);
+    request->setParamType(MegaApi::USER_ATTR_LAST_PURGE_ACKNOWLEDGED);
+    request->setNumber(ts);
+
+    request->performRequest = [this, request]()
+    {
+        return performRequest_setAttrUser(request);
+    };
+
+    requestQueue.push(request);
+    waiter->notify();
+}
+
+void MegaApiImpl::performRequest_setLastPurgeAcknowledged(MegaRequestPrivate* request)
+{
+    const string tmp = request->getNumber() ? std::to_string(request->getNumber()) : string{};
+
+    client->putua(ATTR_LAST_PURGE_ACKNOWLEDGED,
+                  reinterpret_cast<const byte*>(tmp.c_str()),
+                  static_cast<unsigned>(tmp.size()),
+                  -1,
+                  UNDEF,
+                  0,
+                  0,
+                  [this, request](Error e)
+                  {
+                      fireOnRequestFinish(request, std::make_unique<MegaErrorPrivate>(e));
+                  });
+}
+
+void MegaApiImpl::getLastPurgeAcknowledged(MegaRequestListener* listener)
+{
+    MegaRequestPrivate* request = new MegaRequestPrivate(MegaRequest::TYPE_GET_ATTR_USER, listener);
+    request->setParamType(MegaApi::USER_ATTR_LAST_PURGE_ACKNOWLEDGED);
+
+    request->performRequest = [this, request]()
+    {
+        return performRequest_getAttrUser(request);
+    };
+
+    requestQueue.push(request);
+    waiter->notify();
+}
+
+error MegaApiImpl::getLastPurgeAcknowledged_getua_result(byte* data,
+                                                         unsigned len,
+                                                         MegaRequestPrivate* request)
+{
+    int64_t value = 0;
+    error e = API_OK;
+
+    if (len)
+    {
+        string buff{reinterpret_cast<char*>(data), len};
+        size_t processed = 0;
+        try
+        {
+            value = static_cast<int64_t>(stoll(buff, &processed));
+            if (processed < buff.size())
+            {
+                value = 0;
+                LOG_err << "Invalid value for Last Purge Acknowledged";
+                e = API_EINTERNAL;
+            }
+        }
+        catch (...)
+        {
+            LOG_err << "Invalid value for Last Purge Acknowledged";
+            e = API_EINTERNAL;
+        }
+    }
+
+    request->setNumber(value);
     return e;
 }
 
@@ -40679,6 +40855,7 @@ MegaEventPrivate::MegaEventPrivate(MegaEventPrivate *event)
     this->type = event->getType();
     this->setText(event->getText());
     this->setNumber(event->getNumber());
+    this->numberMap = event->numberMap;
     this->setHandle(event->getHandle());
     mIntegerList.reset(event->mIntegerList ? event->mIntegerList->copy() : nullptr);
 }
@@ -40722,13 +40899,18 @@ void MegaEventPrivate::setNumber(int64_t newNumber)
     number = newNumber;
 }
 
-std::optional<int64_t> MegaEventPrivate::getNumber(const std::string& key) const
+int64_t MegaEventPrivate::getNumber(const std::string& key) const
 {
     if (auto it = numberMap.find(key); it != numberMap.end())
     {
         return it->second;
     }
-    return std::nullopt;
+    return 0;
+}
+
+bool MegaEventPrivate::hasNumber(const std::string& key) const
+{
+    return numberMap.find(key) != numberMap.end();
 }
 
 void MegaEventPrivate::setNumber(const std::string& key, int64_t value)
@@ -40790,6 +40972,8 @@ const char *MegaEventPrivate::getEventString(int type)
             return "NETWORK_ACTIVITY";
         case MegaEvent::EVENT_TRANSFERS_RESUMED:
             return "TRANSFERS_RESUMED";
+        case MegaEvent::EVENT_LAST_PURGE:
+            return "LAST_PURGE";
     }
 
     return "UNKNOWN";
