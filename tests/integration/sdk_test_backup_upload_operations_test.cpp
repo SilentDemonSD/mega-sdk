@@ -119,27 +119,23 @@ public:
 
     std::shared_ptr<SyncUploadOperationsTracker> addSyncListenerTracker(const std::string& s)
     {
-        TestMutexGuard g(trackerMutex);
         return mSyncListenerTrackers.add(s);
     }
 
     std::shared_ptr<SyncUploadOperationsTracker> getSyncListenerTrackerByPath(const std::string& s)
     {
-        TestMutexGuard g(trackerMutex);
         return mSyncListenerTrackers.getByPath(s);
     }
 
     std::shared_ptr<SyncUploadOperationsTransferTracker>
         addTransferListenerTracker(const std::string& s)
     {
-        TestMutexGuard g(trackerMutex);
         return mTransferListenerTrackers.add(s);
     }
 
     std::shared_ptr<SyncUploadOperationsTransferTracker>
         getTransferListenerTrackerByPath(const std::string& s)
     {
-        TestMutexGuard g(trackerMutex);
         return mTransferListenerTrackers.getByPath(s);
     }
 
@@ -186,8 +182,6 @@ protected:
                         std::optional<fs::file_time_type> customMtime);
 
 private:
-    mutable std::recursive_timed_mutex trackerMutex;
-    using TestMutexGuard = std::unique_lock<std::recursive_timed_mutex>;
     std::unique_ptr<NiceMock<MockTransferListener>> mMtl;
     std::unique_ptr<NiceMock<MockSyncListener>> mMslStats;
     std::unique_ptr<NiceMock<MockSyncListener>> mMslFiles;
