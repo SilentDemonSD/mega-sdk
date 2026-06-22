@@ -6009,7 +6009,7 @@ public:
 
         m_off_t offset() const;
 
-        void addConsumedBytes(m_off_t size);
+        void addConsumedBytes(m_off_t delta);
 
         std::optional<m_off_t> onReceived(m_off_t receivedOffset, m_off_t receivedLength);
 

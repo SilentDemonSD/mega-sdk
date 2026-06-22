@@ -37660,9 +37660,9 @@ m_off_t MegaHTTPContext::CacheFile::offset() const
     return mOffset;
 }
 
-void MegaHTTPContext::CacheFile::addConsumedBytes(m_off_t size)
+void MegaHTTPContext::CacheFile::addConsumedBytes(m_off_t delta)
 {
-    mConsumedBytes += size;
+    mConsumedBytes += delta;
 }
 
 std::optional<m_off_t> MegaHTTPContext::CacheFile::onReceived(m_off_t receivedOffset,
