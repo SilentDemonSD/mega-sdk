@@ -28,6 +28,7 @@ auto read(FileAccess& file, void* buffer, std::uint64_t offset, std::uint64_t le
     auto remaining = length;
 
     // To avoid data races in FileAccess.
+    auto errorcode = 0;
     auto retry = false;
 
     // Read as much data from the file as possible.
@@ -42,7 +43,8 @@ auto read(FileAccess& file, void* buffer, std::uint64_t offset, std::uint64_t le
                            static_cast<m_off_t>(offset),
                            true,
                            FSLogging::logOnError,
-                           &retry))
+                           &retry,
+                           &errorcode))
             break;
 
         // Bump pointers.

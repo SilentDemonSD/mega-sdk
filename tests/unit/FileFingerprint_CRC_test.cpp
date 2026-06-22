@@ -102,7 +102,8 @@ public:
                   m_off_t off,
                   bool /*nolock*/,
                   ::mega::FSLogging,
-                  bool* /*retry*/ = nullptr) override
+                  bool* /*retry*/ = nullptr,
+                  int* /*errorcode*/ = nullptr) override
     {
         if (!mIsOpen || off < 0)
             return false;

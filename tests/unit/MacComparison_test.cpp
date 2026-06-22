@@ -60,9 +60,13 @@ public:
         mIsOpen = false;
     }
 
-    bool sysread(void* buffer, unsigned long length, m_off_t offset, bool* retry) override
+    bool sysread(void* buffer,
+                 unsigned long length,
+                 m_off_t offset,
+                 bool* retry,
+                 int* errorcode) override
     {
-        return doRead(buffer, length, offset, retry);
+        return doRead(buffer, length, offset, retry, errorcode);
     }
 
     bool frawread(void* buffer,
@@ -70,9 +74,10 @@ public:
                   m_off_t offset,
                   bool /*alreadyOpened*/,
                   FSLogging,
-                  bool* retry = nullptr) override
+                  bool* retry = nullptr,
+                  int* errorcode = nullptr) override
     {
-        return doRead(buffer, length, offset, retry);
+        return doRead(buffer, length, offset, retry, errorcode);
     }
 
     // Allow test to modify failure position after creation
@@ -83,8 +88,11 @@ public:
     }
 
 private:
-    bool doRead(void* buffer, unsigned long length, m_off_t offset, bool* retry)
+    bool doRead(void* buffer, unsigned long length, m_off_t offset, bool* retry, int* errorcode)
     {
+        if (!errorcode)
+            errorcode = &this->errorcode;
+
         if (retry)
             *retry = false;
 
@@ -97,14 +105,14 @@ private:
         // Simulate read failure at specific position
         if (mFailAtBytePos > 0 && (off + nbytes > mFailAtBytePos))
         {
-            errorcode = mFailErrorCode;
+            *errorcode = mFailErrorCode;
             return false;
         }
 
         // Normal out-of-bounds check
         if (off > mContent.size() || nbytes > (mContent.size() - off))
         {
-            errorcode = 38; // EOF-style error
+            *errorcode = 38; // EOF-style error
             return false;
         }
 
