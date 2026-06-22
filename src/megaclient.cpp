@@ -14944,11 +14944,11 @@ error MegaClient::changepw(const char* password, const char *pin)
         spin.emplace(pin);
     }
     getuserdata(reqtag,
-                [this, u, spwd, spin](string* /*name*/,
-                                      string* /*pubk*/,
-                                      string* /*privk*/,
-                                      std::vector<DiscountCode>&&,
-                                      error e)
+                [this, spwd, spin](string* /*name*/,
+                                   string* /*pubk*/,
+                                   string* /*privk*/,
+                                   std::vector<DiscountCode>&&,
+                                   error e)
                 {
                     if (e != API_OK)
                     {
@@ -14958,16 +14958,14 @@ error MegaClient::changepw(const char* password, const char *pin)
 
                     switch (accountversion)
                     {
-                        case 1:
-                            e = changePasswordV1(u, spwd.c_str(), spin ? spin->c_str() : nullptr);
-                            break;
-
                         default:
                             LOG_warn << "Unexpected account version v" << accountversion
                                      << " processed as v2";
                             [[fallthrough]];
 
+                        case 1:
                         case 2:
+                            // Always set the password with v2 (PBKDF2 + per-account salt).
                             e = changePasswordV2(spwd.c_str(), spin ? spin->c_str() : nullptr);
                             break;
                     }
@@ -14978,33 +14976,6 @@ error MegaClient::changepw(const char* password, const char *pin)
                     }
                 });
 
-    return API_OK;
-}
-
-error MegaClient::changePasswordV1(User* u, const char* password, const char* pin)
-{
-    error e;
-    byte newpwkey[SymmCipher::KEYLENGTH];
-    e = pw_key(password, newpwkey);
-    if (e)
-    {
-        return e;
-    }
-
-    byte newkey[SymmCipher::KEYLENGTH];
-    SymmCipher pwcipher;
-    memcpy(newkey, key.key, sizeof newkey);
-    pwcipher.setkey(newpwkey);
-    pwcipher.ecb_encrypt(newkey);
-
-    string email = u->email;
-    uint64_t stringhash = stringhash64(&email, &pwcipher);
-    queueCommand(new CommandSetMasterKey(this,
-                                         newkey,
-                                         (const byte*)&stringhash,
-                                         sizeof(stringhash),
-                                         NULL,
-                                         pin));
     return API_OK;
 }
 
