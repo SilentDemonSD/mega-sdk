@@ -43,7 +43,8 @@ void TreeProcShareKeys::get(Command* c)
 
 void TreeProcForeignKeys::proc(MegaClient* client, std::shared_ptr<Node> n)
 {
-    if (n->foreignkey)
+    // Only rewrite nodes whose key has actually been applied.
+    if (n->foreignkey && n->keyApplied())
     {
         client->nodekeyrewrite.push_back(n->nodehandle);
 

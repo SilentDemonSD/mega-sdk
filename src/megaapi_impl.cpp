@@ -22114,6 +22114,14 @@ void MegaApiImpl::getDownloadUrl(MegaNode* node,
                 return API_EARGS;
             }
 
+            // Refuse nodes whose key has not been applied. Such a node still holds
+            // the raw wire-form key ("<sharehandle>:<base64>"), longer than the
+            // fixed filekey buffer in CommandGetFile.
+            if (!node->keyApplied())
+            {
+                return API_EKEY;
+            }
+
             client->queueCommand(new CommandGetFile(
                 client,
                 (const byte*)node->nodekey().data(),

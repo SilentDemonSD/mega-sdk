@@ -779,16 +779,20 @@ CommandGetFile::CommandGetFile(MegaClient* /*client*/,
     }
 
     assert(key && "no key provided!");
-    if (key && keySize != SymmCipher::KEYLENGTH)
-    {
-        assert (keySize <= FILENODEKEYLENGTH);
-        memcpy(filekey, key, keySize);
-        mFileKeyType = FILENODE;
-    }
-    else if (key && keySize == SymmCipher::KEYLENGTH)
+    mFileKeyType = 0;
+    if (key && keySize == SymmCipher::KEYLENGTH)
     {
         memcpy(filekey, key, SymmCipher::KEYLENGTH);
         mFileKeyType = 1;
+    }
+    else if (key && keySize == FILENODEKEYLENGTH)
+    {
+        memcpy(filekey, key, FILENODEKEYLENGTH);
+        mFileKeyType = FILENODE;
+    }
+    else if (key)
+    {
+        LOG_err << "CommandGetFile: refusing node key of invalid length " << keySize;
     }
 
     mCompletion = std::move(completion);
@@ -4209,6 +4213,14 @@ CommandNodeKeyUpdate::CommandNodeKeyUpdate(MegaClient* client, handle_vector* v)
 
         if ((n = client->nodebyhandle(h)))
         {
+            // An unapplied key is still the raw wire-form string, and should be skipped.
+            if (!n->keyApplied())
+            {
+                LOG_err << "CommandNodeKeyUpdate: skipping node with unapplied key "
+                        << toNodeHandle(h);
+                continue;
+            }
+
             client->key.ecb_encrypt((byte*)n->nodekey().data(), nodekey, n->nodekey().size());
             assert(!n->hasZeroKey());
 
