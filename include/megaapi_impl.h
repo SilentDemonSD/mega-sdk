@@ -5629,7 +5629,7 @@ class StreamingBuffer
 {
 public:
     StreamingBuffer(const std::string& logName = {});
-    ~StreamingBuffer();
+    virtual ~StreamingBuffer();
     // Allocate buffer and reset class members
     void init(size_t newCapacity);
     // Reset positions for body writting ("forgets" buffered external data such as headers, which use the same buffer) [Default: 0 -> the whole buffer]
@@ -5678,12 +5678,14 @@ public:
 private:
     // Rate between partial file size and its duration (only for media files)
     m_off_t partialDuration(m_off_t partialSize) const;
-    // Recalculate maxBufferSize and maxOutputSize taking into accout the byteRate (for media files) and DirectReadSlot read chunk size.
-    void calcMaxBufferAndMaxOutputSize();
 
     std::string logname{};
 
 protected:
+    // Recalculate maxBufferSize and maxOutputSize taking into accout the byteRate (for media files)
+    // and DirectReadSlot read chunk size.
+    virtual void calcMaxBufferAndMaxOutputSize();
+
     // Circular buffer to store data to feed the consumer
     char* buffer;
     // Total buffer size
@@ -5705,6 +5707,21 @@ protected:
     m_off_t fileSize;
     // Media length in seconds (for media files)
     int duration;
+};
+
+class HttpStreamingBuffer: public StreamingBuffer
+{
+public:
+    HttpStreamingBuffer(const std::string& logName = {});
+
+    // Limit max buffer size to 2MB for HTTP streaming
+    static constexpr unsigned int MAX_BUFFER_SIZE = 2u << 20;
+
+    // Limit single HTTP write size to 128KB for throttled delivery
+    static constexpr unsigned int MAX_OUTPUT_SIZE = 1u << 17;
+
+private:
+    void calcMaxBufferAndMaxOutputSize() override;
 };
 
 class MegaTCPContext : public MegaTransferListener, public MegaRequestListener
@@ -6022,7 +6039,7 @@ public:
     ~MegaHTTPContext();
 
     // Connection management
-    StreamingBuffer streamingBuffer;
+    HttpStreamingBuffer streamingBuffer;
     http_parser parser;
     char *lastBuffer;
     size_t lastBufferLen;

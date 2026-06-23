@@ -34292,6 +34292,19 @@ std::string StreamingBuffer::bufferStatus() const
     return bufferState;
 }
 
+HttpStreamingBuffer::HttpStreamingBuffer(const std::string& logName):
+    StreamingBuffer(logName)
+{}
+
+void HttpStreamingBuffer::calcMaxBufferAndMaxOutputSize()
+{
+    StreamingBuffer::calcMaxBufferAndMaxOutputSize();
+    maxBufferSize =
+        std::min(maxBufferSize, static_cast<size_t>(HttpStreamingBuffer::MAX_BUFFER_SIZE));
+    maxOutputSize =
+        std::min(maxOutputSize, static_cast<size_t>(HttpStreamingBuffer::MAX_OUTPUT_SIZE));
+}
+
 // http_parser settings
 http_parser_settings MegaTCPServer::parsercfg;
 

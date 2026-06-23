@@ -72,6 +72,7 @@ target_sources(test_unit
 target_sources_conditional(test_unit
     FLAG USE_LIBUV
     PRIVATE
+    impl/http_streaming_buffer_test.cpp
     impl/tcp_context_pool_test.cpp
 )
 
