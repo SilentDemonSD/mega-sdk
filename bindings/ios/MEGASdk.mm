@@ -4367,4 +4367,10 @@ using namespace mega;
     self.megaApi->fileServiceSetReclaimOptions([options getCPtr]);
 }
 
+- (void)setLastPurgeAcknowledgedWithTimestamp:(int64_t)timestamp delegate:(id<MEGARequestDelegate>)delegate {
+    if (self.megaApi) {
+        self.megaApi->setLastPurgeAcknowledged(timestamp, [self createDelegateMEGARequestListener:delegate singleListener:YES]);
+    }
+}
+
 @end

@@ -47,6 +47,7 @@ typedef NS_ENUM(NSUInteger, Event) {
     EventCreditCardExpiry = 21,
     EventNetworkActivity = 22,
     EventTransfersResumed = 23,
+    EventLastPurge = 24,
 };
 
 typedef NS_ENUM(NSInteger, ReasonError) {
@@ -101,6 +102,9 @@ NS_SWIFT_SENDABLE
 
 /// Readable description of the event
 @property (nonatomic, readonly, nullable) NSString *eventString;
+
+/// Returns the numeric value associated with the given key, or nil if the key is not present.
+- (NSNumber * _Nullable)optionalNumberForKey:(NSString *)key;
 
 NS_ASSUME_NONNULL_END
 

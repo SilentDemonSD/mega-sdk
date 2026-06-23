@@ -82,5 +82,14 @@ using namespace mega;
     return nil;
 }
 
+- (nullable NSNumber *)optionalNumberForKey:(NSString *)key {
+    if (self.megaEvent) {
+        std::string cKey = std::string(key.UTF8String);
+        if (self.megaEvent->hasNumber(cKey)) {
+            return [NSNumber numberWithLongLong:self.megaEvent->getNumber(cKey)];
+        }
+    }
+    return nil;
+}
 
 @end
