@@ -1206,7 +1206,8 @@ bool FileAccess::fread(string* buffer,
                        unsigned long padding,
                        m_off_t offset,
                        FSLogging logging,
-                       bool* cretry)
+                       bool* cretry,
+                       int* cerrorcode)
 {
     // Sanity.
     assert(buffer);
@@ -1219,7 +1220,7 @@ bool FileAccess::fread(string* buffer,
     buffer->resize(length + padding);
 
     // Try and perform the read.
-    auto result = sysread(buffer->data(), length, offset, cretry);
+    auto result = sysread(buffer->data(), length, offset, cretry, cerrorcode);
 
     // Read was successful so zero pad bytes.
     if (result && padding)
@@ -1237,7 +1238,8 @@ bool FileAccess::frawread(void* buffer,
                           m_off_t offset,
                           bool alreadyOpened,
                           FSLogging logging,
-                          bool* cretry)
+                          bool* cretry,
+                          int* cerrorcode)
 {
     // Sanity.
     assert(buffer || !length);
@@ -1247,7 +1249,7 @@ bool FileAccess::frawread(void* buffer,
         return false;
 
     // Try and perform the read.
-    auto result = sysread(buffer, length, offset, cretry);
+    auto result = sysread(buffer, length, offset, cretry, cerrorcode);
 
     // Close the file if necessary.
     if (!alreadyOpened)

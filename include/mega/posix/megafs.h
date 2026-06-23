@@ -181,7 +181,11 @@ public:
 
     bool ftruncate(m_off_t size) override;
 
-    bool sysread(void* buffer, unsigned long length, m_off_t offset, bool* retry) override;
+    bool sysread(void* buffer,
+                 unsigned long length,
+                 m_off_t offset,
+                 bool* retry,
+                 int* errorcode) override;
     bool sysstat(m_time_t*, m_off_t*, FSLogging) override;
     bool sysopen(bool async, FSLogging) override;
     void sysclose() override;
