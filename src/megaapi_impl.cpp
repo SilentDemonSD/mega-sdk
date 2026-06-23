@@ -34046,8 +34046,6 @@ void StreamingBuffer::calcMaxBufferAndMaxOutputSize()
     maxBufferSize = (std::max(maxBufferSize, minNeededBufferSize) / maxReadChunkSize) * maxReadChunkSize;
     // Set max outputSize depending on maxDeliveryChunksPerByteRate. Limit is maxBufferSize.
     maxOutputSize = std::min(maxDeliveryChunksPerByteRate * maxReadChunkSize, maxBufferSize);
-    // Limit single TCP write size to 128KB for throttled delivery
-    maxOutputSize = std::min(maxOutputSize, static_cast<size_t>(1u << 17));
 }
 
 void StreamingBuffer::reset(bool freeData, size_t sizeToReset)
