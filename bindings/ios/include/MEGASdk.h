@@ -10276,6 +10276,14 @@ typedef NS_ENUM(NSInteger, PasswordManagerNodeType) {
  */
 - (void)setFileServiceReclaimOptions:(MEGAFileServiceReclaimOptions *)options;
 
+/**
+ * @brief Acknowledge a purge notification so it is not shown again.
+ *
+ * @param timestamp Unix timestamp of the purge to acknowledge (from EventLastPurge).
+ * @param delegate MEGARequestDelegate to track this request.
+ */
+- (void)setLastPurgeAcknowledgedWithTimestamp:(int64_t)timestamp delegate:(id<MEGARequestDelegate>)delegate;
+
 @end
 
 NS_ASSUME_NONNULL_END
