@@ -11694,6 +11694,8 @@ int MegaClient::readuser(JSON* j, bool actionpackets)
                 // Keep them instead of the ones with no version from the fetch nodes.
                 if (!(uh == me && fetchingnodes))
                 {
+                    bool cu25519Changed = false;
+
                     if (!publicKey.empty())
                     {
                         u->pubk.setkey(AsymmCipher::PUBKEY,
@@ -11708,6 +11710,8 @@ int MegaClient::readuser(JSON* j, bool actionpackets)
 
                     if (puCu255.size())
                     {
+                        const UserAttribute* cu = u->getAttribute(ATTR_CU25519_PUBK);
+                        cu25519Changed = !cu || !cu->isValid() || cu->value() != puCu255;
                         u->setAttribute(ATTR_CU25519_PUBK, puCu255, {});
                     }
 
@@ -11718,7 +11722,18 @@ int MegaClient::readuser(JSON* j, bool actionpackets)
 
                     if (sigCu255.size())
                     {
+                        const UserAttribute* sig = u->getAttribute(ATTR_SIG_CU255_PUBK);
+                        cu25519Changed =
+                            cu25519Changed || !sig || !sig->isValid() || sig->value() != sigCu255;
                         u->setAttribute(ATTR_SIG_CU255_PUBK, sigCu255, {});
+                    }
+
+                    // For an already-established contact, re-verify when its Cu25519 key (or the
+                    // signature of it) changed. The new-contact transition below only fetches keys
+                    // on the first to VISIBLE transition.
+                    if (cu25519Changed && uh != me && statecurrent && u->show == VISIBLE)
+                    {
+                        fetchContactKeys(u);
                     }
                 }
 
@@ -11735,12 +11750,15 @@ int MegaClient::readuser(JSON* j, bool actionpackets)
                                 u->changed.email = true;
                             }
                         }
-                        else if (u->show == VISIBILITY_UNKNOWN && v == VISIBLE
-                                 && uh != me
-                                 && statecurrent)  // otherwise, fetched when statecurrent is set
+                        // A contact becoming visible (newly added (UNKNOWN) or re-added after
+                        // being removed (HIDDEN)) may carry keys we have not verified in their
+                        // current form.
+                        if ((u->show == VISIBILITY_UNKNOWN || u->show == HIDDEN) && v == VISIBLE &&
+                            uh != me && statecurrent) // otherwise, fetched when statecurrent is set
                         {
                             // new user --> fetch contact keys if they are not yet available.
-                            // If keys are available for the user, fetchContactKeys will call trackKey directly.
+                            // If keys are available for the user, fetchContactKeys will call
+                            // trackKey directly.
                             fetchContactKeys(u);
                         }
 
@@ -16810,8 +16828,22 @@ error MegaClient::trackKey(attr_t keyType, handle uh, const std::string &pubKey)
                 app->key_modified(uh, keyType);
                 sendevent(99451, "Key modification detected");
 
-                // flush the temporal authring if needed
-                if (temporalAuthring)
+                // The identity (Ed25519) key changed. Clear its trusted status, while keeping the
+                // previously-tracked fingerprint as the anchor: if the known key returns it will be
+                // re-promoted to SEEN.
+                bool downgraded = false;
+                if (authring->getAuthMethod(uh) >= AUTH_METHOD_SEEN)
+                {
+                    LOG_warn << "Clearing trusted status in " << User::attr2string(authringType)
+                             << " for user " << userID << " after a key change";
+                    authring->update(uh, AUTH_METHOD_UNKNOWN);
+                    // apply the downgrade right away, don't wait for it to be persisted
+                    updateActiveAuthring(authringType, uh, AUTH_METHOD_UNKNOWN);
+                    downgraded = true;
+                }
+
+                // persist the downgrade and/or flush the temporal authring if needed
+                if (downgraded || temporalAuthring)
                 {
                     updateAuthring(authring, authringType, temporalAuthring, uh);
                 }
@@ -16821,6 +16853,16 @@ error MegaClient::trackKey(attr_t keyType, handle uh, const std::string &pubKey)
         }
         else
         {
+            // A known key that had been cleared after a change has returned: re-promote it to
+            // SEEN. Do not auto-restore a manually-verified (FINGERPRINT) state. That requires
+            // explicit verification.
+            if (!authring->isSignedKey() && authring->getAuthMethod(uh) < AUTH_METHOD_SEEN)
+            {
+                LOG_warn << "Restoring SEEN status in " << User::attr2string(authringType)
+                         << " for user " << userID << " after the known key returned";
+                authring->update(uh, AUTH_METHOD_SEEN);
+            }
+
             LOG_debug << "Authentication of public key in " << User::attr2string(authringType)
                       << " for user " << userID << " was successful. Auth method: "
                       << AuthRing::authMethodToStr(authring->getAuthMethod(uh));
@@ -16963,6 +17005,18 @@ error MegaClient::trackSignature(attr_t signatureType, handle uh, const std::str
                 app->key_modified(uh, signatureType == ATTR_SIG_CU255_PUBK ? ATTR_CU25519_PUBK : ATTR_UNKNOWN);
                 sendevent(99451, "Key modification detected");
 
+                // The tracked key was replaced by a different one (even though this new key
+                // carries a valid signature, e.g. when the public Ed25519 was substituted too).
+                // Clear its verified status so the share-key path stops trusting the previous
+                // fingerprint until the change is re-verified.
+                if (authring->getAuthMethod(uh) == AUTH_METHOD_SIGNATURE)
+                {
+                    authring->update(uh, AUTH_METHOD_UNKNOWN);
+                    // apply the downgrade right away, don't wait for it to be persisted
+                    updateActiveAuthring(authringType, uh, AUTH_METHOD_UNKNOWN);
+                    updateAuthring(authring, authringType, temporalAuthring, uh);
+                }
+
                 return API_EKEY;
             }
             else if (authring->getAuthMethod(uh) != AUTH_METHOD_SIGNATURE)
@@ -16995,8 +17049,21 @@ error MegaClient::trackSignature(attr_t signatureType, handle uh, const std::str
         app->key_modified(uh, signatureType);
         sendevent(99452, "Signature mismatch for public key");
 
-        // flush the temporal authring if needed
-        if (temporalAuthring)
+        // The cached public key whose signature failed must no longer be trusted: clear its
+        // verified status in the authring.
+        bool downgraded = false;
+        if (keyTracked && authring->getAuthMethod(uh) == AUTH_METHOD_SIGNATURE)
+        {
+            LOG_warn << "Clearing verified status in " << User::attr2string(authringType)
+                     << " for user " << userID << " after signature verification failure";
+            authring->update(uh, AUTH_METHOD_UNKNOWN);
+            // apply the downgrade right away, don't wait for it to be persisted
+            updateActiveAuthring(authringType, uh, AUTH_METHOD_UNKNOWN);
+            downgraded = true;
+        }
+
+        // persist the downgrade and/or flush the temporal authring if needed
+        if (downgraded || temporalAuthring)
         {
             updateAuthring(authring, authringType, temporalAuthring, uh);
         }
@@ -17004,6 +17071,18 @@ error MegaClient::trackSignature(attr_t signatureType, handle uh, const std::str
     }
 
     return API_OK;
+}
+
+void MegaClient::updateActiveAuthring(attr_t authringType, handle uh, AuthMethod newValue)
+{
+    // Update the user's entry in the active in-memory authring, so the change takes effect
+    // immediately instead of only after it is persisted and received back.
+    auto it = mAuthRings.find(authringType);
+    if (it != mAuthRings.end() && it->second.isTracked(uh) &&
+        it->second.getAuthMethod(uh) != newValue)
+    {
+        it->second.update(uh, newValue);
+    }
 }
 
 error MegaClient::updateAuthring(AuthRing *authring, attr_t authringType, bool temporalAuthring, handle updateduh)
@@ -24994,10 +25073,17 @@ bool KeyManager::verificationRequired(handle userHandle)
         return !mClient.areCredentialsVerified(userHandle);
     }
 
-    // if no manual verification required, still check Ed25519 public key is SEEN
-    AuthRingsMap::const_iterator it = mClient.mAuthRings.find(ATTR_AUTHRING);
-    bool edAuthringFound = it != mClient.mAuthRings.end();
-    return !edAuthringFound || (it->second.getAuthMethod(userHandle) < AUTH_METHOD_SEEN);
+    // if no manual verification required, still check that contact Ed25519 public key is SEEN and
+    // that the contact Cu25519 public key signature is verified.
+    AuthRingsMap::const_iterator itEd = mClient.mAuthRings.find(ATTR_AUTHRING);
+    bool edAuthringFound = itEd != mClient.mAuthRings.end();
+    if (!edAuthringFound || itEd->second.getAuthMethod(userHandle) < AUTH_METHOD_SEEN)
+    {
+        return true;
+    }
+    AuthRingsMap::const_iterator itCu = mClient.mAuthRings.find(ATTR_AUTHCU255);
+    bool cuAuthringFound = itCu != mClient.mAuthRings.end();
+    return !cuAuthringFound || (itCu->second.getAuthMethod(userHandle) != AUTH_METHOD_SIGNATURE);
 }
 
 string KeyManager::serializeBackups() const
