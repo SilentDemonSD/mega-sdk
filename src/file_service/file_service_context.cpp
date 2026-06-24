@@ -377,7 +377,7 @@ auto FileServiceContext::fileContextFromCloud(FileID id) -> FileServiceResultOr<
 
     // Create a context to represent this file's information.
     auto info = std::make_shared<FileInfoContext>(accessed,
-                                                  mActivities.begin(),
+                                                  mContextMonitor.begin(),
                                                   allocatedSize,
                                                   dirty,
                                                   duration,
@@ -393,7 +393,7 @@ auto FileServiceContext::fileContextFromCloud(FileID id) -> FileServiceResultOr<
     mInfoContexts.emplace(id, info);
 
     // Create a context to represent the file itself.
-    auto context = std::make_shared<FileContext>(mActivities.begin(),
+    auto context = std::make_shared<FileContext>(mContextMonitor.begin(),
                                                  std::move(file),
                                                  std::move(info),
                                                  std::nullopt,
@@ -459,7 +459,7 @@ auto FileServiceContext::fileContextFromDatabase(FileID id) -> FileServiceResult
     }
 
     // Instantiate a new file context.
-    auto context = std::make_shared<FileContext>(mActivities.begin(),
+    auto context = std::make_shared<FileContext>(mContextMonitor.begin(),
                                                  mStorage.getFile(id),
                                                  std::move(info),
                                                  std::move(keyData),
@@ -586,7 +586,7 @@ auto FileServiceContext::infoContextFromDatabase(FileID id) -> FileInfoContextPt
 
     // Instantiate a context to represent this file's information.
     info = std::make_shared<FileInfoContext>(accessed,
-                                             mActivities.begin(),
+                                             mContextMonitor.begin(),
                                              allocatedSize,
                                              dirty,
                                              duration,
@@ -1010,6 +1010,7 @@ FileServiceContext::FileServiceContext(Client& client,
     NodeEventObserver(),
     mInstanceLogger("FileServiceContext", *this, logger()),
     mClient(client),
+    mDeinitialized{false},
     mStorage(userStoragePath),
     mDatabase(createDatabase(mStorage.databasePath())),
     mQueries(mDatabase),
@@ -1024,8 +1025,9 @@ FileServiceContext::FileServiceContext(Client& client,
     mReclaimTaskLock(),
     mEventEmitter(),
     mService(service),
-    mActivities(),
-    mExecutor(TaskExecutorFlags(), logger())
+    mExecutor(TaskExecutorFlags(), logger()),
+    mContextMonitor(),
+    mReclaimMonitor()
 {
     // Let the client know we want to receive node change events.
     mClient.addEventObserver(*this);
@@ -1059,7 +1061,7 @@ FileServiceContext::FileServiceContext(Client& client,
     // Schedule initial reclamation for later execution.
     mReclaimTask = mExecutor.execute(std::bind(&FileServiceContext::reclaimTaskCallback,
                                                this,
-                                               mActivities.begin(),
+                                               mReclaimMonitor.begin(),
                                                when,
                                                std::placeholders::_1),
                                      when,
@@ -1068,6 +1070,15 @@ FileServiceContext::FileServiceContext(Client& client,
 
 FileServiceContext::~FileServiceContext()
 {
+    // Let any active file contexts know we're shutting down.
+    mDeinitialized = true;
+
+    // Cancel any scheduled reclamations.
+    reclaimOptionsChanged(ReclaimOptions());
+
+    // Make sure any pending reclamations have completed.
+    mReclaimMonitor.waitUntilIdle();
+
     // Cancel in-memory pins that might be keeping contexts alive.
     {
         // So we can safely iterate over mFileContexts.
@@ -1087,7 +1098,7 @@ FileServiceContext::~FileServiceContext()
             auto when = std::chrono::steady_clock::time_point::min();
 
             // Cancel any in-memory pins on the context.
-            context->pinUntil(when);
+            context->pinUntil(context, when);
         }
     }
 
@@ -1275,7 +1286,7 @@ try
 
     // Instantiate an info context to describe our new file.
     auto info = std::make_shared<FileInfoContext>(modified,
-                                                  mActivities.begin(),
+                                                  mContextMonitor.begin(),
                                                   allocatedSize,
                                                   dirty,
                                                   duration,
@@ -1288,7 +1299,7 @@ try
                                                   size);
 
     // Instantiate a file context to manipulate our new file.
-    auto file = std::make_shared<FileContext>(mActivities.begin(),
+    auto file = std::make_shared<FileContext>(mContextMonitor.begin(),
                                               mStorage.addFile(id),
                                               info,
                                               std::nullopt,
@@ -1321,6 +1332,11 @@ Database& FileServiceContext::database()
 LocalPath FileServiceContext::databasePath() const
 {
     return mStorage.databasePath();
+}
+
+bool FileServiceContext::deinitializing() const
+{
+    return mDeinitialized.load();
 }
 
 TaskExecutor& FileServiceContext::executor()
@@ -1612,7 +1628,7 @@ void FileServiceContext::reclaimOptionsChanged(const ReclaimOptions& newOptions)
     // Schedule a reclamation for some time in the future.
     mReclaimTask = mExecutor.execute(std::bind(&FileServiceContext::reclaimTaskCallback,
                                                this,
-                                               mActivities.begin(),
+                                               mReclaimMonitor.begin(),
                                                when,
                                                std::placeholders::_1),
                                      when,
@@ -2094,7 +2110,7 @@ void FileServiceContext::ReclaimContext::reclaimed(ReclaimContextPtr context,
 
 FileServiceContext::ReclaimContext::ReclaimContext(FileServiceContext& service):
     mInstanceLogger("FileServiceContext::ReclaimContext", *this, logger()),
-    mActivity(service.mActivities.begin()),
+    mActivity(service.mReclaimMonitor.begin()),
     mCallbacks(),
     mIDs(),
     mNumPending(0),

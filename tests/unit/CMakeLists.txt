@@ -60,6 +60,7 @@ target_sources(test_unit
     shared_mutex_tests.cpp
     uripath_test.cpp
     Sqlite_test.cpp
+    SqliteLexicographicListing_test.cpp
     SqliteNodesPerf_test.cpp
     file_access_tests.cpp
     jsonsplitter_test.cpp

@@ -3600,6 +3600,27 @@ public class MegaApiJava {
     }
 
     /**
+     * Get downloads URLs for a node
+     * <p>
+     * The associated request type with this request is MegaRequest::TYPE_GET_DOWNLOAD_URLS
+     * <p>
+     * Valid data in the MegaRequest object received in onRequestFinish when the error code
+     * is MegaError::API_OK:
+     * - MegaRequest::getName - Returns semicolon-separated download URL(s) to the file
+     * - MegaRequest::getLink - Returns semicolon-separated IPv4 of the server in the URL(s)
+     * - MegaRequest::getText - Returns semicolon-separated IPv6 of the server in the URL(s)
+     * - MegaRequest::getMegaStringMap - Returns a {node handle, file handle} pair for the given file node
+     *
+     * @param node      Node to get the downloads URLs
+     * @param singleUrl Always return one URL (even for raided files)
+     * @param forceSSL  Enforce getting a https URL
+     * @param listener  MegaRequestListener to track this request
+     */
+    public void getDownloadUrl(MegaNode node, boolean singleUrl, boolean forceSSL, MegaRequestListenerInterface listener) {
+        megaApi.getDownloadUrl(node, singleUrl, forceSSL, createDelegateRequestListener(listener));
+    }
+
+    /**
      * Get the thumbnail of a node
      * <p>
      * If the node doesn't have a thumbnail the request fails with the MegaError::API_ENOENT

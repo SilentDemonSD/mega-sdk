@@ -150,6 +150,10 @@ class FileContext final: public std::enable_shared_from_this<FileContext>
     // Execute zero or more queued requests.
     void execute();
 
+    // Execute a request, translating any uncaught exceptions into an error code.
+    template<typename Request>
+    auto executeCommon(Request&& request) -> std::enable_if_t<IsFileRequestV<Request>>;
+
     // Execute a request if possible otherwise queue it for later execution.
     template<typename Request>
     auto executeOrQueue(Request&& request) -> std::enable_if_t<IsFileRequestV<Request>>;
@@ -291,7 +295,7 @@ public:
     FileEventObserverID addObserver(FileEventObserver observer);
 
     // Append data to the end of this file.
-    void append(FileAppendRequest request);
+    void append(FileContextPtr context, FileAppendRequest request);
 
     // Duplicate OS file descriptor of storage file, return an unset AutoFileHandle on errors
     AutoFileHandle dupFileDescriptor();
@@ -300,26 +304,26 @@ public:
     FileRangeVector downloading() const;
 
     // Fetch all of this file's data from the cloud.
-    void fetch(FileFetchRequest request);
+    void fetch(FileContextPtr context, FileFetchRequest request);
 
     // Wait until all fetches in progress have completed.
-    void fetchBarrier(FileFetchBarrierCallback callback);
+    void fetchBarrier(FileFetchBarrierCallback callback, FileContextPtr context);
 
     // Flush this file's local modifications to the cloud.
-    void flush(FileFlushRequest request);
+    void flush(FileContextPtr context, FileFlushRequest request);
 
     // Retrieve information about this file.
     FileInfo info() const;
 
     // Pin this context in memory for a specified period of time.
     template<typename Rep, typename Duration>
-    void pinFor(std::chrono::duration<Rep, Duration> period)
+    void pinFor(FileContextPtr context, std::chrono::duration<Rep, Duration> period)
     {
-        pinUntil(std::chrono::steady_clock::now() + period);
+        pinUntil(std::move(context), std::chrono::steady_clock::now() + period);
     }
 
     // Pin this context in memory until the specified time.
-    void pinUntil(std::chrono::steady_clock::time_point when);
+    void pinUntil(FileContextPtr context, std::chrono::steady_clock::time_point when);
 
     // Return a copy of the service's current options.
     ServiceOptions serviceOptions() const;
@@ -328,13 +332,13 @@ public:
     FileRangeVector ranges() const;
 
     // Read data from this file.
-    void read(FileReadRequest request);
+    void read(FileContextPtr context, FileReadRequest request);
 
     // Reclaim this file's storage.
-    void reclaim(FileReclaimCallback callback);
+    void reclaim(FileReclaimCallback callback, FileContextPtr context);
 
     // Remove this file.
-    void remove(FileRemoveRequest request);
+    void remove(FileContextPtr context, FileRemoveRequest request);
 
     // Remove a previously added observer.
     void removeObserver(FileEventObserverID id);
@@ -343,13 +347,13 @@ public:
     bool removed() const;
 
     // Update the file's modification time.
-    void touch(FileTouchRequest request);
+    void touch(FileContextPtr context, FileTouchRequest request);
 
     // Truncate this file to a specified size.
-    void truncate(FileTruncateRequest request);
+    void truncate(FileContextPtr context, FileTruncateRequest request);
 
     // Write data to this file.
-    void write(FileWriteRequest request);
+    void write(FileContextPtr context, FileWriteRequest request);
 }; // FileContext
 
 } // file_service

@@ -16,6 +16,7 @@
 #include <mega/file_service/file_service_result_forward.h>
 #include <mega/file_service/file_service_result_or_forward.h>
 #include <mega/file_service/storage_info.h>
+#include <mega/localpath.h>
 #include <mega/types.h>
 
 #include <cstdint>
@@ -55,6 +56,9 @@ class FileService
     // Whether the initialize() has been called
     bool mInitialized{false};
 
+    // Db root path when SDK is not logged in
+    LocalPath mPublicDbRootPath;
+
     // A user storage name when SDK is not logged in, allocated once during logged in/out cycles
     std::string mPublicStorageName;
 
@@ -81,7 +85,7 @@ public:
     auto databasePath() const -> FileServiceResultOr<LocalPath>;
 
     // Deinitialize the file service.
-    void deinitialize(bool cleanCache);
+    void deinitialize(bool cleanCache, bool isDestructing);
 
     // Retrieve information about a file managed by the file service.
     auto info(FileID id) -> FileServiceResultOr<FileInfo>;

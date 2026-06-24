@@ -448,6 +448,70 @@ std::set<std::string> readNodesColumnSet(const std::string& dbPath)
     return cols;
 }
 
+// Index counterpart of readNodesColumnSet — the explicit (non-internal) index names on
+// the `nodes` table. 'sqlite_%' autoindexes (e.g. for the PRIMARY KEY) are excluded so only
+// indexes created by createIndexes() are compared.
+std::set<std::string> readNodesIndexSet(const std::string& dbPath)
+{
+    std::set<std::string> idx;
+    auto [dbGuard, openRc] = openSqliteRaw(dbPath);
+    if (openRc != SQLITE_OK)
+        return idx;
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(dbGuard.get(),
+                           "SELECT name FROM sqlite_master WHERE type = 'index' "
+                           "AND tbl_name = 'nodes' AND name NOT LIKE 'sqlite_%'",
+                           -1,
+                           &stmt,
+                           nullptr) == SQLITE_OK)
+    {
+        while (sqlite3_step(stmt) == SQLITE_ROW)
+        {
+            if (const auto* name = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0)))
+            {
+                idx.emplace(name);
+            }
+        }
+    }
+    sqlite3_finalize(stmt);
+    return idx;
+}
+
+// Path of the node statecache DB under `dir`. A MegaClient creates several ".db" files (nodes
+// statecache, prefs, …), so we can't pick by extension alone — return the one that actually has a
+// `nodes` table. Empty if none.
+std::string findNodesDbFile(const std::filesystem::path& dir)
+{
+    for (const auto& entry: std::filesystem::directory_iterator(dir))
+    {
+        const auto name = entry.path().filename().string();
+        if (!entry.is_regular_file() || name.size() < 3 ||
+            name.compare(name.size() - 3, 3, ".db") != 0)
+        {
+            continue;
+        }
+        const std::string path = entry.path().string();
+        auto [dbGuard, rc] = openSqliteRaw(path);
+        if (rc != SQLITE_OK)
+            continue;
+        sqlite3_stmt* stmt = nullptr;
+        bool hasNodesTable = false;
+        if (sqlite3_prepare_v2(
+                dbGuard.get(),
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'nodes'",
+                -1,
+                &stmt,
+                nullptr) == SQLITE_OK)
+        {
+            hasNodesTable = (sqlite3_step(stmt) == SQLITE_ROW);
+        }
+        sqlite3_finalize(stmt);
+        if (hasNodesTable)
+            return path;
+    }
+    return {};
+}
+
 // Per-row test fixture for migration seed/verify.
 struct SeedRow
 {
@@ -3153,6 +3217,152 @@ TEST_F(ListAllNodesByPageTest, LocationScope_IgnoredWhenExplicitAncestorsPresent
     EXPECT_EQ(got.count(hVaultFile), 1u);
     // Cloud content must NOT appear because explicitAncestors didn't include it.
     EXPECT_EQ(got.count(hClean), 0u);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Indexes must be (re)created on the resume/load path, not only on a
+// fresh fetchnodes. These tests drive NodeManager::loadNodes() — the resume entry
+// point — against a DB whose indexes were dropped to simulate an older SDK.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Minimal harness: a MegaClient over a SqliteDbAccess rooted at a fresh temp dir (named after
+// `dirName`), with the nodes table opened. Index-enable flags are set before opensctable() so the
+// open-time drop behaviour matches production. A sid is set so opensctable() can derive the
+// statecache filename. Owns the temp dir: destruction releases the DB (and its WAL) and removes
+// the dir.
+struct IndexTestClient
+{
+    mega::MegaApp app;
+    std::filesystem::path dir;
+    std::shared_ptr<mega::MegaClient> client;
+
+    IndexTestClient(const char* dirName, bool enableSearch, bool enableLexi):
+        dir(makeFreshTestDir(dirName))
+    {
+        auto* dbAccess = new SqliteDbAccess(LocalPath::fromAbsolutePath(path_u8string(dir)));
+        client = mt::makeClient(app, dbAccess);
+        client->sid =
+            "AWA5YAbtb4JO-y2zWxmKZpSe5-6XM7CTEkA-3Nv7J4byQUpOazdfSC1ZUFlS-kah76gPKUEkTF9g7MeE";
+        client->enableSearchDBIndexes(enableSearch);
+        client->enableLexicographicDBIndexes(enableLexi);
+        client->opensctable();
+    }
+
+    ~IndexTestClient()
+    {
+        client.reset(); // release the DB (and its WAL) before removing the dir
+        std::error_code ec;
+        std::filesystem::remove_all(dir, ec);
+    }
+
+    // Commits the open sctable transaction so a separate read-only connection sees the writes
+    // (~SqliteDbTable would otherwise roll them back on close). Call only while a transaction is
+    // open — committing with none active is a SQLite error.
+    void commit()
+    {
+        client->sctable->commit();
+    }
+
+    // Path of the node statecache DB this client created. Empty until opensctable() has run.
+    std::string dbFile() const
+    {
+        return findNodesDbFile(dir);
+    }
+};
+
+TEST(Sqlite, ResumeCreatesMissingIndexesOnExistingDb)
+{
+    // One live client throughout; reads use a separate raw connection while it (and its WAL) stays
+    // open, avoiding a teardown/checkpoint race. That connection only sees committed state: the
+    // first createIndexes() is persisted by commit() (also required so dropSearchDBIndexes() finds
+    // no open transaction); the drop and the resume loadNodes() then run in auto-commit.
+    IndexTestClient c("resume_creates_indexes_test", /*search=*/true, /*lexi=*/true);
+    auto* sa = dynamic_cast<SqliteAccountState*>(c.client->sctable.get());
+    ASSERT_TRUE(sa) << "sctable is not a SqliteAccountState";
+
+    // A DB written by the current SDK has every index.
+    sa->createIndexes(/*enableSearch=*/true, /*enableLexi=*/true);
+    c.commit();
+    const std::string dbFile = c.dbFile();
+    ASSERT_FALSE(dbFile.empty()) << "node DB file not found under " << c.dir;
+
+    // Simulate a DB written by an older SDK that lacked the search indexes.
+    c.client->mNodeManager.dropSearchDBIndexes();
+    const auto afterDrop = readNodesIndexSet(dbFile);
+    ASSERT_FALSE(afterDrop.empty()) << "could not read indexes / db missing";
+    ASSERT_EQ(0u, afterDrop.count("listallnodesdefaultidx")) << "drop did not take effect";
+    ASSERT_EQ(1u, afterDrop.count("parenthandleindex")) << "unconditional index unexpectedly gone";
+
+    // Resume from the existing cache: loadNodes() must recreate the missing indexes.
+    ASSERT_TRUE(c.client->mNodeManager.loadNodes());
+    const auto afterResume = readNodesIndexSet(dbFile);
+    EXPECT_EQ(1u, afterResume.count("listallnodesdefaultidx"))
+        << "resume (loadNodes) did not recreate the missing index";
+    EXPECT_EQ(1u, afterResume.count("ctimeindex"));
+    EXPECT_EQ(1u, afterResume.count("parenthandleindex"));
+
+    // Idempotence: a second resume neither errors nor changes the index set.
+    ASSERT_TRUE(c.client->mNodeManager.loadNodes());
+    EXPECT_EQ(afterResume, readNodesIndexSet(dbFile)) << "second resume changed the index set";
+}
+
+TEST(Sqlite, ResumedDbHasSameIndexesAsFreshDb)
+{
+    IndexTestClient c("parity_index_set_test", /*search=*/true, /*lexi=*/true);
+
+    // Fresh build through the load path -> the full index set the current createIndexes defines.
+    ASSERT_TRUE(c.client->mNodeManager.loadNodes());
+    c.commit();
+    const std::string dbFile = c.dbFile();
+    ASSERT_FALSE(dbFile.empty());
+    const auto freshSet = readNodesIndexSet(dbFile);
+    ASSERT_FALSE(freshSet.empty());
+
+    // Mimic a DB written by an older SDK missing several indexes.
+    c.client->mNodeManager.dropSearchDBIndexes();
+    c.client->mNodeManager.dropLexicographicDBIndexes();
+    ASSERT_NE(freshSet, readNodesIndexSet(dbFile)) << "drops did not change the index set";
+
+    // Resume must restore the set to be identical to fresh.
+    ASSERT_TRUE(c.client->mNodeManager.loadNodes());
+    const auto resumedSet = readNodesIndexSet(dbFile);
+
+    // Self-maintaining: a future index added to createIndexes appears in both sets; they diverge
+    // only if the resume path stops reaching createIndexes (the regression this guards).
+    EXPECT_THAT(resumedSet, ::testing::UnorderedElementsAreArray(freshSet));
+}
+
+TEST(Sqlite, ResumeRespectsIndexEnableFlags)
+{
+    // search OFF, lexi OFF: resume must create only the unconditional indexes.
+    {
+        IndexTestClient c("resume_flags_off_test", /*search=*/false, /*lexi=*/false);
+        ASSERT_TRUE(c.client->mNodeManager.loadNodes());
+        c.commit();
+        const std::string dbFile = c.dbFile();
+        ASSERT_FALSE(dbFile.empty()) << "node DB file not found under " << c.dir;
+        const auto set = readNodesIndexSet(dbFile);
+        ASSERT_FALSE(set.empty());
+        EXPECT_EQ(1u, set.count("parenthandleindex")) << "unconditional index must always exist";
+        EXPECT_EQ(0u, set.count("listallnodesdefaultidx"))
+            << "search index built despite search=off";
+        EXPECT_EQ(0u, set.count("ctimeindex")) << "search index built despite search=off";
+        EXPECT_EQ(0u, set.count("lexicographics3keyindex")) << "lexi index built despite lexi=off";
+    }
+
+    // search ON, lexi ON: resume must create the full set.
+    {
+        IndexTestClient c("resume_flags_on_test", /*search=*/true, /*lexi=*/true);
+        ASSERT_TRUE(c.client->mNodeManager.loadNodes());
+        c.commit();
+        const std::string dbFile = c.dbFile();
+        ASSERT_FALSE(dbFile.empty()) << "node DB file not found under " << c.dir;
+        const auto set = readNodesIndexSet(dbFile);
+        EXPECT_EQ(1u, set.count("parenthandleindex"));
+        EXPECT_EQ(1u, set.count("listallnodesdefaultidx"))
+            << "search index missing despite search=on";
+        EXPECT_EQ(1u, set.count("lexicographics3keyindex")) << "lexi index missing despite lexi=on";
+    }
 }
 
 } // anonymous namespace

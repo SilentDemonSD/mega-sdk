@@ -2115,10 +2115,6 @@ class MegaRequestPrivate : public MegaRequest
         std::function<error()> performRequest;
         std::function<error(TransferDbCommitter&)> performTransferRequest;
 
-        // perform fireOnRequestFinish in sendPendingReqeusts()
-        // See fireOnRequestFinish
-        std::function<void()> performFireOnRequestFinish;
-
         ~MegaRequestPrivate() override;
         MegaRequest *copy() override;
         void setNodeHandle(MegaHandle newNodeHandle);
@@ -4986,6 +4982,12 @@ public:
         void fireOnRequestFinish(MegaRequestPrivate* request,
                                  unique_ptr<MegaErrorPrivate> e,
                                  bool callbackIsFromOtherThread = false);
+        // Finish a request whose completion was deferred from another thread, but
+        // only if it is still tracked in requestMap (it may have been finished and
+        // deleted in the meantime, e.g. by abortPendingActions). Runs on the
+        // MegaApiImpl thread; see the cross-thread branch of fireOnRequestFinish.
+        void finishRequestIfStillTracked(MegaRequestPrivate* request,
+                                         unique_ptr<MegaErrorPrivate> e);
         void fireOnRequestUpdate(MegaRequestPrivate *request);
         void fireOnRequestTemporaryError(MegaRequestPrivate *request, unique_ptr<MegaErrorPrivate> e);
         bool fireOnTransferData(MegaTransferPrivate *transfer);
@@ -5073,7 +5075,7 @@ public:
         // sc requests to close existing wsc and immediately retrieve pending actionpackets
         RequestQueue scRequestQueue;
 
-        long long notificationNumber;
+        std::atomic<long long> notificationNumber;
         set<MegaRequestListener *> requestListeners;
         set<MegaTransferListener *> transferListeners;
         set<MegaScheduledCopyListener *> backupListeners;
@@ -5941,16 +5943,48 @@ struct FileStreamResultConsumption
     std::optional<Value> mValue;
 };
 
+class PublicNodeCache
+{
+public:
+    PublicNodeCache(std::size_t capacity);
+
+    // Get a copy, nullptr if there is no cached public nodes for h
+    std::unique_ptr<MegaNode> getCopy(handle h);
+
+    void put(handle h, const std::shared_ptr<MegaNode> ptr);
+
+private:
+    LRUCache<handle, shared_ptr<MegaNode>> mNodes;
+    std::mutex mMutex;
+};
+
 class MegaHTTPContext: public MegaTCPContext, public std::enable_shared_from_this<MegaHTTPContext>
 {
 private:
+    struct TaskContext
+    {
+        // The UV request representing this task.
+        //
+        // This member must be first.
+        uv_work_t mRequest;
+
+        // A weak reference to the HTTP context that spawned this task.
+        std::weak_ptr<MegaHTTPContext> mCookie;
+
+        // State necessary to continue streaming data from the service.
+        file_service::FileStreamResult mResult;
+    }; // TaskContext
+
     friend class MegaHTTPServer;
     static std::atomic_uint32_t nextId;
     const uint32_t contextId;
     std::string logname;
     FileStreamResultConsumption mFileStreamResultConsumption{};
 
-    std::unique_ptr<uv_work_t> processFileStreamResult();
+    auto processFileStreamResult() -> std::unique_ptr<TaskContext>;
+
+    static void afterContinueStream(uv_work_t* request, int status);
+    static void continueStream(uv_work_t* request);
 
 public:
     MegaHTTPContext();
@@ -5976,6 +6010,8 @@ public:
     m_off_t rangeEnd;
     m_off_t rangeWritten;
     MegaNode *node;
+    // Cache public nodes to avoid getting their data from servers on each request
+    static PublicNodeCache publicNodes;
     std::string path;
     std::string nodehandle;
     std::string nodekey;

@@ -66,7 +66,8 @@ FileService::FileService(common::Client& publicClient):
     mServiceOptionsLock(),
     mPublicClient(publicClient),
     mInitialized(false),
-    mPublicStorageName(getNamer().name(publicClient.dbRootPath()))
+    mPublicDbRootPath(publicClient.dbRootPath()),
+    mPublicStorageName(getNamer().name(mPublicDbRootPath))
 {
     construct();
 }
@@ -109,7 +110,7 @@ try
     mContext = std::make_unique<FileServiceContext>(
         mPublicClient,
         *this,
-        UserStoragePath{mPublicClient.dbRootPath(), mPublicStorageName});
+        UserStoragePath{mPublicDbRootPath, mPublicStorageName});
 
     FSInfo1("File Service constructed");
 
@@ -142,7 +143,7 @@ auto FileService::databasePath() const -> FileServiceResultOr<LocalPath>
     return unexpected(FILE_SERVICE_UNINITIALIZED);
 }
 
-void FileService::deinitialize(bool cleanCache)
+void FileService::deinitialize(bool cleanCache, bool isDestructing)
 {
     UniqueLock guard(mContextLock);
 
@@ -162,7 +163,8 @@ void FileService::deinitialize(bool cleanCache)
     mContext.reset();
 
     // Reconstruct a context using public client
-    construct();
+    if (!isDestructing)
+        construct();
 
     // Not initialized anymore
     mInitialized = false;

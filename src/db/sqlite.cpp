@@ -221,6 +221,7 @@ DbTable *SqliteDbAccess::openTableWithNodes(PrnGen &rng, FileSystemAccess &fsAcc
         "type tinyint, mimetypeVirtual tinyint AS (getmimetype(name)) VIRTUAL, "
         "fingerprintVirtual BLOB AS (getFingerprintExcludingMtime(fingerprint)) VIRTUAL, "
         "sizeVirtual int64 AS (getSizeFromNodeCounter(counter)) VIRTUAL,"
+        "s3keyVirtual text AS (name || (CASE WHEN type = 1 THEN '/' ELSE '' END)) VIRTUAL, "
         "share tinyint, fav tinyint, ctime int64, mtime int64 DEFAULT 0, "
         "flags int64, counter BLOB NOT NULL, "
         "node BLOB NOT NULL, label tinyint DEFAULT 0, description text, tags text)";
@@ -259,6 +260,10 @@ DbTable *SqliteDbAccess::openTableWithNodes(PrnGen &rng, FileSystemAccess &fsAcc
         {"tags", "text", NodeData::COMPONENT_TAGS, NewColumn::extractDataFromNodeData<TagsType>},
         {"sizeVirtual",
          "int64 AS (getSizeFromNodeCounter(counter)) VIRTUAL",
+         NodeData::COMPONENT_NONE,
+         nullptr},
+        {"s3keyVirtual",
+         "text AS (name || (CASE WHEN type = 1 THEN '/' ELSE '' END)) VIRTUAL",
          NodeData::COMPONENT_NONE,
          nullptr},
     };
@@ -1252,6 +1257,10 @@ void SqliteAccountState::updateCounterAndFlags(NodeHandle nodeHandle, uint64_t f
     sqlite3_reset(mStmtUpdateNodeAndFlags);
 }
 
+// Single source of truth for the `nodes` table indexes. Invoked from every node-load path
+// (initCompleted = server fetch, dumpNodes = legacy upgrade, loadNodes = cache resume), so any
+// index added here is created on existing DBs too. Add new node indexes here, not elsewhere.
+// All statements are CREATE INDEX IF NOT EXISTS (idempotent).
 void SqliteAccountState::createIndexes(bool enableIndexesForSearching,
                                        bool enableIndexesForLexicographicalList)
 {
@@ -1391,12 +1400,23 @@ void SqliteAccountState::createIndexes(bool enableIndexesForSearching,
     }
     if (enableIndexesForLexicographicalList)
     {
-        sql = "CREATE INDEX IF NOT EXISTS lexicopraphicindex on nodes (parenthandle, name, type, "
-              "nodehandle)";
+        // Drop the pre-S3-key index (keyed on raw name, type): listings now order by s3keyVirtual,
+        // so it's dead. createIndexes runs on every open, so this also clears it from an existing
+        // DB — migrated in place, no DB version bump.
+        sql = "DROP INDEX IF EXISTS lexicopraphicindex";
         result = sqlite3_exec(db, sql.c_str(), nullptr, nullptr, nullptr);
         if (result)
         {
-            LOG_err << "Data base error while creating index (lexicopraphicindex): "
+            LOG_err << "Data base error while dropping stale index (lexicopraphicindex): "
+                    << sqlite3_errmsg(db);
+        }
+
+        sql = "CREATE INDEX IF NOT EXISTS lexicographics3keyindex on nodes (parenthandle, "
+              "s3keyVirtual, nodehandle)";
+        result = sqlite3_exec(db, sql.c_str(), nullptr, nullptr, nullptr);
+        if (result)
+        {
+            LOG_err << "Data base error while creating index (lexicographics3keyindex): "
                     << sqlite3_errmsg(db);
         }
     }
@@ -1418,7 +1438,7 @@ void SqliteAccountState::dropSearchDBIndexes()
 
 void SqliteAccountState::dropLexicographicDBIndexes()
 {
-    dropDBIndexes({"lexicopraphicindex"});
+    dropDBIndexes({"lexicographics3keyindex", "lexicopraphicindex"});
 }
 
 void SqliteAccountState::dropDBIndexes(const std::vector<std::string>& indicesToDelete)
@@ -2085,25 +2105,25 @@ bool SqliteAccountState::listChildNodesLexicographically(
     int sqlResult = SQLITE_OK;
     static const QueryTagId idParentHand{1};
     static const QueryTagId idPageOffName{2};
-    static const QueryTagId idPageOffType{3};
-    static const QueryTagId idPageSize{4};
-    static const QueryTagId idPageOffHandle{5};
+    static const QueryTagId idPageSize{3};
+    static const QueryTagId idPageOffHandle{4};
 
     sqlite3_stmt*& stmt = offset ? mStmtGetChildrenLexi : mStmtGetChildrenLexiNoOffset;
     if (!stmt)
     {
         // clang-format off
+        // Order by the effective S3 key (folder = name + '/') to match S3 key order, not raw name.
+        // The trailing '/' folds type into the key, so the seek tiebreak is just (s3key, nodehandle).
         const std::string offsetWhere = offset ?
-             "AND ((name > "s + idPageOffName + ") OR " +
-                  "(name = "  + idPageOffName + " AND type > " + idPageOffType + ") OR " +
-                  "(name = "  + idPageOffName + " AND type = " + idPageOffType + " AND nodehandle > " + idPageOffHandle + "))"
+             "AND ((s3keyVirtual > "s + idPageOffName + ") OR " +
+                  "(s3keyVirtual = "  + idPageOffName + " AND nodehandle > " + idPageOffHandle + "))"
              : "";
         const std::string sqlQuery =
             "SELECT nodehandle, counter, node "s +
             "FROM nodes "
             "WHERE (parenthandle = " + idParentHand + ") " // Versions aren't taken in consideration
             + offsetWhere +
-            "ORDER BY name, type, nodehandle\n"
+            "ORDER BY s3keyVirtual, nodehandle\n"
             "LIMIT " + idPageSize;
         // clang-format on
         sqlResult = sqlite3_prepare_v2(db, sqlQuery.c_str(), -1, &stmt, NULL);
@@ -2114,11 +2134,12 @@ bool SqliteAccountState::listChildNodesLexicographically(
     bindValue(sqlResult, stmt, idParentHand, parenthandle, sqlite3_bind_int64);
     if (offset)
     {
-        const auto lastType = offset->mLastType.value_or(std::numeric_limits<int>::max());
+        // Tests engaged-ness, not value: an inclusive seek sets mLastHandle = 0 -> binds 0 ->
+        // "nodehandle > 0", including the node whose key == mLastName; unset binds MAX (strictly
+        // after the key).
         const auto lastHandle = offset->mLastHandle ?
                                     static_cast<sqlite3_int64>(*offset->mLastHandle) :
                                     std::numeric_limits<sqlite3_int64>::max();
-        bindValue(sqlResult, stmt, idPageOffType, lastType, sqlite3_bind_int64);
         bindValue(sqlResult, stmt, idPageOffHandle, lastHandle, sqlite3_bind_int64);
         bindText(sqlResult, stmt, idPageOffName, offset->mLastName);
     }

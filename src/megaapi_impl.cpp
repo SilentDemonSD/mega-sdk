@@ -17797,17 +17797,24 @@ void MegaApiImpl::fireOnRequestFinish(MegaRequestPrivate* request,
 {
     assert(callbackIsFromOtherThread || threadId == std::this_thread::get_id());
 
-    // call from other threads like sync thread. Push to requestQueue with performFireOnRequestFinish assigned,
-    // all fireOneRequestFinish is therefore handled in sendPendingRequests processed by a single thread.
+    // Called from another thread (e.g. the sync or file-service worker thread).
+    // Marshal the completion onto the MegaApiImpl thread via executeOnThread so
+    // that all fireOnRequestFinish work happens on a single thread.
+    //
+    // We must NOT touch `request` here: abortPendingActions runs on the
+    // MegaApiImpl thread (e.g. during logout) and may finish and delete this
+    // request concurrently. We only capture the pointer by value; the marshalled
+    // task re-validates it against requestMap before using it (see
+    // finishRequestIfStillTracked), so a request already finished/deleted is
+    // safely skipped instead of dereferenced.
     if (threadId != std::this_thread::get_id())
     {
-        auto ePtr = e.release();
-        request->performFireOnRequestFinish = [this, request, ePtr]()
-        {
-            fireOnRequestFinish(request, std::unique_ptr<MegaErrorPrivate>(ePtr), false);
-        };
-        requestQueue.push(request);
-        waiter->notify();
+        auto* ePtr = e.release();
+        executeOnThread(std::make_shared<ExecuteOnce>(
+            [this, request, ePtr]()
+            {
+                finishRequestIfStillTracked(request, std::unique_ptr<MegaErrorPrivate>(ePtr));
+            }));
         return;
     }
 
@@ -17839,6 +17846,29 @@ void MegaApiImpl::fireOnRequestFinish(MegaRequestPrivate* request,
     requestMap.erase(request->getTag());
 
     delete request;
+}
+
+void MegaApiImpl::finishRequestIfStillTracked(MegaRequestPrivate* request,
+                                              unique_ptr<MegaErrorPrivate> e)
+{
+    // Runs on the MegaApiImpl thread (via executeOnThread), with sdkMutex held.
+    assert(threadId == std::this_thread::get_id());
+
+    // The request may already have been finished and deleted (e.g. by
+    // abortPendingActions during logout) before this deferred completion runs.
+    // Confirm it is still tracked before touching it - compare by pointer value
+    // only, never dereference `request`, as it may be freed.
+    for (const auto& entry: requestMap)
+    {
+        if (entry.second == request)
+        {
+            fireOnRequestFinish(request, std::move(e), false);
+            return;
+        }
+    }
+
+    // Not tracked anymore: the request was already finished/deleted. Drop this
+    // stale completion.
 }
 
 void MegaApiImpl::fireOnRequestUpdate(MegaRequestPrivate *request)
@@ -17888,8 +17918,7 @@ void MegaApiImpl::fireOnRequestTemporaryError(MegaRequestPrivate *request, uniqu
 void MegaApiImpl::fireOnTransferStart(MegaTransferPrivate *transfer)
 {
     assert(threadId == std::this_thread::get_id());
-    notificationNumber++;
-    transfer->setNotificationNumber(notificationNumber);
+    transfer->setNotificationNumber(++notificationNumber);
 
     for(set<MegaTransferListener *>::iterator it = transferListeners.begin(); it != transferListeners.end() ;)
     {
@@ -17911,8 +17940,7 @@ void MegaApiImpl::fireOnTransferStart(MegaTransferPrivate *transfer)
 void MegaApiImpl::fireOnTransferFinish(MegaTransferPrivate *transfer, unique_ptr<MegaErrorPrivate> e)
 {
     assert(threadId == std::this_thread::get_id());
-    notificationNumber++;
-    transfer->setNotificationNumber(notificationNumber);
+    transfer->setNotificationNumber(++notificationNumber);
     transfer->setLastError(e.get());
 
     if(e->getErrorCode())
@@ -17987,8 +18015,7 @@ void MegaApiImpl::fireOnTransferFinish(MegaTransferPrivate *transfer, unique_ptr
 void MegaApiImpl::fireOnTransferTemporaryError(MegaTransferPrivate *transfer, unique_ptr<MegaErrorPrivate> e)
 {
     assert(threadId == std::this_thread::get_id());
-    notificationNumber++;
-    transfer->setNotificationNumber(notificationNumber);
+    transfer->setNotificationNumber(++notificationNumber);
 
     transfer->setNumRetry(transfer->getNumRetry() + 1);
 
@@ -18017,8 +18044,7 @@ MegaClient *MegaApiImpl::getMegaClient()
 void MegaApiImpl::fireOnTransferUpdate(MegaTransferPrivate *transfer)
 {
     assert(threadId == std::this_thread::get_id());
-    notificationNumber++;
-    transfer->setNotificationNumber(notificationNumber);
+    transfer->setNotificationNumber(++notificationNumber);
 
     for(set<MegaTransferListener *>::iterator it = transferListeners.begin(); it != transferListeners.end() ;)
     {
@@ -18045,8 +18071,7 @@ void MegaApiImpl::fireOnFolderTransferUpdate(MegaTransferPrivate *transfer, int 
                         || (stage == MegaTransfer::STAGE_CREATE_TREE && transfer->getType() == MegaTransfer::TYPE_DOWNLOAD)))
             || threadId == std::this_thread::get_id());
 
-    notificationNumber++;
-    transfer->setNotificationNumber(notificationNumber);
+    transfer->setNotificationNumber(++notificationNumber);
 
     // This one is defined to only be called back on the listener for the transfer
     // not any of the global or megaapi listeners
@@ -18061,8 +18086,7 @@ void MegaApiImpl::fireOnFolderTransferUpdate(MegaTransferPrivate *transfer, int 
 bool MegaApiImpl::fireOnTransferData(MegaTransferPrivate *transfer)
 {
     assert(threadId == std::this_thread::get_id());
-    notificationNumber++;
-    transfer->setNotificationNumber(notificationNumber);
+    transfer->setNotificationNumber(++notificationNumber);
 
     bool result = false;
     MegaTransferListener* listener = transfer->getListener();
@@ -19034,7 +19058,9 @@ MegaNodeList* MegaApiImpl::listChildNodesLexicographically(
     const auto megaToNodeOffset =
         [](const MegaSearchLexicographicalOffset& off) -> NodeSearchLexicographicalOffset
     {
-        return {off.mLastName, off.mLastType, off.mLastHandle};
+        // Public off.mLastType is deprecated and ignored: node type is folded into the effective
+        // S3 key, so the internal offset carries no type field at all.
+        return {off.mLastName, off.mLastHandle};
     };
     SdkMutexGuard guard(sdkMutex);
     sharedNode_vector results =
@@ -20621,13 +20647,6 @@ void MegaApiImpl::sendPendingRequests()
         if (!request)
         {
             break;
-        }
-
-        if (request->performFireOnRequestFinish)
-        {
-            request->performFireOnRequestFinish();
-            request = nullptr;
-            continue;
         }
 
         // also we avoid yielding for consecutive transaction cancel operations (we used to yeild every time, but we need to keep the sdkMutex lock while the database transaction is ongoing)
@@ -35075,27 +35094,30 @@ using file_service::FileResultOr;
 using file_service::FileStreamDataCallback;
 using file_service::FileStreamResult;
 
-// A work continue stream for uv_work_queue, as it may take times
-// Only when all result data has been consumed
-static void continueStream(uv_work_t* req)
+// Callback for the work continue stream
+void MegaHTTPContext::afterContinueStream(uv_work_t* request, int)
 {
-    assert(req->data);
-
-    if (!req->data)
-        return;
-
-    auto result = (FileStreamResult*)req->data;
-    if (result->mContinue)
-        result->mContinue(result->mLength);
+    // Destroy our work context.
+    delete reinterpret_cast<TaskContext*>(request->data);
 }
 
-// Callback for the work continue stream
-static void afterContinueStream(uv_work_t* req, int)
+// A work continue stream for uv_work_queue, as it may take times
+// Only when all result data has been consumed
+void MegaHTTPContext::continueStream(uv_work_t* request)
 {
-    if (req->data)
-        delete (FileStreamResult*)req->data;
+    // Get our hands on our task context.
+    auto* task = reinterpret_cast<TaskContext*>(request->data);
 
-    delete req;
+    // Check if our HTTP context is still alive.
+    auto context = task->mCookie.lock();
+
+    // HTTP context isn't alive or has been finished.
+    if (!context || context->finished)
+        return;
+
+    // Continue streaming data.
+    if (task->mResult.mContinue)
+        task->mResult.mContinue(task->mResult.mLength);
 }
 
 void MegaHTTPServer::processWriteFinished(MegaTCPContext* tcpctx, int status)
@@ -35140,14 +35162,17 @@ void MegaHTTPServer::processWriteFinished(MegaTCPContext* tcpctx, int status)
     }
 
     // Or Streaming via file service may have pending result, check if we can process
-    std::unique_ptr<uv_work_t> continueWork = httpctx->processFileStreamResult();
+    auto task = httpctx->processFileStreamResult();
 
     uv_mutex_unlock(&httpctx->mutex);
 
     // Continue stream is slow operation, do it as a work
-    if (continueWork)
+    if (task)
     {
-        uv_queue_work(&uv_loop, continueWork.release(), &continueStream, &afterContinueStream);
+        uv_queue_work(&uv_loop,
+                      &task.release()->mRequest,
+                      &MegaHTTPContext::continueStream,
+                      &MegaHTTPContext::afterContinueStream);
     }
 
     uv_async_send(&httpctx->asynchandle);
@@ -36075,15 +36100,20 @@ int MegaHTTPServer::onMessageComplete(http_parser *parser)
         else
         {
             handle httpNodeHandle = MegaApi::base64ToHandle(httpctx->nodehandle.c_str());
-            string link =
-                MegaClient::publicLinkURL(httpctx->megaApi->getMegaClient()->mNewLinkFormat,
-                                          TypeOfLink::FILE,
-                                          httpNodeHandle,
-                                          httpctx->nodekey.c_str());
-            LOG_debug << httpctx->getLogName() << "Getting public link: " << link;
-            httpctx->megaApi->getPublicNode(link.c_str(), httpctx);
-            // getPublicNode result is processed inside httpctx onRequestFinish
-            return 0;
+            node = MegaHTTPContext::publicNodes.getCopy(httpNodeHandle).release();
+            if (!node)
+            {
+                // Send a request to the server to get its data
+                string link =
+                    MegaClient::publicLinkURL(httpctx->megaApi->getMegaClient()->mNewLinkFormat,
+                                              TypeOfLink::FILE,
+                                              httpNodeHandle,
+                                              httpctx->nodekey.c_str());
+                LOG_debug << httpctx->getLogName() << "Getting public link: " << link;
+                httpctx->megaApi->getPublicNode(link.c_str(), httpctx);
+                // getPublicNode result is processed inside httpctx onRequestFinish
+                return 0;
+            }
         }
     }
 
@@ -37259,6 +37289,33 @@ void MegaHTTPServer::sendNextBytes(MegaHTTPContext *httpctx)
 
 std::atomic_uint32_t MegaHTTPContext::nextId{0u};
 
+// Decide by the number of parallel public file link video streaming likely to be.
+// 16 might be enough
+constexpr std::size_t MAX_PUBLIC_NODES_CAPACITY = 16;
+
+PublicNodeCache MegaHTTPContext::publicNodes{MAX_PUBLIC_NODES_CAPACITY};
+
+PublicNodeCache::PublicNodeCache(std::size_t capacity):
+    mNodes{capacity}
+{}
+
+unique_ptr<MegaNode> PublicNodeCache::getCopy(handle h)
+{
+    const std::lock_guard l{mMutex};
+    if (const std::optional<shared_ptr<MegaNode>> ptr = mNodes.get(h); ptr && *ptr)
+    {
+        return unique_ptr<MegaNode>{(*ptr)->copy()};
+    }
+
+    return nullptr;
+}
+
+void PublicNodeCache::put(handle h, const std::shared_ptr<MegaNode> ptr)
+{
+    const std::lock_guard l{mMutex};
+    mNodes.put(h, std::move(ptr));
+}
+
 MegaHTTPContext::MegaHTTPContext():
     contextId{nextId++},
     logname{"(HttpCtx#" + std::to_string(contextId) + ") "},
@@ -37299,7 +37356,7 @@ MegaHTTPContext::~MegaHTTPContext()
     uv_mutex_destroy(&mutex_responses);
 }
 
-std::unique_ptr<uv_work_t> MegaHTTPContext::processFileStreamResult()
+auto MegaHTTPContext::processFileStreamResult() -> std::unique_ptr<TaskContext>
 {
     // No result or no space to process
     if (!mFileStreamResultConsumption.mValue || streamingBuffer.availableSpace() <= 0)
@@ -37322,13 +37379,19 @@ std::unique_ptr<uv_work_t> MegaHTTPContext::processFileStreamResult()
     if (consumed < len)
         return nullptr;
 
-    // Prepare continue work
-    std::unique_ptr<uv_work_t> continueWork{new uv_work_t()};
-    continueWork->data = new FileStreamResult(std::move(consumption.mFileStreamResult));
+    // Instantiate task context.
+    auto task = std::make_unique<TaskContext>();
 
-    // Release current result
+    // Populate task context.
+    task->mCookie = weak_from_this();
+    task->mRequest.data = task.get();
+    task->mResult = std::move(consumption.mFileStreamResult);
+
+    // Release current result.
     mFileStreamResultConsumption.mValue.reset();
-    return continueWork;
+
+    // Return task context to our caller.
+    return task;
 }
 
 void MegaHTTPContext::onTransferStart(MegaApi*, [[maybe_unused]] MegaTransfer* transfer)
@@ -37473,6 +37536,10 @@ void MegaHTTPContext::onRequestFinish(MegaApi *, MegaRequest *request, MegaError
     {
         node = request->getPublicMegaNode();
         nodereceived = true;
+        if (node)
+        {
+            publicNodes.put(node->getHandle(), shared_ptr<MegaNode>{node->copy()});
+        }
     }
     uv_async_send(&asynchandle);
 }

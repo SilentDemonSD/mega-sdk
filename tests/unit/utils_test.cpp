@@ -276,6 +276,37 @@ TEST(CharacterSet, IterateUtf16)
         EXPECT_TRUE(it.end());
         EXPECT_EQ(it.get(), L'\0');
     }
+
+    // High BMP single code units (negative in signed 16-bit wchar_t).
+    {
+        auto it = unicodeCodepointIterator(L"\x8000\xffff");
+
+        EXPECT_FALSE(it.end());
+        EXPECT_EQ(it.get(), 0x8000);
+        EXPECT_EQ(it.get(), 0xFFFF);
+        EXPECT_TRUE(it.end());
+        EXPECT_EQ(it.get(), L'\0');
+    }
+
+    // Maximum Unicode code point.
+    {
+        auto it = unicodeCodepointIterator(L"\xdbff\xdfff", 2);
+
+        EXPECT_FALSE(it.end());
+        EXPECT_EQ(it.get(), 0x10FFFF);
+        EXPECT_TRUE(it.end());
+        EXPECT_EQ(it.get(), L'\0');
+    }
+
+    // Nonzero surrogate payload bits.
+    {
+        auto it = unicodeCodepointIterator(L"\xd801\xdc01", 2);
+
+        EXPECT_FALSE(it.end());
+        EXPECT_EQ(it.get(), 0x10401);
+        EXPECT_TRUE(it.end());
+        EXPECT_EQ(it.get(), L'\0');
+    }
 }
 
 using namespace mega;

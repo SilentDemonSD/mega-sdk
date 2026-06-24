@@ -3132,8 +3132,23 @@ std::array<vector<Transfer*>, 6> TransferList::nexttransfers(std::function<bool(
 
     for (direction_t direction : putget)
     {
-        for (Transfer *transfer : transfers[direction])
+        // Iterate a snapshot, not transfers[direction] directly: removeCancelledTransferFiles()
+        // fires onTransferFinish() synchronously, and an app listener may re-enter getTransfers()
+        // (under the recursive sdkMutex), which compacts this lazy-erase deque (applyErase) and
+        // would invalidate a live iterator -> use-after-free. A flat pointer copy is immune.
+        std::vector<Transfer*> snapshot;
+        snapshot.reserve(transfers[direction].size());
+        for (Transfer* t: transfers[direction])
         {
+            snapshot.push_back(t);
+        }
+
+        for (Transfer* transfer: snapshot)
+        {
+            assert(transfer);
+            if (transfer == nullptr)
+                continue;
+
             if (!transfer->slot)
             {
                 // check for cancellation here before we go to the trouble of requesting a download/upload URL

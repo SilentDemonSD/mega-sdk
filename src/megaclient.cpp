@@ -2157,6 +2157,7 @@ MegaClient::~MegaClient()
     delete pendingcs;
     delete badhostcs;
     delete dbaccess;
+    dbaccess = nullptr;
     LOG_debug << clientname << "~MegaClient completing";
 }
 
@@ -5074,7 +5075,7 @@ void MegaClient::locallogout(bool removecaches, [[maybe_unused]] bool keepSyncsC
     freeq(PUT);
 
     // Deinitialize the File Service.
-    mFileService.deinitialize(removecaches);
+    mFileService.deinitialize(removecaches, destructorRunning);
 
     // Deinitialize the FUSE Service.
     mFuseService.deinitialize();
