@@ -4334,8 +4334,12 @@ void MegaClient::dispatchTransfers()
                             }
                             else if (n->type == FILENODE)
                             {
-                                keyData = (const byte*)n->nodekey().data();
                                 nexttransfer->size = n->size;
+                                // Only use the node key once it has been applied.
+                                if (n->keyApplied())
+                                {
+                                    keyData = (const byte*)n->nodekey().data();
+                                }
                             }
                         }
                         else
@@ -17500,13 +17504,14 @@ void MegaClient::purgenodesusersabortsc(bool keepOwnUser)
 // request direct read by node pointer
 void MegaClient::pread(Node* node, m_off_t offset, m_off_t count, DirectRead::Callback&& callback)
 {
-    queueread(node->nodehandle,
-              false,
-              node->nodecipher(),
-              MemAccess::get<int64_t>((const char*)node->nodekey().data() + SymmCipher::KEYLENGTH),
-              offset,
-              count,
-              std::move(callback));
+    // For an unapplied key pass a null cipher so queueread fails
+    // the read cleanly instead of reading past a short key.
+    SymmCipher* cipher = node->keyApplied() ? node->nodecipher() : nullptr;
+    int64_t iv =
+        cipher ?
+            MemAccess::get<int64_t>((const char*)node->nodekey().data() + SymmCipher::KEYLENGTH) :
+            0;
+    queueread(node->nodehandle, false, cipher, iv, offset, count, std::move(callback));
 }
 
 void MegaClient::pread(handle handle,
@@ -17534,13 +17539,12 @@ void MegaClient::pread(handle handle,
 
 void MegaClient::pread(Node* node, m_off_t offset, m_off_t count, void* appData)
 {
-    queueread(node->nodehandle,
-              false,
-              node->nodecipher(),
-              MemAccess::get<int64_t>((const char*)node->nodekey().data() + SymmCipher::KEYLENGTH),
-              offset,
-              count,
-              appData);
+    SymmCipher* cipher = node->keyApplied() ? node->nodecipher() : nullptr;
+    int64_t iv =
+        cipher ?
+            MemAccess::get<int64_t>((const char*)node->nodekey().data() + SymmCipher::KEYLENGTH) :
+            0;
+    queueread(node->nodehandle, false, cipher, iv, offset, count, appData);
 }
 
 // request direct read by exported handle / key
@@ -17649,6 +17653,19 @@ void MegaClient::queueread(handle handle,
                            const char* chatAuth)
 {
     assert(callback);
+
+    // A null cipher means there is no usable key for this read (e.g. the node key
+    // was not applied). Fail the read here, before DirectReadNode dereferences the
+    // cipher.
+    if (!cipher)
+    {
+        DirectRead::CallbackParam param{std::in_place_type<DirectRead::Failure>,
+                                        Error(API_EKEY),
+                                        0,
+                                        0};
+        callback(param);
+        return;
+    }
 
     handledrn_map::iterator it;
 
@@ -18557,6 +18574,17 @@ void MegaClient::execmovetosyncdebris(Node* requestedNode, std::function<void(No
                     proctree(n, &tc, false, false);
                     tc.allocnodes();
                     proctree(n, &tc, false, false);
+                    if (tc.unusableKey || tc.nn.empty())
+                    {
+                        LOG_err << "SyncDebris: node " << toNodeHandle(n->nodehandle) << " ("
+                                << n->displaypath()
+                                << ") has an unusable key, skipping copy-to-debris";
+                        if (rec.completion)
+                        {
+                            rec.completion(rec.nodeHandle, API_EKEY);
+                        }
+                        continue;
+                    }
                     tc.nn[0].parenthandle = UNDEF;
                     putnodes(debrisTarget->nodeHandle(),
                              NoVersioning,
@@ -19293,6 +19321,11 @@ error MegaClient::transferRemoteCopy(File* file,
     proctree(sameNode, &tc, false, true);
     tc.allocnodes();
     proctree(sameNode, &tc, false, true);
+    if (tc.unusableKey || tc.nn.empty())
+    {
+        LOG_err << "transferRemoteCopy: source node has an unusable key, cannot copy";
+        return API_EKEY;
+    }
     tc.nn[0].parenthandle = UNDEF;
 
     SymmCipher nodeKey;

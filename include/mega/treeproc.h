@@ -59,6 +59,7 @@ public:
     unsigned nc = 0;
     bool allocated = false;
     bool resetSensitive = false; // Used when importing foreign nodes
+    bool unusableKey = false; // set if a file node in the tree has an unapplied key
 
     void allocnodes(void);
 

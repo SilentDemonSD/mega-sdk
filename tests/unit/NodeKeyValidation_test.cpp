@@ -24,11 +24,15 @@
 #include <mega/megaapp.h>
 #include <mega/megaclient.h>
 #include <mega/node.h>
+#include <mega/transfer.h>
 #include <mega/treeproc.h>
 #include <mega/types.h>
+#include <mega/utils.h>
 
 #include <memory>
+#include <optional>
 #include <string>
+#include <variant>
 
 using namespace mega;
 
@@ -40,6 +44,11 @@ namespace
 // (FILENODEKEYLENGTH = 32) nor a folder key (FOLDERNODEKEYLENGTH = 16), so
 // keyApplied() is always false and it must not be used as a fixed-length key.
 const std::string kRawOverlongKey = "share:" + std::string(FILENODEKEYLENGTH, 'x');
+
+// A raw key shorter than a valid node key, and shorter than the IV offset at byte
+// SymmCipher::KEYLENGTH (16): keyApplied() is false, and reading the IV/MAC at byte
+// offsets >= 16 would run past it.
+const std::string kRawShortKey = std::string(SymmCipher::KEYLENGTH / 2, 'x');
 
 // CommandNodeKeyUpdate builds its request into the protected jsonWriter while
 // running its constructor. This thin subclass exposes that built string so a test
@@ -199,6 +208,93 @@ TEST_F(NodeKeyValidationTest, CommandNodeKeyUpdateEncodesAppliedKeyAndSkipsUnapp
 
     // Unapplied key node is skipped.
     EXPECT_EQ(skippedJson, emptyJson);
+}
+
+// Direct read (pread) reads the CTR IV from key bytes [16,24) and, downstream,
+// DirectReadNode dereferences the cipher. A node whose key is not applied must fail
+// the read cleanly (API_EKEY) instead of reading past a short key / dereferencing a
+// null cipher.
+TEST_F(NodeKeyValidationTest, PreadOnUnappliedKeyFailsCleanly)
+{
+    auto node = addNode(FILENODE, 40);
+    node->setKey(kRawShortKey);
+    ASSERT_FALSE(node->keyApplied());
+
+    bool called = false;
+    error captured = API_OK;
+    client->pread(node.get(),
+                  0 /*offset*/,
+                  1 /*count*/,
+                  [&](DirectRead::CallbackParam& param)
+                  {
+                      if (auto* failure = std::get_if<DirectRead::Failure>(&param))
+                      {
+                          called = true;
+                          captured = failure->e;
+                      }
+                  });
+
+    EXPECT_TRUE(called);
+    EXPECT_EQ(captured, API_EKEY);
+}
+
+// The meta-MAC helpers read the IV [16,24) and remote MAC [24,32) straight out of the
+// key. A key that is not a full file key must be refused, not read past.
+TEST_F(NodeKeyValidationTest, MetaMacHelpersRejectInvalidLengthKey)
+{
+    MacComparisonResult result =
+        CompareLocalFileMetaMacWithNodeKey(nullptr, kRawShortKey, FILENODE, std::nullopt);
+    // errorCode is the specific marker the guard sets (it defaults to 0/success);
+    // areEqualMacs alone is too weak since it defaults to false.
+    EXPECT_EQ(result.errorCode, API_EKEY);
+    EXPECT_FALSE(result.areEqualMacs);
+
+    auto [localMac, remoteMac] =
+        genLocalAndRemoteMetaMac(nullptr, kRawShortKey, FILENODE, std::nullopt);
+    EXPECT_EQ(localMac, INVALID_META_MAC);
+    EXPECT_EQ(remoteMac, INVALID_META_MAC);
+}
+
+// MAC/fingerprint comparison must refuse a node whose key is not applied instead of
+// reading the remote MAC past a short key.
+TEST_F(NodeKeyValidationTest, CompareNodeMacRejectsUnappliedKey)
+{
+    auto node = addNode(FILENODE, 41);
+    node->setKey(kRawShortKey);
+    ASSERT_FALSE(node->keyApplied());
+
+    FileFingerprint fp;
+    EXPECT_EQ(CompareNodeWithProvidedMacAndFpExcludingMtime(node.get(), fp, 12345),
+              NODE_COMP_EARGS);
+}
+
+// TreeProcCopy flags a file node whose key was not applied so the whole copy can be
+// aborted, and does not flag a node with an applied key.
+TEST_F(NodeKeyValidationTest, TreeProcCopyFlagsUnappliedKey)
+{
+    {
+        auto node = addNode(FILENODE, 52);
+        node->setKey(kRawShortKey);
+        ASSERT_FALSE(node->keyApplied());
+
+        TreeProcCopy tc;
+        tc.nc = 1;
+        tc.allocnodes();
+        tc.proc(client.get(), node);
+        EXPECT_TRUE(tc.unusableKey);
+    }
+    {
+        auto node = addNode(FILENODE, 53);
+        node->setKey(std::string(FILENODEKEYLENGTH / 2, 'A') +
+                     std::string(FILENODEKEYLENGTH / 2, 'B'));
+        ASSERT_TRUE(node->keyApplied());
+
+        TreeProcCopy tc;
+        tc.nc = 1;
+        tc.allocnodes();
+        tc.proc(client.get(), node);
+        EXPECT_FALSE(tc.unusableKey);
+    }
 }
 
 } // anonymous namespace

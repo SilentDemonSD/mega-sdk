@@ -21535,6 +21535,14 @@ void MegaApiImpl::moveNode(MegaNode* node, MegaNode* newParent, const char* newN
 
                 // build new nodes array
                 client->proctree(node, &tc, !ovhandle.isUndef());
+                if (tc.unusableKey)
+                {
+                    // A node in the tree has an unapplied key,
+                    // fail the move rather than create a broken node.
+                    LOG_err << "move: a node in the tree has an unusable key";
+                    e = API_EKEY;
+                    return e;
+                }
                 if (!nc)
                 {
                     e = API_EARGS;
@@ -21698,6 +21706,12 @@ error MegaApiImpl::performRequest_copy(MegaRequestPrivate* request)
                 // build new nodes array
                 processMegaTree(megaNode, &tc);
 
+                if (tc.unusableKey)
+                {
+                    LOG_err << "Failed to import node: a node in the tree has an unusable key";
+                    return API_EKEY;
+                }
+
                 tc.nn[0].parenthandle = UNDEF;
                 tc.nn[0].ovhandle = ovhandle;
 
@@ -21835,6 +21849,11 @@ error MegaApiImpl::copyTreeFromOwnedNode(shared_ptr<Node> node,
 
     // build new nodes array
     client->proctree(node, &tc, false, !ovhandle.isUndef());
+    if (tc.unusableKey)
+    {
+        LOG_err << "Failed to copy owned node: a node in the tree has an unusable key";
+        return API_EKEY;
+    }
     if (tc.nn.empty())
     {
         LOG_err << "Failed to copy owned node: Failed to find nodes";
@@ -21912,6 +21931,13 @@ void MegaApiImpl::restoreVersion(MegaNode* version, MegaRequestListener* listene
             if (version->type != FILENODE || !version->parent || version->parent->type != FILENODE)
             {
                 return API_EARGS;
+            }
+
+            if (!version->keyApplied())
+            {
+                LOG_err << "restoreVersion: version " << toNodeHandle(version->nodehandle) << " ("
+                        << version->displaypath() << ") has an unapplied key, cannot restore";
+                return API_EKEY;
             }
 
             Node *current = version.get();
@@ -31963,6 +31989,21 @@ void MegaTreeProcCopy::allocnodes()
 }
 bool MegaTreeProcCopy::processMegaNode(MegaNode *n)
 {
+    // MegaNode has no keyApplied(), so check the key length directly. A file node whose
+    // key was never applied cannot be copied.
+    if (n->getType() == MegaNode::TYPE_FILE &&
+        (!n->getNodeKey() || n->getNodeKey()->size() != FILENODEKEYLENGTH))
+    {
+        unusableKey = true;
+        if (allocated)
+        {
+            LOG_err << "MegaTreeProcCopy: node " << toNodeHandle(n->getHandle()) << " ("
+                    << (n->getName() ? n->getName() : "?")
+                    << ") has an unapplied key, import will be aborted";
+        }
+        return true;
+    }
+
     if (allocated)
     {
         // prepare map of attributes
