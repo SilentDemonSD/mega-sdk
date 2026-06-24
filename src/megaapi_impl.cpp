@@ -13643,19 +13643,43 @@ std::optional<DateSectionParams>
     return params;
 }
 
-MegaNodeList* MegaApiImpl::listAllNodesByPage(const MegaListAllNodesFilter* filter,
-                                              int order,
-                                              CancelToken cancelToken,
-                                              size_t maxElements,
-                                              const MegaSearchCursorOffset* megaCursor)
+MegaNodeList* MegaApiImpl::runListAllNodesByPage(const std::optional<ListAllNodesParams>& params,
+                                                 CancelToken cancelToken)
 {
-    auto params = buildListAllParams(filter, order, maxElements, megaCursor);
     if (!params)
         return new MegaNodeListPrivate();
 
     SdkMutexGuard g(sdkMutex);
     sharedNode_vector results = client->mNodeManager.listAllNodesByPage(*params, cancelToken);
     return new MegaNodeListPrivate(results);
+}
+
+MegaNodeList* MegaApiImpl::listAllNodesByPage(const MegaListAllNodesFilter* filter,
+                                              int order,
+                                              CancelToken cancelToken,
+                                              size_t maxElements,
+                                              const MegaSearchCursorOffset* megaCursor)
+{
+    return runListAllNodesByPage(buildListAllParams(filter, order, maxElements, megaCursor),
+                                 cancelToken);
+}
+
+MegaNodeList* MegaApiImpl::listAllNodesByPageAtOffset(const MegaListAllNodesFilter* filter,
+                                                      int order,
+                                                      CancelToken cancelToken,
+                                                      size_t maxElements,
+                                                      int64_t offset)
+{
+    if (offset < 0)
+    {
+        LOG_warn << "listAllNodesByPageAtOffset: negative offset (" << offset << ")";
+        return new MegaNodeListPrivate();
+    }
+
+    auto params = buildListAllParams(filter, order, maxElements, /*cursor=*/nullptr);
+    if (params)
+        params->offset = offset;
+    return runListAllNodesByPage(params, cancelToken);
 }
 
 MegaDateSectionList* MegaApiImpl::groupAllNodesByDate(const MegaGroupNodesByDateFilter* filter,

@@ -3308,6 +3308,24 @@ using namespace mega;
     return [MEGANodeList.alloc initWithNodeList:nodeList cMemoryOwn:YES];
 }
 
+- (MEGANodeList *)listAllNodesByPageWithFilter:(MEGAListAllNodesFilter *)filter
+                                     orderType:(MEGASortOrderType)orderType
+                                   maxElements:(NSUInteger)maxElements
+                                        offset:(int64_t)offset
+                                   cancelToken:(MEGACancelToken *)cancelToken {
+    if (self.megaApi == nil || filter == nil) return nil;
+
+    auto cppFilter = [self generateMegaListAllNodesFilterFrom:filter];
+
+    MegaNodeList *nodeList = self.megaApi->listAllNodesByPageAtOffset(cppFilter.get(),
+                                                                      static_cast<int>(orderType),
+                                                                      cancelToken.getCPtr,
+                                                                      static_cast<size_t>(maxElements),
+                                                                      offset);
+
+    return [MEGANodeList.alloc initWithNodeList:nodeList cMemoryOwn:YES];
+}
+
 - (void)getRecentActionsAsyncSinceDays:(NSInteger)days maxNodes:(NSInteger)maxNodes excludeSensitives:(BOOL)excludeSensitives delegate:(id<MEGARequestDelegate>)delegate {
     if (self.megaApi != nil) {
         self.megaApi->getRecentActionsAsync((int)days, (unsigned int)maxNodes, excludeSensitives, [self createDelegateMEGARequestListener:delegate singleListener:YES]);

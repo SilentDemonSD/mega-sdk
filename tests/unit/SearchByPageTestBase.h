@@ -46,7 +46,8 @@ inline ListAllNodesParams makeParams(MimeType_t mime,
                                      std::optional<NodeSearchCursorOffset> cursor = std::nullopt,
                                      std::vector<NodeHandle> explicitAncestors = {},
                                      std::vector<NodeHandle> excludeHandles = {},
-                                     int locationScope = 1)
+                                     int locationScope = 1,
+                                     int64_t offset = 0)
 {
     ListAllNodesParams p;
     p.mimeType = mime;
@@ -57,6 +58,7 @@ inline ListAllNodesParams makeParams(MimeType_t mime,
     p.explicitAncestors = std::move(explicitAncestors);
     p.excludeHandles = std::move(excludeHandles);
     p.locationScope = locationScope;
+    p.offset = offset;
     return p;
 }
 

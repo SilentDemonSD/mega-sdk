@@ -4642,6 +4642,19 @@ MegaNodeList* MegaApi::listAllNodesByPage(const MegaListAllNodesFilter* filter,
                                      cursor);
 }
 
+MegaNodeList* MegaApi::listAllNodesByPageAtOffset(const MegaListAllNodesFilter* filter,
+                                                  int order,
+                                                  MegaCancelToken* cancelToken,
+                                                  size_t maxElements,
+                                                  int64_t offset)
+{
+    return pImpl->listAllNodesByPageAtOffset(filter,
+                                             order,
+                                             convertToCancelToken(cancelToken),
+                                             maxElements,
+                                             offset);
+}
+
 MegaDateSectionList* MegaApi::groupAllNodesByDate(const MegaGroupNodesByDateFilter* filter,
                                                   int order,
                                                   MegaCancelToken* cancelToken)

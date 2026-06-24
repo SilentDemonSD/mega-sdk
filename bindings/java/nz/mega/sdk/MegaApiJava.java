@@ -276,7 +276,6 @@ public class MegaApiJava {
     public final static int CLIENT_TYPE_VPN = MegaApi.CLIENT_TYPE_VPN;
     public final static int CLIENT_TYPE_PASSWORD_MANAGER = MegaApi.CLIENT_TYPE_PASSWORD_MANAGER;
 
-
     /**
      * PITAG trigger codes exposed at API level.
      *
@@ -12428,5 +12427,140 @@ public class MegaApiJava {
     public void fileServiceReclaim(MegaFileServiceReclaimOptions options,
                                    MegaRequestListenerInterface listener) {
         megaApi.fileServiceReclaim(options, createDelegateRequestListener(listener, false));
+    }
+
+    /**
+     * @brief Group all nodes matching @p filter into date buckets, sorted
+     *        by the active timestamp column.
+     *
+     * Same scope / sensitivity / file-version exclusion as
+     * MegaApi::listAllNodesByPage; any FILE_TYPE_* the latter accepts is
+     * accepted here. Nodes with mtime <= 0 are excluded so the section
+     * list does not contain a spurious "1970-01-01" bucket. Sections with
+     * zero remaining items are omitted.
+     *
+     * Always returns the section list across the entire filter scope.
+     *
+     * Supported sort orders (@p order):
+     *   - ORDER_MODIFICATION_ASC / ORDER_MODIFICATION_DESC
+     *
+     * Other order values are rejected (empty list + warning).
+     *
+     * @param filter       Required. Node-selection scope and bucket
+     *                     granularity (MegaGroupNodesByDateFilter::byGranularity).
+     * @param order        Timeline sort order; controls section ordering
+     *                     (ASC = oldest first, DESC = newest first).
+     * @param cancelToken  Optional; may be null. If cancelled mid-scan the
+     *                     call returns an empty list.
+     *
+     * @return Owning list of sections (caller must delete). Empty on
+     *         rejection, cancellation, or when the filter matches no nodes.
+     */
+    public MegaDateSectionList groupAllNodesByDate(MegaGroupNodesByDateFilter filter, int order, MegaCancelToken cancelToken) {
+        return megaApi.groupAllNodesByDate(filter, order, cancelToken);
+    }
+
+    /**
+     * @brief List nodes matching a MegaListAllNodesFilter using cursor-based
+     *        pagination.
+     *
+     * Unlike search() which walks a caller-supplied subtree, this method queries
+     * the nodes table with a flat query and applies the ancestor restriction via
+     * an EXISTS up-walk, making it significantly faster for global pagination
+     * use-cases. File versions are always excluded. Cursor-based pagination
+     * guarantees that no items are skipped if nodes are deleted between page
+     * requests, unlike the offset-based search().
+     *
+     * See MegaListAllNodesFilter for the exact set of honoured filter fields and
+     * the semantics of byLocationHandles / byExcludeLocationHandles / byLocation
+     * / bySensitivity.
+     *
+     * Supported sort orders (@p order):
+     *   - ORDER_DEFAULT_ASC      / ORDER_DEFAULT_DESC
+     *   - ORDER_SIZE_ASC         / ORDER_SIZE_DESC
+     *   - ORDER_MODIFICATION_ASC / ORDER_MODIFICATION_DESC
+     *   - ORDER_LABEL_ASC        / ORDER_LABEL_DESC
+     *   - ORDER_FAV_ASC          / ORDER_FAV_DESC
+     *
+     * The call returns an empty list and logs a warning when:
+     *   - @p filter is nullptr.
+     *   - @p filter->byCategory() is FILE_TYPE_DEFAULT or otherwise outside
+     *     the FILE_TYPE_* range.
+     *   - @p filter->byLocation() is set to a value outside the
+     *     MegaListAllNodesFilter::LOCATION_* range.
+     *   - byLocationHandles or byExcludeLocationHandles exceeds
+     *     MegaListAllNodesFilter::MAX_LOCATION_HANDLES, or contains an
+     *     INVALID_HANDLE entry.
+     *   - @p order is outside the supported set.
+     *   - @p cursor is supplied but its order-independent fields are
+     *     missing or invalid: getLastName() is null/empty, or
+     *     getLastHandle() is INVALID_HANDLE.
+     *   - @p cursor is supplied and the field required by @p order is
+     *     missing or out of range:
+     *       * ORDER_SIZE_*         → getLastSize() < 0
+     *       * ORDER_MODIFICATION_* → getLastMtime() < 0
+     *       * ORDER_LABEL_*        → getLastLabel() outside
+     *                                [NODE_LBL_UNKNOWN, NODE_LBL_GREY]
+     *       * ORDER_FAV_*          → getLastFav() not 0 or 1
+     *     ORDER_DEFAULT_* requires no extra field beyond lastName /
+     *     lastHandle.
+     *
+     * For best performance, ensure search DB indexes are enabled (default):
+     * @code
+     *   megaApi->enableSearchDBIndexes(true);
+     * @endcode
+     *
+     * @param filter       Filter describing the mime category, optional
+     *                     byLocationHandles / byExcludeLocationHandles,
+     *                     byLocation and sensitivity constraints. Must not
+     *                     be nullptr.
+     * @param order        Sort order constant (see supported values above).
+     * @param cancelToken  Optional cancellation token; may be null.
+     * @param maxElements  Maximum number of nodes to return per page (0 = no limit).
+     * @param cursor       Cursor from the last node of the previous page, or
+     *                     nullptr for the first page. Fields required depend on
+     *                     the sort order — see MegaSearchCursorOffset.
+     *
+     * @return List of MegaNode objects for this page, or an empty list when there
+     *         are no more results or inputs were rejected. The caller takes
+     *         ownership and must delete the returned object.
+     */
+    public MegaNodeList listAllNodesByPage(MegaListAllNodesFilter filter, int order, MegaCancelToken cancelToken, int maxElements, MegaSearchCursorOffset cursor) {
+        return megaApi.listAllNodesByPage(filter, order, cancelToken, maxElements, cursor);
+    }
+
+    /**
+     * @brief Fetch a contiguous window of nodes by offset + limit from the ordered result.
+     *
+     * Skips @p offset nodes and returns up to @p maxElements. Compose with
+     * MegaListAllNodesFilter::byTimestampAnchor: anchor a page at a date section (from
+     * MegaApi::groupAllNodesByDate), then pass the local position within that section as
+     * @p offset to land on the on-screen window. A window near the section end bleeds
+     * contiguously into the adjacent section (the anchor is half-bounded). Offset
+     * positions are NOT stable under concurrent add/delete; re-fetch on change notifications.
+     *
+     * NOTE: without byTimestampAnchor, an @p offset of N forces the query to skip N rows
+     * (and, for grouped categories FILE_TYPE_ALL_DOCS / FILE_TYPE_ALL_VISUAL_MEDIA, to
+     * materialize offset+maxElements rows per route) while holding the SDK lock. Anchor the
+     * page to a date section to keep @p offset small; an unanchored deep offset is O(offset).
+     *
+     * This entry point takes no MegaSearchCursorOffset: offset windowing and keyset cursor
+     * pagination are mutually exclusive. It has a distinct name from
+     * listAllNodesByPage(..., const MegaSearchCursorOffset*) so that a literal 0 / NULL last
+     * argument is never ambiguous between the two pagination modes.
+     *
+     * @param filter       Required. Scope/category filter; may carry byTimestampAnchor.
+     * @param order        Sort order constant. Accepts the same set as
+     *                     listAllNodesByPage (ORDER_DEFAULT / SIZE / MODIFICATION /
+     *                     LABEL / FAV, each ASC/DESC); the fast-scroller flow uses
+     *                     NEWEST/OLDEST = ORDER_MODIFICATION_DESC/ASC.
+     * @param cancelToken  Optional; may be null.
+     * @param maxElements  Window size (limit). 0 means no limit.
+     * @param offset       Leading nodes to skip; must be >= 0 (negative => empty list).
+     * @return Up to maxElements nodes starting at offset; empty on invalid args or no match.
+     *         The caller takes ownership and must delete the returned object.
+     */
+    public MegaNodeList listAllNodesByPageAtOffset(MegaListAllNodesFilter filter, int order, int maxElements, MegaCancelToken cancelToken, long offset) {
+        return megaApi.listAllNodesByPageAtOffset(filter, order, cancelToken, maxElements, offset);
     }
 }

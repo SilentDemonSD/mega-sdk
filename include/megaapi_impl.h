@@ -4756,6 +4756,12 @@ public:
                                          size_t maxElements,
                                          const MegaSearchCursorOffset* cursor);
 
+        MegaNodeList* listAllNodesByPageAtOffset(const MegaListAllNodesFilter* filter,
+                                                 int order,
+                                                 CancelToken cancelToken,
+                                                 size_t maxElements,
+                                                 int64_t offset);
+
         MegaDateSectionList* groupAllNodesByDate(const MegaGroupNodesByDateFilter* filter,
                                                  int order,
                                                  CancelToken cancelToken);
@@ -4783,6 +4789,12 @@ public:
                                int order,
                                size_t maxElements,
                                const MegaSearchCursorOffset* cursor) const;
+
+        // Shared locked tail for the cursor (listAllNodesByPage) and offset
+        // (listAllNodesByPageAtOffset) entry points: empty list on nullopt params, else run
+        // the query under sdkMutex and wrap the result.
+        MegaNodeList* runListAllNodesByPage(const std::optional<ListAllNodesParams>& params,
+                                            CancelToken cancelToken);
 
         // Validates + converts public MegaGroupNodesByDateFilter inputs (scope +
         // granularity) into an internal DateSectionParams. Returns std::nullopt on
