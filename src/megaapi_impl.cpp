@@ -34298,9 +34298,9 @@ void HttpStreamingBuffer::calcMaxBufferAndMaxOutputSize()
 {
     StreamingBuffer::calcMaxBufferAndMaxOutputSize();
     maxBufferSize =
-        std::min(maxBufferSize, static_cast<size_t>(HttpStreamingBuffer::MAX_BUFFER_SIZE));
+        std::min(maxBufferSize, static_cast<size_t>(HttpStreamingBuffer::HTTP_MAX_BUFFER_SIZE));
     maxOutputSize =
-        std::min(maxOutputSize, static_cast<size_t>(HttpStreamingBuffer::MAX_OUTPUT_SIZE));
+        std::min(maxOutputSize, static_cast<size_t>(HttpStreamingBuffer::HTTP_MAX_OUTPUT_SIZE));
 }
 
 // http_parser settings

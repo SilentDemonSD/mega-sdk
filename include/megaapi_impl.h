@@ -5715,10 +5715,10 @@ public:
     HttpStreamingBuffer(const std::string& logName = {});
 
     // Limit max buffer size to 2MB for HTTP streaming
-    static constexpr unsigned int MAX_BUFFER_SIZE = 2u << 20;
+    static constexpr unsigned int HTTP_MAX_BUFFER_SIZE = 2u << 20;
 
     // Limit single HTTP write size to 128KB for throttled delivery
-    static constexpr unsigned int MAX_OUTPUT_SIZE = 1u << 17;
+    static constexpr unsigned int HTTP_MAX_OUTPUT_SIZE = 1u << 17;
 
 private:
     void calcMaxBufferAndMaxOutputSize() override;
