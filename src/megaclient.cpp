@@ -24956,8 +24956,9 @@ string KeyManager::computeSymmetricKey(handle user)
 
     std::string sharedSecret;
     ECDH ecdh(mClient.mX255Key->getPrivKey(), attribute->value());
-    if (!ecdh.computeSymmetricKey(sharedSecret))
+    if (!ecdh.initializationOK || !ecdh.computeSymmetricKey(sharedSecret))
     {
+        LOG_err << "Unable to generate symmetric key. Invalid Cu25519 key material.";
         return std::string();
     }
 
