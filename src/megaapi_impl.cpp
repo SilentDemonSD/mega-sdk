@@ -17240,18 +17240,24 @@ void MegaApiImpl::checkLastPurgeNotification()
         return;
     }
 
-    // ^!lpack lives on the own user; if not loaded yet, defer rather than fire blind.
     const User* u = client->ownuser();
     if (!u)
     {
         return;
     }
 
+    // EXPIRED ^!lpack: a 'ua' reported it changed (likely acknowledged elsewhere) but we lack the
+    // value -> suppress this alarming alert. Missing attribute -> never set -> not acknowledged.
+    const UserAttribute* attr = u->getAttribute(ATTR_LAST_PURGE_ACKNOWLEDGED);
+    if (attr && !attr->isValid())
+    {
+        return; // don't mark; a later loaded value can re-evaluate
+    }
+
     // Mark now (fire or suppress) so this ts is evaluated at most once per session.
     client->mLastPurgeNotifiedTs = client->mLastPurge.ts;
 
     // Suppress if already acknowledged on any device (^!lpack).
-    const UserAttribute* attr = u->getAttribute(ATTR_LAST_PURGE_ACKNOWLEDGED);
     if (attr && attr->isValid() && !attr->value().empty())
     {
         try
