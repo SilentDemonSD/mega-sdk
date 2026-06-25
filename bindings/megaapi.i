@@ -473,6 +473,16 @@ extern "C" jint JNIEXPORT JNICALL JNI_OnLoad(JavaVM *jvm, void *reserved)
 %newobject mega::MegaTimeZoneDetails::copy;
 %newobject mega::MegaUserAlert::copy;
 %newobject mega::MegaUserAlertList::copy;
+%newobject mega::MegaDateSection::copy;
+%newobject mega::MegaDateSectionList::copy;
+%newobject mega::MegaApi::groupAllNodesByDate;
+%newobject mega::MegaApi::listAllNodesByPage;
+%newobject mega::MegaApi::listAllNodesByPageAtOffset;
+%newobject mega::MegaNodeScopeFilter::copy;
+%newobject mega::MegaListAllNodesFilter::createInstance;
+%newobject mega::MegaListAllNodesFilter::copy;
+%newobject mega::MegaGroupNodesByDateFilter::createInstance;
+%newobject mega::MegaGroupNodesByDateFilter::copy;
 %newobject mega::MegaAchievementsDetails::getAwardEmails;
 %newobject mega::MegaTransfer::getPublicMegaNode;
 

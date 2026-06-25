@@ -448,6 +448,9 @@ typedef enum { MIME_TYPE_UNKNOWN    = 0,
                MIME_TYPE_ALL_DOCS   = 11,   // any of {document, pdf, presentation, spreadsheet}
                MIME_TYPE_OTHERS = 12, // any other file not included in previous types
                MIME_TYPE_ALL_VISUAL_MEDIA = 13, // any of {photo, video}
+               // Largest value (aliases the last entry, so -Wswitch stays clean). Bump when
+               // adding a type; also the mime cache-key base in db/sqlite.cpp.
+               MIME_TYPE_MAX = MIME_TYPE_ALL_VISUAL_MEDIA,
              } MimeType_t;
 
 typedef enum { LBL_UNKNOWN = 0, LBL_RED = 1, LBL_ORANGE = 2, LBL_YELLOW = 3, LBL_GREEN = 4,

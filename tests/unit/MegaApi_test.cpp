@@ -570,3 +570,68 @@ TEST(MegaApi, UseCurrentPathIfNoBasePathIsGiven)
 
     ASSERT_STREQ(std::filesystem::current_path().string().c_str(), megaApi.getBasePath());
 }
+
+// Locks the byTimestampAnchor setter contract via the getters (no DB/network):
+// only the "unset" sentinel (0,0,*) / order==-1 resets to 0/0/-1; everything
+// else (incl. degenerate range, unsupported order, out-of-range bounds) is
+// stored as-is and validated later by listAllNodesByPage.
+TEST(MegaApi, MegaListAllNodesFilter_byTimestampAnchorContract)
+{
+    auto make = []
+    {
+        return unique_ptr<MegaListAllNodesFilter>{MegaListAllNodesFilter::createInstance()};
+    };
+    auto expectAnchor = [](const MegaListAllNodesFilter& f, int64_t start, int64_t end, int order)
+    {
+        EXPECT_EQ(f.byTimestampAnchorStartDate(), start);
+        EXPECT_EQ(f.byTimestampAnchorEndDate(), end);
+        EXPECT_EQ(f.byTimestampAnchorOrder(), order);
+    };
+
+    // Valid anchor is stored verbatim.
+    {
+        auto f = make();
+        f->byTimestampAnchor(100, 200, MegaApi::ORDER_MODIFICATION_DESC);
+        expectAnchor(*f, 100, 200, MegaApi::ORDER_MODIFICATION_DESC);
+    }
+
+    // start == end == 0 is the "unset" sentinel → reset to 0/0/-1.
+    {
+        auto f = make();
+        f->byTimestampAnchor(100, 200, MegaApi::ORDER_MODIFICATION_ASC);
+        f->byTimestampAnchor(0, 0, MegaApi::ORDER_MODIFICATION_ASC);
+        expectAnchor(*f, 0, 0, -1);
+    }
+
+    // sectionOrder == -1 is the "unset" sentinel → reset.
+    {
+        auto f = make();
+        f->byTimestampAnchor(100, 200, MegaApi::ORDER_MODIFICATION_ASC);
+        f->byTimestampAnchor(100, 200, -1);
+        expectAnchor(*f, 0, 0, -1);
+    }
+
+    // Out-of-range bounds (e.g. negative) are STORED, not reset — rejected later
+    // by listAllNodesByPage.
+    {
+        auto f = make();
+        f->byTimestampAnchor(-5, 200, MegaApi::ORDER_MODIFICATION_ASC);
+        expectAnchor(*f, -5, 200, MegaApi::ORDER_MODIFICATION_ASC);
+    }
+
+    // Degenerate range (start >= end) is STORED, not reset — rejected later
+    // by listAllNodesByPage.
+    {
+        auto f = make();
+        f->byTimestampAnchor(200, 200, MegaApi::ORDER_MODIFICATION_DESC);
+        expectAnchor(*f, 200, 200, MegaApi::ORDER_MODIFICATION_DESC);
+    }
+
+    // Unsupported order with a valid range is STORED, not reset — rejected
+    // later by listAllNodesByPage.
+    {
+        auto f = make();
+        f->byTimestampAnchor(100, 200, MegaApi::ORDER_SIZE_ASC);
+        expectAnchor(*f, 100, 200, MegaApi::ORDER_SIZE_ASC);
+    }
+}

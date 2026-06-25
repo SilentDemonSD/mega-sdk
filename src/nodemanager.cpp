@@ -860,6 +860,8 @@ sharedNode_vector NodeManager::listAllNodesByPage(const ListAllNodesParams& para
     if (!mTable || mNodes.empty())
     {
         assert(mTable && !mNodes.empty());
+        LOG_warn << "listAllNodesByPage: node table not ready (mTable=" << (mTable != nullptr)
+                 << ", mNodes.empty=" << mNodes.empty() << "); returning empty";
         return sharedNode_vector();
     }
 
@@ -883,7 +885,7 @@ sharedNode_vector NodeManager::listAllNodesByPage(const ListAllNodesParams& para
     return processUnserializedNodes(nodesFromTable, cancelFlag);
 }
 
-std::vector<NodeHandle> NodeManager::resolveListAllRoots(const ListAllNodesParams& params) const
+std::vector<NodeHandle> NodeManager::resolveListAllRoots(const ListAllFilterParams& params) const
 {
     assert(mMutex.owns_lock());
     // byLocationHandles wins: explicit ancestor list → use it verbatim.
@@ -908,6 +910,36 @@ std::vector<NodeHandle> NodeManager::resolveListAllRoots(const ListAllNodesParam
         && !rootnodes.rubbish.isUndef())
         roots.push_back(rootnodes.rubbish);
     return roots;
+}
+
+std::vector<DateSection> NodeManager::groupAllNodesByDate(const DateSectionParams& params,
+                                                          CancelToken cancelFlag)
+{
+    LockGuard g(mMutex);
+
+    if (!mTable || mNodes.empty())
+    {
+        assert(mTable && !mNodes.empty());
+        LOG_warn << "groupAllNodesByDate: node table not ready (mTable=" << (mTable != nullptr)
+                 << ", mNodes.empty=" << mNodes.empty() << "); returning empty";
+        return {};
+    }
+
+    const std::vector<NodeHandle> filesRoots = resolveListAllRoots(params);
+    if (filesRoots.empty())
+    {
+        LOG_warn << "groupAllNodesByDate: no valid root resolved (explicitAncestors size="
+                 << params.explicitAncestors.size() << ", locationScope=" << params.locationScope
+                 << "); returning empty";
+        return {};
+    }
+
+    std::vector<DateSection> out;
+    if (!mTable->groupAllNodesByDate(params, filesRoots, out, cancelFlag))
+    {
+        return {};
+    }
+    return out;
 }
 
 sharedNode_vector NodeManager::getNodesWithInShares()

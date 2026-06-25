@@ -98,6 +98,8 @@ class MegaScheduledCopy;
 class MegaSync;
 class MegaStringList;
 class MegaNodeList;
+class MegaDateSection;
+class MegaDateSectionList;
 class MegaUserList;
 class MegaUserAlertList;
 class MegaContactRequestList;
@@ -10969,13 +10971,14 @@ public:
 };
 
 /**
- * @brief Filter for MegaApi::listAllNodesByPage.
+ * @brief Common node-selection scope shared by MegaApi::listAllNodesByPage and
+ *        MegaApi::groupAllNodesByDate: MIME category, rootnode/location scope,
+ *        ancestor include/exclude handles, and sensitivity.
  *
- * Deliberately narrower than MegaSearchFilter: only exposes the fields the
- * flat, cursor-paginated listAllNodesByPage query can actually honour. New
- * fields (byName, byTag, byDescription, byFavourite, time windows, byNodeType,
- * text-search operators) are intentionally absent — use MegaApi::search /
- * MegaApi::getChildren when those are required.
+ * Deliberately narrower than MegaSearchFilter: only the fields the flat,
+ * cursor-paginated queries can honour. byName / byTag / byDescription /
+ * byFavourite / time windows / byNodeType / text-search operators are
+ * intentionally absent — use MegaApi::search / MegaApi::getChildren for those.
  *
  * Scope (resolved in priority order):
  *   - byLocationHandles set (non-empty) → results are the union of the
@@ -11006,17 +11009,11 @@ public:
  *   - SENSITIVITY_HIDE_SENSITIVE → hide nodes whose own SENSITIVE flag, or
  *     any strict ancestor's flag below the matched root, is set. The matched
  *     root's own flag is intentionally ignored.
- *
- * Cursor validity: a cursor built from a previous page is only reusable when
- * the filter's (byCategory, byLocation, byLocationHandles,
- * byExcludeLocationHandles, bySensitivity) tuple and the sort order all match
- * the original call. Mixing configurations may skip or duplicate entries —
- * restart pagination when any of these change.
  */
-class MegaListAllNodesFilter
+class MegaNodeScopeFilter
 {
 protected:
-    MegaListAllNodesFilter();
+    MegaNodeScopeFilter();
 
 public:
     enum
@@ -11039,28 +11036,25 @@ public:
     };
 
     /// Maximum number of handles accepted by byLocationHandles() and
-    /// byExcludeLocationHandles(). Lists exceeding this size cause
-    /// listAllNodesByPage to reject the request.
+    /// byExcludeLocationHandles(). Lists exceeding this size cause the query
+    /// to reject the request.
     static constexpr size_t MAX_LOCATION_HANDLES = 3;
 
     /**
-     * @brief Creates a new instance of MegaListAllNodesFilter.
-     * @return A pointer to the private subclass. Caller takes ownership.
-     */
-    static MegaListAllNodesFilter* createInstance();
-
-    /**
      * @brief Create a copy of this instance. The caller takes ownership.
+     *
+     * Returns the same concrete type. This base has no createInstance();
+     * construct a concrete subclass.
      */
-    virtual MegaListAllNodesFilter* copy() const;
+    virtual MegaNodeScopeFilter* copy() const;
 
-    virtual ~MegaListAllNodesFilter();
+    virtual ~MegaNodeScopeFilter();
 
     /**
      * @brief Required. MIME type category (see MegaApi::FILE_TYPE_* constants).
      *
      * Must be a non-DEFAULT value in [FILE_TYPE_DEFAULT+1, FILE_TYPE_LAST].
-     * listAllNodesByPage rejects FILE_TYPE_DEFAULT (returns empty, logs warning).
+     * The query rejects FILE_TYPE_DEFAULT (returns empty, logs warning).
      */
     virtual void byCategory(int mimeType);
     virtual int byCategory() const;
@@ -11071,8 +11065,8 @@ public:
      *
      * Pass nullptr or an empty list (default) to use the rootnode scope
      * selected by byLocation(). Lists with more than MAX_LOCATION_HANDLES
-     * entries, or with any INVALID_HANDLE entry, cause listAllNodesByPage to
-     * reject the request.
+     * entries, or with any INVALID_HANDLE entry, cause the query to reject
+     * the request.
      *
      * The supplied list is copied; the caller retains ownership of the
      * MegaHandleList. The getter returns a new MegaHandleList that the
@@ -11106,7 +11100,7 @@ public:
      * @param scope One of LOCATION_CLOUD_DRIVE,
      *              LOCATION_CLOUD_DRIVE_AND_VAULT (default),
      *              LOCATION_CLOUD_DRIVE_VAULT_AND_RUBBISH.
-     * Other values cause listAllNodesByPage to reject the request.
+     * Other values cause the query to reject the request.
      */
     virtual void byLocation(int scope);
     virtual int byLocation() const;
@@ -11122,6 +11116,221 @@ public:
      */
     virtual void bySensitivity(int filterOption);
     virtual int bySensitivity() const;
+};
+
+/**
+ * @brief MegaNodeScopeFilter plus the listAllNodesByPage-specific date-section
+ *        anchor (byTimestampAnchor).
+ *
+ * Cursor validity: a cursor built from a previous page is only reusable when
+ * the filter's scope tuple (byCategory, byLocation, byLocationHandles,
+ * byExcludeLocationHandles, bySensitivity) and the sort order all match the
+ * original call. Mixing configurations may skip or duplicate entries — restart
+ * pagination when any of these change.
+ */
+class MegaListAllNodesFilter: public MegaNodeScopeFilter
+{
+protected:
+    MegaListAllNodesFilter();
+
+public:
+    /**
+     * @brief Creates a new instance of MegaListAllNodesFilter.
+     * @return A pointer to the private subclass. Caller takes ownership.
+     */
+    static MegaListAllNodesFilter* createInstance();
+
+    /// Create a copy of this instance. The caller takes ownership.
+    MegaListAllNodesFilter* copy() const override;
+
+    ~MegaListAllNodesFilter() override;
+
+    /**
+     * @brief Optional. Anchor pagination to a date bucket.
+     *
+     * @p startDate / @p endDate is the bucket pair from a MegaDateSection
+     * (its getStartDate() and getEndDate()). Bounds are UTC epoch seconds;
+     * @p startDate is the inclusive lower bound and @p endDate is the
+     * exclusive upper bound. Pass the section's getters verbatim — these
+     * fields don't swap meaning based on direction.
+     *
+     * **Half-bounded semantics.** Only one bound is enforced, picked by
+     * @p sectionOrder:
+     *   - ORDER_MODIFICATION_ASC:  enforces the lower bound @p startDate (walks forward)
+     *   - ORDER_MODIFICATION_DESC: enforces the upper bound @p endDate   (walks backward)
+     * Pagination continues into adjacent sections. To fetch ONLY this bucket,
+     * the app stops after MegaDateSection::getCount() items.
+     *
+     * Pass @p startDate == @p endDate == 0 (or @p sectionOrder == -1) to
+     * disable; all three fields reset together. This setter only stores the
+     * values; validity is enforced when the filter is used. listAllNodesByPage
+     * returns an empty list (and logs a warning) for an unsupported
+     * @p sectionOrder, a negative bound, or @p startDate >= @p endDate.
+     * @p startDate == 0 is allowed and means "no lower bound" for an ASC anchor.
+     *
+     * Honoured only by listAllNodesByPage. Ignored by
+     * MegaApi::groupAllNodesByDate, which always returns the section list
+     * across the entire remaining filter scope.
+     *
+     * The @p order on listAllNodesByPage controls only the ORDER BY, not which
+     * half-bound is enforced. NOTE: a non-mtime page order is NOT scoped to one
+     * bucket; fetch getCount() items with ORDER_MODIFICATION_* and sort
+     * client-side.
+     */
+    virtual void byTimestampAnchor(int64_t startDate, int64_t endDate, int sectionOrder);
+
+    /// Returns the configured startDate, or 0 if unset.
+    virtual int64_t byTimestampAnchorStartDate() const;
+
+    /// Returns the configured endDate, or 0 if unset.
+    virtual int64_t byTimestampAnchorEndDate() const;
+
+    /// Returns the configured sectionOrder (which identifies BOTH the
+    /// timestamp column AND the traversal direction), or -1 if unset.
+    virtual int byTimestampAnchorOrder() const;
+};
+
+/**
+ * @brief MegaNodeScopeFilter for MegaApi::groupAllNodesByDate.
+ *
+ * Carries the same node-selection scope as the base and adds the section
+ * granularity constants. It deliberately does NOT expose byTimestampAnchor:
+ * grouping has no pagination anchor.
+ */
+class MegaGroupNodesByDateFilter: public MegaNodeScopeFilter
+{
+protected:
+    MegaGroupNodesByDateFilter();
+
+public:
+    /**
+     * @brief Granularity values for MegaApi::groupAllNodesByDate.
+     */
+    enum
+    {
+        SECTION_GRANULARITY_DAY = 0, ///< Group id "YYYY-MM-DD".
+        SECTION_GRANULARITY_MONTH = 1, ///< Group id "YYYY-MM".
+        SECTION_GRANULARITY_YEAR = 2, ///< Group id "YYYY".
+    };
+
+    /**
+     * @brief Creates a new instance of MegaGroupNodesByDateFilter.
+     * @return A pointer to the private subclass. Caller takes ownership.
+     */
+    static MegaGroupNodesByDateFilter* createInstance();
+
+    /// Create a copy of this instance. The caller takes ownership.
+    MegaGroupNodesByDateFilter* copy() const override;
+
+    ~MegaGroupNodesByDateFilter() override;
+
+    /**
+     * @brief Bucket granularity for MegaApi::groupAllNodesByDate.
+     *
+     * @param granularity One of SECTION_GRANULARITY_DAY / _MONTH (default) / _YEAR.
+     * groupAllNodesByDate returns an empty list (and logs a warning) for an
+     * out-of-range value.
+     */
+    virtual void byGranularity(int granularity);
+
+    /// Returns the configured granularity (SECTION_GRANULARITY_MONTH if unset).
+    virtual int byGranularity() const;
+};
+
+/**
+ * @brief One date bucket of nodes returned by MegaApi::groupAllNodesByDate.
+ *
+ * Each section carries:
+ *   - getGroupId():   display-only canonical date string (e.g. "2024-07")
+ *   - getStartDate(): inclusive lower bound, UTC epoch seconds
+ *   - getEndDate():   exclusive upper bound, UTC epoch seconds
+ *   - getCount():     number of nodes in the bucket
+ *
+ * To fetch the nodes anchored at this bucket, pass getStartDate() and
+ * getEndDate() to MegaListAllNodesFilter::byTimestampAnchor().
+ *
+ * Group ids are stable across mutations: adding or removing an item in a
+ * bucket changes that bucket's count() but never its groupId(). Sections
+ * with zero items are not returned.
+ */
+class MegaDateSection
+{
+protected:
+    MegaDateSection();
+
+public:
+    virtual MegaDateSection* copy() const;
+    virtual ~MegaDateSection();
+
+    /**
+     * @brief Display-only date string identifying this section.
+     *
+     * Format is determined by the granularity passed to
+     * MegaApi::groupAllNodesByDate (see SECTION_GRANULARITY_* above).
+     * Stable across mutations within the same bucket; safe to use as a UI
+     * section header / key. Display/key only; not round-tripped (see class
+     * header to fetch a bucket).
+     *
+     * @return The group id. Caller does NOT own; the pointer is valid for
+     *         the lifetime of this MegaDateSection.
+     */
+    virtual const char* getGroupId() const;
+
+    /**
+     * @brief Inclusive lower bound of this bucket, as UTC epoch seconds.
+     *
+     * Always the canonical bucket start (midnight UTC of the day / first
+     * day of the month / first day of the year) — direction-independent,
+     * not the minimum mtime of nodes actually in the bucket.
+     */
+    virtual int64_t getStartDate() const;
+
+    /**
+     * @brief Exclusive upper bound of this bucket, as UTC epoch seconds.
+     *
+     * Always the start of the next bucket at the same granularity
+     * (midnight UTC of the next day / first day of the next month / first
+     * day of the next year). Direction-independent.
+     */
+    virtual int64_t getEndDate() const;
+
+    /**
+     * @brief Number of items in this section.
+     *
+     * Sum getCount() across all sections for the timeline's total length (the
+     * value the fast scroller uses for its track).
+     *
+     * int64_t (not int): a large account's total can exceed INT_MAX; bindings
+     * must not narrow it.
+     */
+    virtual int64_t getCount() const;
+};
+
+/**
+ * @brief Owning list of MegaDateSection values.
+ *
+ * Returned by MegaApi::groupAllNodesByDate. The caller takes ownership and
+ * must delete the returned list; the list owns its entries. Pointers
+ * returned by get() are valid only for the lifetime of the list.
+ */
+class MegaDateSectionList
+{
+protected:
+    MegaDateSectionList();
+
+public:
+    virtual MegaDateSectionList* copy() const;
+    virtual ~MegaDateSectionList();
+
+    /**
+     * @brief Returns the section at index @p i, or nullptr if @p i is
+     *        outside [0, size()). The list retains ownership; the returned
+     *        pointer is valid only until the list is destroyed. To keep a
+     *        section beyond the list's lifetime, copy the whole list
+     *        (MegaDateSectionList::copy) and re-get.
+     */
+    virtual const MegaDateSection* get(int i) const;
+    virtual int size() const;
 };
 
 /**
@@ -20612,6 +20821,74 @@ class MegaApi
                                          MegaCancelToken* cancelToken,
                                          size_t maxElements,
                                          const MegaSearchCursorOffset* cursor);
+
+        /**
+         * @brief Fetch a contiguous window of nodes by offset + limit from the ordered result.
+         *
+         * Skips @p offset nodes and returns up to @p maxElements. Compose with
+         * MegaListAllNodesFilter::byTimestampAnchor: anchor a page at a date section (from
+         * MegaApi::groupAllNodesByDate), then pass the local position within that section as
+         * @p offset to land on the on-screen window. A window near the section end bleeds
+         * contiguously into the adjacent section (the anchor is half-bounded). Offset
+         * positions are NOT stable under concurrent add/delete; re-fetch on change notifications.
+         *
+         * NOTE: without byTimestampAnchor, an @p offset of N forces the query to skip N rows
+         * (and, for grouped categories FILE_TYPE_ALL_DOCS / FILE_TYPE_ALL_VISUAL_MEDIA, to
+         * materialize offset+maxElements rows per route) while holding the SDK lock. Anchor the
+         * page to a date section to keep @p offset small; an unanchored deep offset is O(offset).
+         *
+         * This entry point takes no MegaSearchCursorOffset: offset windowing and keyset cursor
+         * pagination are mutually exclusive. It has a distinct name from
+         * listAllNodesByPage(..., const MegaSearchCursorOffset*) so that a literal 0 / NULL last
+         * argument is never ambiguous between the two pagination modes.
+         *
+         * @param filter       Required. Scope/category filter; may carry byTimestampAnchor.
+         * @param order        Sort order constant. Accepts the same set as
+         *                     listAllNodesByPage (ORDER_DEFAULT / SIZE / MODIFICATION /
+         *                     LABEL / FAV, each ASC/DESC); the fast-scroller flow uses
+         *                     NEWEST/OLDEST = ORDER_MODIFICATION_DESC/ASC.
+         * @param cancelToken  Optional; may be null.
+         * @param maxElements  Window size (limit). 0 means no limit.
+         * @param offset       Leading nodes to skip; must be >= 0 (negative => empty list).
+         * @return Up to maxElements nodes starting at offset; empty on invalid args or no match.
+         *         The caller takes ownership and must delete the returned object.
+         */
+        MegaNodeList* listAllNodesByPageAtOffset(const MegaListAllNodesFilter* filter,
+                                                 int order,
+                                                 MegaCancelToken* cancelToken,
+                                                 size_t maxElements,
+                                                 int64_t offset);
+
+        /**
+         * @brief Group all nodes matching @p filter into date buckets, sorted
+         *        by the active timestamp column.
+         *
+         * Same scope / sensitivity / file-version exclusion as
+         * MegaApi::listAllNodesByPage; any FILE_TYPE_* the latter accepts is
+         * accepted here. Nodes with mtime <= 0 are excluded so the section
+         * list does not contain a spurious "1970-01-01" bucket. Sections with
+         * zero remaining items are omitted.
+         *
+         * Always returns the section list across the entire filter scope.
+         *
+         * Supported sort orders (@p order):
+         *   - ORDER_MODIFICATION_ASC / ORDER_MODIFICATION_DESC
+         *
+         * Other order values are rejected (empty list + warning).
+         *
+         * @param filter       Required. Node-selection scope and bucket
+         *                     granularity (MegaGroupNodesByDateFilter::byGranularity).
+         * @param order        Timeline sort order; controls section ordering
+         *                     (ASC = oldest first, DESC = newest first).
+         * @param cancelToken  Optional; may be null. If cancelled mid-scan the
+         *                     call returns an empty list.
+         *
+         * @return Owning list of sections (caller must delete). Empty on
+         *         rejection, cancellation, or when the filter matches no nodes.
+         */
+        MegaDateSectionList* groupAllNodesByDate(const MegaGroupNodesByDateFilter* filter,
+                                                 int order,
+                                                 MegaCancelToken* cancelToken);
 
         /**
          * @brief Get a list of buckets, each bucket containing a list of recently added/modified

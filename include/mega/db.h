@@ -139,6 +139,8 @@ class NodeSearchPage;
 struct NodeSearchLexicographicalOffset;
 struct NodeSearchCursorOffset;
 struct ListAllNodesParams;
+struct DateSectionParams;
+struct DateSection;
 
 class MEGA_API DBTableNodes
 {
@@ -265,6 +267,25 @@ public:
                                     const std::vector<NodeHandle>& filesRoots,
                                     std::vector<std::pair<NodeHandle, NodeSerialized>>& nodes,
                                     CancelToken cancelFlag) = 0;
+
+    /**
+     * @brief Aggregate matching nodes into date buckets.
+     *
+     * Same filter + root semantics as listAllNodesByPage (mime, sensitivity,
+     * excludeHandles, EXISTS up-walk, file-version exclusion) plus an
+     * additional `<timestampColumn> > invalidSentinel` guard so the result
+     * never contains a spurious "1970-..." bucket.
+     *
+     * @param params      Section filter + granularity + order.
+     * @param filesRoots  Resolved by NodeManager; 1..kListAllMaxLocationHandles
+     *                    non-UNDEF ancestor handles.
+     * @param out         One DateSection per non-empty bucket.
+     * @return true on success (out may be empty); false on DB error.
+     */
+    virtual bool groupAllNodesByDate(const DateSectionParams& params,
+                                     const std::vector<NodeHandle>& filesRoots,
+                                     std::vector<DateSection>& out,
+                                     CancelToken cancelFlag) = 0;
 
     virtual void createIndexes(bool enableIndexesForSearching,
                                bool enableIndexesForLexicographicalList) = 0;

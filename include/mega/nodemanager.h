@@ -291,7 +291,7 @@ struct NodeSearchCursorOffset
     std::optional<int> mLastFav; ///< fav flag for FAV_ASC / FAV_DESC
 };
 
-// Mirrors MegaListAllNodesFilter::LOCATION_CLOUD_DRIVE_AND_VAULT (== 1).
+// Mirrors MegaNodeScopeFilter::LOCATION_CLOUD_DRIVE_AND_VAULT (== 1).
 // A static_assert in megaapi_impl.cpp enforces the value match.
 constexpr int kDefaultListAllLocationScope = 1;
 
@@ -301,10 +301,8 @@ constexpr int kDefaultListAllLocationScope = 1;
 constexpr size_t kListAllMaxLocationHandles = 3;
 
 /**
- * @brief Filter + pagination state for listAllNodesByPage, threaded through
- *        MegaApiImpl → NodeManager → DbTable → SqliteAccountState.
- *
- * Grouped so future filter fields can be added without churning four signatures.
+ * @brief Filter inputs shared by listAllNodesByPage (paginated rows) and
+ *        groupAllNodesByDate (section aggregates).
  *
  * Root selection (resolved at NodeManager, which owns rootnodes):
  *   - explicitAncestors non-empty → used verbatim as the root set.
@@ -320,13 +318,11 @@ constexpr size_t kListAllMaxLocationHandles = 3;
  * explicitAncestors and excludeHandles are each capped at
  * kListAllMaxLocationHandles.
  */
-struct ListAllNodesParams
+struct ListAllFilterParams
 {
     MimeType_t mimeType = MIME_TYPE_UNKNOWN;
     int order = 0;
-    size_t maxElements = 0;
     bool excludeSensitive = false;
-    std::optional<NodeSearchCursorOffset> cursor;
 
     /// byLocationHandles — empty means use locationScope.
     std::vector<NodeHandle> explicitAncestors;
@@ -335,8 +331,66 @@ struct ListAllNodesParams
     std::vector<NodeHandle> excludeHandles;
 
     /// byLocation — only consulted when explicitAncestors is empty.
-    /// Mirrors MegaListAllNodesFilter::LOCATION_*.
+    /// Mirrors MegaNodeScopeFilter::LOCATION_*.
     int locationScope = kDefaultListAllLocationScope;
+};
+
+/// Granularity for MegaApi::groupAllNodesByDate. Values mirror
+/// MegaGroupNodesByDateFilter::SECTION_GRANULARITY_* in megaapi.h
+/// (static_asserts in megaapi_impl.cpp keep them in sync).
+enum class DateSectionGranularity
+{
+    Day = 0,
+    Month = 1,
+    Year = 2,
+    Max = Year,
+};
+
+/// Parsed timestamp-anchor selector; the SQL layer resolves the column and
+/// scales seconds → column units at bind time. Only one bound is used,
+/// picked by mOrder (ASC → mStartSeconds; DESC → mEndSeconds); the other is
+/// kept for symmetry with MegaDateSection::getStartDate / getEndDate. mOrder
+/// is independent of the page-level order used for ORDER BY.
+struct TimestampAnchorFilter
+{
+    int mOrder = 0; ///< OrderByClause value; carries column AND direction
+    int64_t mStartSeconds = 0; ///< inclusive lower bound, UTC epoch seconds
+    int64_t mEndSeconds = 0; ///< exclusive upper bound, UTC epoch seconds
+};
+
+/// Filter + pagination state for listAllNodesByPage (cursor, page size,
+/// optional date anchor).
+struct ListAllNodesParams: ListAllFilterParams
+{
+    size_t maxElements = 0;
+    std::optional<NodeSearchCursorOffset> cursor;
+
+    /// Optional half-bounded timestamp filter. Bound direction follows the
+    /// anchor's own order (see MegaListAllNodesFilter::byTimestampAnchor); the
+    /// opposite side is left open so pages walk into adjacent sections.
+    std::optional<TimestampAnchorFilter> timestampAnchor;
+    int64_t offset = 0; // Rows to skip (offset-based windowing). Mutually exclusive with cursor.
+};
+
+/// Parameters for NodeManager::groupAllNodesByDate. Same filter/root logic as
+/// ListAllNodesParams (shared base); only adds `granularity`. Callers must set a
+/// timestamp `order`; the DB entry point rejects an unsupported one (incl. the
+/// inherited default 0).
+struct DateSectionParams: ListAllFilterParams
+{
+    DateSectionGranularity granularity = DateSectionGranularity::Month;
+};
+
+/// One date bucket from NodeManager::groupAllNodesByDate. mStartDate (inclusive
+/// lower bound) and mEndDate (exclusive upper bound = next bucket's start) are
+/// finalized by the DB layer, so they are already set when the vector reaches
+/// MegaApiImpl.
+struct DateSection
+{
+    std::string mGroupId;
+    int64_t mStartDate = 0; ///< UTC epoch seconds at the bucket lower bound (inclusive)
+    int64_t mEndDate = 0; ///< UTC epoch seconds at the bucket upper bound (exclusive)
+    int64_t mCount = 0;
 };
 
 /**
@@ -413,6 +467,11 @@ public:
      *         populated), or end of pagination.
      */
     sharedNode_vector listAllNodesByPage(const ListAllNodesParams& params, CancelToken cancelFlag);
+
+    /// Resolves roots, then aggregates matching nodes into date buckets.
+    /// See DBTableNodes::groupAllNodesByDate.
+    std::vector<DateSection> groupAllNodesByDate(const DateSectionParams& params,
+                                                 CancelToken cancelFlag);
 
     /*
      * @brief
@@ -594,10 +653,12 @@ public:
     size_t getChildScanDbThreshold() const;
 
 private:
-    // Maps params.explicitAncestor to 1..2 non-UNDEF root handles: explicit ancestor
-    // when set, otherwise default {Cloud, Vault} scope. Empty result means "no valid
-    // root resolvable" — caller must reject.
-    std::vector<NodeHandle> resolveListAllRoots(const ListAllNodesParams& params) const;
+    // Resolves params to its non-UNDEF root handles (up to 3): explicitAncestors
+    // verbatim when set, otherwise the rootnodes picked by locationScope (Cloud;
+    // +Vault if >= 1; +Rubbish if >= 2). Empty result means "no valid root
+    // resolvable" — caller must reject. Takes the base so both listAllNodesByPage
+    // and groupAllNodesByDate share this resolver.
+    std::vector<NodeHandle> resolveListAllRoots(const ListAllFilterParams& params) const;
 
     class NoKeyLogger
     {

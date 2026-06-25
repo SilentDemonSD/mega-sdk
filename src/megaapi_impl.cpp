@@ -6940,71 +6940,38 @@ int MegaSearchFilterPrivate::validateBoolFilterOption(const int value)
     }
 }
 
-void MegaListAllNodesFilterPrivate::byCategory(int mimeType)
+// Pin the public SECTION_GRANULARITY_* values to the internal enum. Same pattern
+// as the LOCATION_* asserts; bumping either side without the other would cause
+// a silent reinterpret on the boundary.
+static_assert(static_cast<int>(DateSectionGranularity::Day) ==
+                  MegaGroupNodesByDateFilter::SECTION_GRANULARITY_DAY,
+              "DateSectionGranularity::Day must mirror SECTION_GRANULARITY_DAY");
+static_assert(static_cast<int>(DateSectionGranularity::Month) ==
+                  MegaGroupNodesByDateFilter::SECTION_GRANULARITY_MONTH,
+              "DateSectionGranularity::Month must mirror SECTION_GRANULARITY_MONTH");
+static_assert(static_cast<int>(DateSectionGranularity::Year) ==
+                  MegaGroupNodesByDateFilter::SECTION_GRANULARITY_YEAR,
+              "DateSectionGranularity::Year must mirror SECTION_GRANULARITY_YEAR");
+
+static bool isSupportedTimestampOrder(int order)
 {
-    if (mimeType <= MegaApi::FILE_TYPE_DEFAULT || MegaApi::FILE_TYPE_LAST < mimeType)
+    return order == MegaApi::ORDER_MODIFICATION_ASC || order == MegaApi::ORDER_MODIFICATION_DESC;
+}
+
+void MegaListAllNodesFilterPrivate::byTimestampAnchor(int64_t startDate,
+                                                      int64_t endDate,
+                                                      int sectionOrder)
+{
+    if ((startDate == 0 && endDate == 0) || sectionOrder == -1)
     {
-        LOG_warn << "Invalid mimeType for MegaListAllNodesFilter: " << mimeType << ". Ignored.";
-        return;
+        startDate = 0;
+        endDate = 0;
+        sectionOrder = -1;
     }
-    mCategory = mimeType;
-}
 
-void MegaListAllNodesFilterPrivate::copyMegaHandleListInto(const MegaHandleList* src,
-                                                           std::vector<MegaHandle>& dst)
-{
-    dst.clear();
-    if (!src)
-        return;
-    const unsigned size = src->size();
-    for (unsigned i = 0; i < size; ++i)
-        dst.push_back(src->get(i));
-}
-
-void MegaListAllNodesFilterPrivate::byLocationHandles(const MegaHandleList* ancestorHandles)
-{
-    copyMegaHandleListInto(ancestorHandles, mLocationHandles);
-}
-
-void MegaListAllNodesFilterPrivate::byExcludeLocationHandles(const MegaHandleList* excludeHandles)
-{
-    copyMegaHandleListInto(excludeHandles, mExcludeLocationHandles);
-}
-
-void MegaListAllNodesFilterPrivate::byLocation(int scope)
-{
-    mLocation = scope;
-}
-
-MegaHandleList* MegaListAllNodesFilterPrivate::byLocationHandles() const
-{
-    auto* list = MegaHandleList::createInstance();
-    for (const MegaHandle h: mLocationHandles)
-        list->addMegaHandle(h);
-    return list;
-}
-
-MegaHandleList* MegaListAllNodesFilterPrivate::byExcludeLocationHandles() const
-{
-    auto* list = MegaHandleList::createInstance();
-    for (const MegaHandle h: mExcludeLocationHandles)
-        list->addMegaHandle(h);
-    return list;
-}
-
-void MegaListAllNodesFilterPrivate::bySensitivity(int filterOption)
-{
-    switch (filterOption)
-    {
-        case MegaListAllNodesFilter::SENSITIVITY_SHOW_ALL:
-        case MegaListAllNodesFilter::SENSITIVITY_HIDE_SENSITIVE:
-            mSensitivity = filterOption;
-            return;
-        default:
-            LOG_warn << "Invalid value for MegaListAllNodesFilter::bySensitivity: " << filterOption
-                     << ". Ignored.";
-            return;
-    }
+    mTimestampAnchorStartDate = startDate;
+    mTimestampAnchorEndDate = endDate;
+    mTimestampAnchorOrder = sectionOrder;
 }
 
 std::unique_ptr<MegaGfxProviderPrivate>
@@ -13385,13 +13352,12 @@ sharedNode_vector MegaApiImpl::searchInNodeManager(const MegaSearchFilter* filte
 // kListAllMaxLocationHandles. This translation unit sees both the duplicated
 // constants and the public-API constants, and is the natural place to enforce
 // that they stay in sync.
-static_assert(kDefaultListAllLocationScope ==
-                  MegaListAllNodesFilter::LOCATION_CLOUD_DRIVE_AND_VAULT,
+static_assert(kDefaultListAllLocationScope == MegaNodeScopeFilter::LOCATION_CLOUD_DRIVE_AND_VAULT,
               "kDefaultListAllLocationScope must mirror "
-              "MegaListAllNodesFilter::LOCATION_CLOUD_DRIVE_AND_VAULT");
-static_assert(kListAllMaxLocationHandles == MegaListAllNodesFilter::MAX_LOCATION_HANDLES,
+              "MegaNodeScopeFilter::LOCATION_CLOUD_DRIVE_AND_VAULT");
+static_assert(kListAllMaxLocationHandles == MegaNodeScopeFilter::MAX_LOCATION_HANDLES,
               "kListAllMaxLocationHandles must mirror "
-              "MegaListAllNodesFilter::MAX_LOCATION_HANDLES");
+              "MegaNodeScopeFilter::MAX_LOCATION_HANDLES");
 
 namespace
 {
@@ -13399,16 +13365,16 @@ namespace
 // it to NodeHandle, appending to `out`. Null list is treated as empty.
 bool extractListAllHandles(const MegaHandleList* listOwner,
                            const char* fieldName,
-                           std::vector<NodeHandle>& out)
+                           std::vector<NodeHandle>& out,
+                           const char* logPrefix)
 {
     if (!listOwner)
         return true;
     const unsigned n = listOwner->size();
-    if (n > MegaListAllNodesFilter::MAX_LOCATION_HANDLES)
+    if (n > MegaNodeScopeFilter::MAX_LOCATION_HANDLES)
     {
-        LOG_warn << "listAllNodesByPage: " << fieldName << " size " << n
-                 << " exceeds MAX_LOCATION_HANDLES="
-                 << MegaListAllNodesFilter::MAX_LOCATION_HANDLES;
+        LOG_warn << logPrefix << ": " << fieldName << " size " << n
+                 << " exceeds MAX_LOCATION_HANDLES=" << MegaNodeScopeFilter::MAX_LOCATION_HANDLES;
         return false;
     }
     for (unsigned i = 0; i < n; ++i)
@@ -13416,7 +13382,7 @@ bool extractListAllHandles(const MegaHandleList* listOwner,
         const MegaHandle h = listOwner->get(i);
         if (h == INVALID_HANDLE)
         {
-            LOG_warn << "listAllNodesByPage: " << fieldName
+            LOG_warn << logPrefix << ": " << fieldName
                      << " contains INVALID_HANDLE entry at position " << i;
             return false;
         }
@@ -13518,48 +13484,67 @@ std::optional<NodeSearchCursorOffset>
 }
 } // anonymous namespace
 
+bool MegaApiImpl::parseListAllFilterIntoBase(const MegaNodeScopeFilter* filter,
+                                             const char* logPrefix,
+                                             ListAllFilterParams& out) const
+{
+    if (!filter)
+    {
+        LOG_warn << logPrefix << ": filter is nullptr";
+        return false;
+    }
+
+    const int mimeType = filter->byCategory();
+    if (mimeType <= MegaApi::FILE_TYPE_DEFAULT || mimeType > MegaApi::FILE_TYPE_LAST)
+    {
+        LOG_warn << logPrefix << ": invalid byCategory value " << mimeType;
+        return false;
+    }
+
+    const int locationScope = filter->byLocation();
+    switch (locationScope)
+    {
+        case MegaNodeScopeFilter::LOCATION_CLOUD_DRIVE:
+        case MegaNodeScopeFilter::LOCATION_CLOUD_DRIVE_AND_VAULT:
+        case MegaNodeScopeFilter::LOCATION_CLOUD_DRIVE_VAULT_AND_RUBBISH:
+            break;
+        default:
+            LOG_warn << logPrefix << ": invalid byLocation value " << locationScope;
+            return false;
+    }
+
+    std::vector<NodeHandle> explicitAncestors;
+    std::vector<NodeHandle> excludeHandles;
+    std::unique_ptr<MegaHandleList> includeList(filter->byLocationHandles());
+    if (!extractListAllHandles(includeList.get(),
+                               "byLocationHandles",
+                               explicitAncestors,
+                               logPrefix))
+        return false;
+    std::unique_ptr<MegaHandleList> excludeList(filter->byExcludeLocationHandles());
+    if (!extractListAllHandles(excludeList.get(),
+                               "byExcludeLocationHandles",
+                               excludeHandles,
+                               logPrefix))
+        return false;
+
+    out.mimeType = static_cast<MimeType_t>(mimeType);
+    out.excludeSensitive =
+        (filter->bySensitivity() == MegaNodeScopeFilter::SENSITIVITY_HIDE_SENSITIVE);
+    out.explicitAncestors = std::move(explicitAncestors);
+    out.excludeHandles = std::move(excludeHandles);
+    out.locationScope = locationScope;
+    return true;
+}
+
 std::optional<ListAllNodesParams>
     MegaApiImpl::buildListAllParams(const MegaListAllNodesFilter* filter,
                                     int order,
                                     size_t maxElements,
                                     const MegaSearchCursorOffset* megaCursor) const
 {
-    if (!filter)
-    {
-        LOG_warn << "listAllNodesByPage: filter is nullptr";
-        return std::nullopt;
-    }
-
-    const int mimeType = filter->byCategory();
-    if (mimeType <= MegaApi::FILE_TYPE_DEFAULT || mimeType > MegaApi::FILE_TYPE_LAST)
-    {
-        LOG_warn << "listAllNodesByPage: invalid byCategory value " << mimeType;
-        return std::nullopt;
-    }
-
-    const bool excludeSensitive =
-        (filter->bySensitivity() == MegaListAllNodesFilter::SENSITIVITY_HIDE_SENSITIVE);
-
-    // Validate byLocation scope range early.
-    const int locationScope = filter->byLocation();
-    switch (locationScope)
-    {
-        case MegaListAllNodesFilter::LOCATION_CLOUD_DRIVE:
-        case MegaListAllNodesFilter::LOCATION_CLOUD_DRIVE_AND_VAULT:
-        case MegaListAllNodesFilter::LOCATION_CLOUD_DRIVE_VAULT_AND_RUBBISH:
-            break;
-        default:
-            LOG_warn << "listAllNodesByPage: invalid byLocation value " << locationScope;
-            return std::nullopt;
-    }
-
-    std::vector<NodeHandle> explicitAncestors;
-    std::vector<NodeHandle> excludeHandles;
-    std::unique_ptr<MegaHandleList> includeList(filter->byLocationHandles());
-    if (!extractListAllHandles(includeList.get(), "byLocationHandles", explicitAncestors))
-        return std::nullopt;
-    std::unique_ptr<MegaHandleList> excludeList(filter->byExcludeLocationHandles());
-    if (!extractListAllHandles(excludeList.get(), "byExcludeLocationHandles", excludeHandles))
+    ListAllNodesParams params;
+    if (!parseListAllFilterIntoBase(filter, "listAllNodesByPage", params))
         return std::nullopt;
 
     // ── Order validation (independent of cursor presence) ───────────────────
@@ -13580,26 +13565,95 @@ std::optional<ListAllNodesParams>
             LOG_warn << "listAllNodesByPage: unsupported order value: " << order;
             return std::nullopt;
     }
-
-    // ── Cursor validation (only when supplied) ──────────────────────────────
-    std::optional<NodeSearchCursorOffset> cursor;
-    if (megaCursor)
-    {
-        cursor = buildNodeSearchCursorOffset(*megaCursor, order);
-        if (!cursor)
-            return std::nullopt;
-    }
-
-    ListAllNodesParams params;
-    params.mimeType = static_cast<MimeType_t>(mimeType);
     params.order = order;
     params.maxElements = maxElements;
-    params.excludeSensitive = excludeSensitive;
-    params.cursor = std::move(cursor);
-    params.explicitAncestors = std::move(explicitAncestors);
-    params.excludeHandles = std::move(excludeHandles);
-    params.locationScope = locationScope;
+
+    // ── Cursor validation (only when supplied) ──────────────────────────────
+    if (megaCursor)
+    {
+        auto cursor = buildNodeSearchCursorOffset(*megaCursor, order);
+        if (!cursor)
+            return std::nullopt;
+        params.cursor = std::move(cursor);
+    }
+
+    {
+        const int64_t anchorStart = filter->byTimestampAnchorStartDate();
+        const int64_t anchorEnd = filter->byTimestampAnchorEndDate();
+        const int anchorOrder = filter->byTimestampAnchorOrder();
+        const bool anchorSet = (anchorStart != 0 || anchorEnd != 0 || anchorOrder != -1);
+
+        if (anchorSet)
+        {
+            if (!isSupportedTimestampOrder(anchorOrder))
+            {
+                LOG_warn << "listAllNodesByPage: unsupported byTimestampAnchor sectionOrder "
+                         << anchorOrder;
+                return std::nullopt;
+            }
+
+            if (anchorStart < 0 || anchorEnd < 0)
+            {
+                LOG_warn << "listAllNodesByPage: byTimestampAnchor has a negative bound";
+                return std::nullopt;
+            }
+
+            if (anchorStart >= anchorEnd)
+            {
+                LOG_warn << "listAllNodesByPage: byTimestampAnchor startDate >= endDate";
+                return std::nullopt;
+            }
+
+            TimestampAnchorFilter ta;
+            ta.mOrder = anchorOrder;
+            ta.mStartSeconds = anchorStart;
+            ta.mEndSeconds = anchorEnd;
+            params.timestampAnchor = ta;
+        }
+    }
+
     return params;
+}
+
+std::optional<DateSectionParams>
+    MegaApiImpl::buildDateSectionParams(const MegaGroupNodesByDateFilter* filter, int order) const
+{
+    // Sole order gate on this path — keeps the builder safe for any future
+    // internal caller, not just the API entry.
+    if (!isSupportedTimestampOrder(order))
+    {
+        LOG_warn << "groupAllNodesByDate: unsupported order " << order;
+        return std::nullopt;
+    }
+
+    DateSectionParams params;
+    // parseListAllFilterIntoBase null-checks the filter, so byGranularity() below
+    // is only read once it's known non-null.
+    if (!parseListAllFilterIntoBase(filter, "groupAllNodesByDate", params))
+        return std::nullopt;
+
+    const int granularity = filter->byGranularity();
+    if (granularity < MegaGroupNodesByDateFilter::SECTION_GRANULARITY_DAY ||
+        granularity > MegaGroupNodesByDateFilter::SECTION_GRANULARITY_YEAR)
+    {
+        LOG_warn << "groupAllNodesByDate: invalid granularity " << granularity;
+        return std::nullopt;
+    }
+
+    params.order = order;
+    params.granularity = static_cast<DateSectionGranularity>(granularity);
+    return params;
+}
+
+MegaNodeList* MegaApiImpl::runListAllNodesByPage(const std::optional<ListAllNodesParams>& params,
+                                                 CancelToken cancelToken)
+{
+    if (!params)
+        return new MegaNodeListPrivate();
+
+    SdkMutexGuard g(sdkMutex);
+    sharedNode_vector results = client->mNodeManager.listAllNodesByPage(*params, cancelToken);
+    return new MegaNodeListPrivate(results);
 }
 
 MegaNodeList* MegaApiImpl::listAllNodesByPage(const MegaListAllNodesFilter* filter,
@@ -13608,13 +13662,45 @@ MegaNodeList* MegaApiImpl::listAllNodesByPage(const MegaListAllNodesFilter* filt
                                               size_t maxElements,
                                               const MegaSearchCursorOffset* megaCursor)
 {
-    auto params = buildListAllParams(filter, order, maxElements, megaCursor);
-    if (!params)
+    return runListAllNodesByPage(buildListAllParams(filter, order, maxElements, megaCursor),
+                                 cancelToken);
+}
+
+MegaNodeList* MegaApiImpl::listAllNodesByPageAtOffset(const MegaListAllNodesFilter* filter,
+                                                      int order,
+                                                      CancelToken cancelToken,
+                                                      size_t maxElements,
+                                                      int64_t offset)
+{
+    if (offset < 0)
+    {
+        LOG_warn << "listAllNodesByPageAtOffset: negative offset (" << offset << ")";
         return new MegaNodeListPrivate();
+    }
+
+    auto params = buildListAllParams(filter, order, maxElements, /*cursor=*/nullptr);
+    if (params)
+        params->offset = offset;
+    return runListAllNodesByPage(params, cancelToken);
+}
+
+MegaDateSectionList* MegaApiImpl::groupAllNodesByDate(const MegaGroupNodesByDateFilter* filter,
+                                                      int order,
+                                                      CancelToken cancelToken)
+{
+    auto paramsOpt = buildDateSectionParams(filter, order);
+    if (!paramsOpt)
+        return new MegaDateSectionListPrivate();
 
     SdkMutexGuard g(sdkMutex);
-    sharedNode_vector results = client->mNodeManager.listAllNodesByPage(*params, cancelToken);
-    return new MegaNodeListPrivate(results);
+    std::vector<DateSection> sections =
+        client->mNodeManager.groupAllNodesByDate(*paramsOpt, cancelToken);
+
+    std::vector<MegaDateSectionPrivate> result;
+    result.reserve(sections.size());
+    for (auto& s: sections)
+        result.emplace_back(std::move(s.mGroupId), s.mStartDate, s.mEndDate, s.mCount);
+    return new MegaDateSectionListPrivate(std::move(result));
 }
 
 long long MegaApiImpl::getSize(MegaNode *n)

@@ -9,6 +9,7 @@
 #include <mega/db/sqlite.h>
 #include <mega/localpath.h>
 
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <mega.h>
@@ -979,6 +980,8 @@ TEST(Sqlite, MigrationOpenOnAlreadyMigratedDbIsIdempotent)
 
 #ifdef USE_SQLITE
 
+#include "CacheKeyCombinations.h"
+#include "SearchByPageTestBase.h"
 #include "utils.h"
 
 #include <mega/megaapp.h>
@@ -990,407 +993,7 @@ namespace fs = std::filesystem;
 namespace
 {
 
-// Convenience helper for building ListAllNodesParams in tests. Defaults to the
-// "Cloud + Vault" scope (explicitAncestors empty, locationScope = 1); tests
-// that exercise a specific subtree pass one or more explicit ancestor handles.
-ListAllNodesParams makeParams(MimeType_t mime,
-                              int order,
-                              size_t maxElements,
-                              bool excludeSensitive = false,
-                              std::optional<NodeSearchCursorOffset> cursor = std::nullopt,
-                              std::vector<NodeHandle> explicitAncestors = {},
-                              std::vector<NodeHandle> excludeHandles = {},
-                              int locationScope = 1)
-{
-    ListAllNodesParams p;
-    p.mimeType = mime;
-    p.order = order;
-    p.maxElements = maxElements;
-    p.excludeSensitive = excludeSensitive;
-    p.cursor = std::move(cursor);
-    p.explicitAncestors = std::move(explicitAncestors);
-    p.excludeHandles = std::move(excludeHandles);
-    p.locationScope = locationScope;
-    return p;
-}
-
-// Collect the handles from a NodeManager-layer result (sharedNode_vector) into
-// a std::set for set-membership assertions. Unordered semantics, dedupes
-// duplicates if any. Used by Group G filter-semantics tests.
-std::set<NodeHandle> handlesOf(const sharedNode_vector& nodes)
-{
-    std::set<NodeHandle> result;
-    for (const auto& n: nodes)
-        result.insert(n->nodeHandle());
-    return result;
-}
-
-// DbTable-layer overload: rows are (handle, serialised) pairs.
-std::set<NodeHandle> handlesOf(const std::vector<std::pair<NodeHandle, NodeSerialized>>& rows)
-{
-    std::set<NodeHandle> result;
-    for (const auto& p: rows)
-        result.insert(p.first);
-    return result;
-}
-
-// ─── Per-node metadata captured at insertion time ────────────────────────────
-// Used to build NodeSearchCursorOffset without relying on attribute decryption.
-struct NodeMeta
-{
-    std::string name;
-    nodetype_t type = FILENODE;
-    int64_t size = 0;
-    int64_t mtime = 0;
-    int label = 0; ///< 0 = unlabelled, 1-7 = colour
-    int fav = 0; ///< 0 or 1
-    bool sensitive = false; ///< sets the "sen" attribute when true
-};
-
-// Attribute name IDs used across multiple test fixtures and test cases.
-const nameid kNameId = AttrMap::string2nameid("n");
-const nameid kFavId = AttrMap::string2nameid("fav");
-const nameid kLabelId = AttrMap::string2nameid("lbl");
-
-// Sort order + page size pair used by parameterised pagination tests.
-struct OrderAndPageSize
-{
-    int order;
-    size_t pageSize;
-};
-
-// ─── Shared test fixture ───────────────────────────────────────────────────────
-/**
- * Base fixture used by ListAllNodesByPageTest and GroupedListAllNodesByPageTest.
- *
- * Dataset (created in SetUp):
- *   ROOT folder
- *   5 sub-folders   "Folder_A" … "Folder_E"
- *   20 file nodes   "file_01.txt" … "file_20.txt"
- *     size  = i * 100  (i = 1 … 20)
- *     mtime = 1'700'000'000 + i
- *     label = i % 4      (0 = unlabelled, 1 / 2 / 3 cycling)
- *     fav   = (i % 5 == 0) ? 1 : 0   (files 5, 10, 15, 20)
- */
-class SearchByPageTest: public ::testing::Test
-{
-protected:
-    mega::MegaApp mApp;
-    NodeManager::MissingParentNodes mMissingParentNodes;
-    std::shared_ptr<MegaClient> mClient;
-    fs::path mTestDir;
-
-    uint64_t mNextHandle = 1;
-    NodeHandle mRootHandle;
-    std::map<handle, NodeMeta> mMeta; ///< Metadata for all inserted nodes
-
-    static constexpr int NUM_FILES = 20;
-    static constexpr int NUM_FOLDERS = 5;
-
-    // Handles exposed for the Cloud-Drive / version / sensitive filter tests.
-    // These reference the jpg + Vault/Rubbish subtrees built by populateDB().
-    NodeHandle hFilesRoot; // alias of mRootHandle, kept for readability
-    NodeHandle hVault, hRubbish;
-    NodeHandle hNormalFolder, hSensFolder;
-    NodeHandle hClean, hSelfSensitive, hHead, hVersionV1, hVersionV2, hUnderSens;
-    NodeHandle hVaultFile, hRubbishFile;
-
-    void SetUp() override
-    {
-        mTestDir = fs::current_path() / "search_by_page_test";
-        // Remove any leftover directory from a previous crashed run to avoid
-        // SQLite "database is locked" errors caused by stale WAL files.
-        fs::remove_all(mTestDir);
-        fs::create_directories(mTestDir);
-
-        auto* dbAccess = new SqliteDbAccess(LocalPath::fromAbsolutePath(path_u8string(mTestDir)));
-
-        mClient = mt::makeClient(mApp, dbAccess);
-        mClient->sid =
-            "AWA5YAbtb4JO-y2zWxmKZpSe5-6XM7CTEkA-3Nv7J4byQUpOazdfSC1ZUFlS-kah76gPKUEkTF9g7MeE";
-        mClient->opensctable();
-
-        populateDB();
-
-        if (auto* sa = dynamic_cast<SqliteAccountState*>(mClient->sctable.get()))
-            sa->createIndexes(/*enableSearch=*/true, /*enableLexi=*/true);
-    }
-
-    void TearDown() override
-    {
-        mClient.reset();
-        fs::remove_all(mTestDir);
-    }
-
-    // ── Low-level node factory ────────────────────────────────────────────────
-    //
-    // `isFetching` is forwarded to NodeManager::addNode and defaults to true
-    // (historical behaviour). Pass false when building subtrees whose
-    // relationships must survive in RAM — notably file-version chains, whose
-    // FLAGS_IS_VERSION bit requires the immediate parent pointer to stay live
-    // instead of being evicted through the single-slot mNodeToWriteInDb buffer.
-    std::shared_ptr<Node> addNode(nodetype_t type,
-                                  std::shared_ptr<Node> parent,
-                                  const NodeMeta& meta,
-                                  bool isFetching = true)
-    {
-        NodeHandle h = NodeHandle().set6byte(mNextHandle++);
-        Node& ref = mt::makeNode(*mClient, type, h, parent.get());
-        auto node = std::shared_ptr<Node>(&ref);
-
-        node->attrs.map[kNameId] = meta.name;
-
-        if (type == FILENODE)
-        {
-            node->size = static_cast<m_off_t>(meta.size);
-            node->mtime = static_cast<m_time_t>(meta.mtime);
-            node->ctime = node->mtime;
-            node->crc[0] = static_cast<int32_t>(mNextHandle);
-            node->isvalid = true;
-            node->serializefingerprint(&node->attrs.map['c']);
-            node->setfingerprint();
-
-            // sizeVirtual in the DB is derived from NodeCounter.storage.
-            // Without this, ORDER BY sizeVirtual returns 0 for all files and
-            // cursor-based pagination for SIZE sorts would not advance.
-            NodeCounter nc;
-            nc.files = 1;
-            nc.storage = meta.size;
-            node->setCounter(nc);
-        }
-
-        if (meta.fav)
-            node->attrs.map[kFavId] = "1";
-
-        if (meta.label > 0)
-            node->attrs.map[kLabelId] = std::to_string(meta.label);
-
-        if (meta.sensitive)
-            node->attrs.map[AttrMap::string2nameid("sen")] = "1";
-
-        mClient->mNodeManager.addNode(node,
-                                      /*notify=*/false,
-                                      isFetching,
-                                      mMissingParentNodes);
-        mClient->mNodeManager.saveNodeInDb(node.get());
-
-        auto& stored = mMeta[h.as8byte()] = meta;
-        stored.type = type;
-        return node;
-    }
-
-    // ── Dataset construction ──────────────────────────────────────────────────
-    //
-    // Builds the shared base dataset used by every SearchByPageTest subclass:
-    //
-    //   CloudDrive (ROOTNODE, mRootHandle/hFilesRoot)
-    //   ├── Folder_A..E                           (5 folders)
-    //   ├── file_01.txt .. file_20.txt            (20 documents)
-    //   ├── normal_folder/                        (non-sensitive)
-    //   │   ├── clean.jpg
-    //   │   ├── self_sensitive.jpg   [sen=1]
-    //   │   └── head.jpg                          (HEAD)
-    //   │       ├── head.jpg         (version v1, FILENODE child of FILENODE)
-    //   │       └── head.jpg         (version v2)
-    //   └── sens_folder/             [sen=1]      (sensitive ancestor)
-    //       └── under_sens.jpg
-    //   Vault (VAULTNODE) / vault_file.jpg
-    //   Rubbish (RUBBISHNODE) / rubbish_file.jpg
-    //
-    // The .jpg / Vault / Rubbish additions are transparent to pagination tests
-    // that query single-mime DOCUMENT — Vault/Rubbish roots fall outside the
-    // Cloud-Drive-rooted filter, jpg files don't match MIME_TYPE_DOCUMENT, and
-    // version children are always excluded by listAllNodesByPage.
-    virtual void populateDB()
-    {
-        NodeMeta rootMeta{"ROOT", ROOTNODE, 0, 0, 0, 0};
-        auto root = addNode(ROOTNODE, nullptr, rootMeta);
-        mRootHandle = root->nodeHandle();
-        hFilesRoot = mRootHandle;
-
-        const std::string alpha = "ABCDE";
-        for (int i = 0; i < NUM_FOLDERS; ++i)
-        {
-            NodeMeta fm;
-            fm.name = "Folder_" + std::string(1, alpha[static_cast<size_t>(i)]);
-            fm.type = FOLDERNODE;
-            addNode(FOLDERNODE, root, fm);
-        }
-
-        // File nodes
-        for (int i = 1; i <= NUM_FILES; ++i)
-        {
-            NodeMeta fm;
-            // Zero-padded name so lexicographic order == numeric order
-            const std::string pad = (i < 10 ? "0" : "");
-            fm.name = "file_" + pad + std::to_string(i) + ".txt";
-            fm.size = static_cast<int64_t>(i) * 100;
-            fm.mtime = 1'700'000'000LL + i;
-            fm.label = i % 4; // 0 = unlabelled, 1/2/3 cycling
-            fm.fav = (i % 5 == 0) ? 1 : 0;
-            addNode(FILENODE, root, fm);
-        }
-
-        // Vault + Rubbish roots. NodeManager auto-registers them via
-        // setrootnode_internal so the rootnodes.{vault,rubbish} columns are set.
-        auto vault = addNode(VAULTNODE,
-                             nullptr,
-                             NodeMeta{"Vault", VAULTNODE},
-                             /*isFetching=*/false);
-        auto rubbish = addNode(RUBBISHNODE,
-                               nullptr,
-                               NodeMeta{"Rubbish", RUBBISHNODE},
-                               /*isFetching=*/false);
-        hVault = vault->nodeHandle();
-        hRubbish = rubbish->nodeHandle();
-
-        // Folders under Cloud Drive root. sens_folder carries the SENS bit so
-        // its descendants must be filtered out when excludeSensitive=true.
-        NodeMeta sensFolderMeta{"sens_folder", FOLDERNODE};
-        sensFolderMeta.sensitive = true;
-        auto normal = addNode(FOLDERNODE,
-                              root,
-                              NodeMeta{"normal_folder", FOLDERNODE},
-                              /*isFetching=*/false);
-        auto sens = addNode(FOLDERNODE, root, sensFolderMeta, /*isFetching=*/false);
-        hNormalFolder = normal->nodeHandle();
-        hSensFolder = sens->nodeHandle();
-
-        const int64_t baseMtime = 1'800'000'000LL;
-
-        // isFetching=false keeps HEAD + version children in RAM so
-        // FLAGS_IS_VERSION can still be computed from the parent pointer.
-        hClean = addNode(FILENODE,
-                         normal,
-                         NodeMeta{"clean.jpg", FILENODE, 100, baseMtime + 1},
-                         /*isFetching=*/false)
-                     ->nodeHandle();
-
-        NodeMeta selfSensMeta{"self_sensitive.jpg", FILENODE, 200, baseMtime + 2};
-        selfSensMeta.sensitive = true;
-        hSelfSensitive =
-            addNode(FILENODE, normal, selfSensMeta, /*isFetching=*/false)->nodeHandle();
-
-        auto head = addNode(FILENODE,
-                            normal,
-                            NodeMeta{"head.jpg", FILENODE, 300, baseMtime + 3},
-                            /*isFetching=*/false);
-        hHead = head->nodeHandle();
-        hVersionV1 = addNode(FILENODE,
-                             head,
-                             NodeMeta{"head.jpg", FILENODE, 290, baseMtime + 2},
-                             /*isFetching=*/false)
-                         ->nodeHandle();
-        hVersionV2 = addNode(FILENODE,
-                             head,
-                             NodeMeta{"head.jpg", FILENODE, 280, baseMtime + 1},
-                             /*isFetching=*/false)
-                         ->nodeHandle();
-
-        hUnderSens = addNode(FILENODE,
-                             sens,
-                             NodeMeta{"under_sens.jpg", FILENODE, 400, baseMtime + 4},
-                             /*isFetching=*/false)
-                         ->nodeHandle();
-
-        hVaultFile = addNode(FILENODE,
-                             vault,
-                             NodeMeta{"vault_file.jpg", FILENODE, 500, baseMtime + 5},
-                             /*isFetching=*/false)
-                         ->nodeHandle();
-        hRubbishFile = addNode(FILENODE,
-                               rubbish,
-                               NodeMeta{"rubbish_file.jpg", FILENODE, 600, baseMtime + 6},
-                               /*isFetching=*/false)
-                           ->nodeHandle();
-    }
-
-    // Single call, no limit, no cursor — returns every distinct handle matching
-    // @p mime (after Cloud+Vault/version/optional-sensitive filtering).
-    std::set<NodeHandle> allMatchesAsSet(MimeType_t mime, int order, bool excludeSensitive) const
-    {
-        auto nodes = mClient->mNodeManager.listAllNodesByPage(
-            makeParams(mime, order, /*maxElements=*/0, excludeSensitive),
-            CancelToken{});
-        std::set<NodeHandle> out;
-        for (const auto& n: nodes)
-            out.insert(n->nodeHandle());
-        return out;
-    }
-
-    // ── Multi-page accumulation helper ─────────────────────────────────────────
-    // Accumulates all pages until empty, starting from `startCursor` (default:
-    // first page). Bounded to mMeta.size()+2 iterations so that a stuck cursor
-    // produces a test failure rather than an infinite hang.
-    std::vector<NodeHandle>
-        collectAllByPage(int order,
-                         size_t pageSize,
-                         MimeType_t mimeType,
-                         std::optional<NodeSearchCursorOffset> startCursor = std::nullopt,
-                         bool excludeSensitive = false) const
-    {
-        std::vector<NodeHandle> result;
-        std::optional<NodeSearchCursorOffset> cursor = startCursor;
-
-        const size_t maxPages = mMeta.size() + 2;
-        size_t pageCount = 0;
-
-        while (pageCount < maxPages)
-        {
-            ++pageCount;
-            auto page = mClient->mNodeManager.listAllNodesByPage(
-                makeParams(mimeType, order, pageSize, excludeSensitive, cursor),
-                CancelToken{});
-            if (page.empty())
-                break;
-            for (const auto& n: page)
-                result.push_back(n->nodeHandle());
-            cursor = cursorFor(page.back()->nodeHandle(), order);
-        }
-
-        if (pageCount >= maxPages)
-        {
-            ADD_FAILURE() << "collectAllByPage: exceeded " << maxPages
-                          << " pages for order=" << order
-                          << " – cursor likely not advancing (possible infinite loop)";
-        }
-
-        return result;
-    }
-
-    // ── Build a cursor anchored at node h for the given sort order ────────────
-    NodeSearchCursorOffset cursorFor(NodeHandle h, int order) const
-    {
-        const NodeMeta& m = mMeta.at(h.as8byte());
-
-        NodeSearchCursorOffset c;
-        c.mLastName = m.name;
-        c.mLastHandle = h.as8byte();
-
-        switch (order)
-        {
-            case OrderByClause::SIZE_ASC:
-            case OrderByClause::SIZE_DESC:
-                c.mLastSize = m.size;
-                break;
-            case OrderByClause::MTIME_ASC:
-            case OrderByClause::MTIME_DESC:
-                c.mLastMtime = m.mtime;
-                break;
-            case OrderByClause::LABEL_ASC:
-            case OrderByClause::LABEL_DESC:
-                c.mLastLabel = m.label;
-                break;
-            case OrderByClause::FAV_ASC:
-            case OrderByClause::FAV_DESC:
-                c.mLastFav = m.fav;
-                break;
-            default:
-                break;
-        }
-        return c;
-    }
-};
+using namespace mega::pagetest;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  listAllNodesByPage – cursor-based global pagination tests
@@ -3363,6 +2966,530 @@ TEST(Sqlite, ResumeRespectsIndexEnableFlags)
             << "search index missing despite search=on";
         EXPECT_EQ(1u, set.count("lexicographics3keyindex")) << "lexi index missing despite lexi=on";
     }
+}
+
+// ─── Offset windowing ────────────────────────────────────────────────────────
+class ListAllNodesByPageOffsetTest: public mega::pagetest::SearchByPageTest
+{
+protected:
+    std::vector<NodeHandle> reference(int order, MimeType_t mime = MIME_TYPE_DOCUMENT) const
+    {
+        return collectAllByPage(order, /*pageSize=*/4, mime);
+    }
+
+    std::vector<NodeHandle>
+        offsetWindow(int order, size_t limit, int64_t offset, MimeType_t mime = MIME_TYPE_DOCUMENT)
+    {
+        auto nodes = mClient->mNodeManager.listAllNodesByPage(
+            mega::pagetest::makeParams(mime, order, limit, false, std::nullopt, {}, {}, 1, offset),
+            CancelToken{});
+        std::vector<NodeHandle> out;
+        for (const auto& n: nodes)
+            out.push_back(n->nodeHandle());
+        return out;
+    }
+
+    // Returns handles in the order returned by listAllNodesByPage for the given params.
+    std::vector<NodeHandle> handlesOfParams(const ListAllNodesParams& p)
+    {
+        auto nodes = mClient->mNodeManager.listAllNodesByPage(p, CancelToken{});
+        std::vector<NodeHandle> out;
+        for (const auto& n: nodes)
+            out.push_back(n->nodeHandle());
+        return out;
+    }
+};
+
+TEST_F(ListAllNodesByPageOffsetTest, Offset_Mid_SkipsExactly)
+{
+    const auto ref = reference(OrderByClause::DEFAULT_ASC);
+    ASSERT_GE(ref.size(), 7u);
+    const std::vector<NodeHandle> expected(ref.begin() + 3, ref.begin() + 7);
+
+    EXPECT_EQ(offsetWindow(OrderByClause::DEFAULT_ASC, /*limit=*/4, /*offset=*/3), expected);
+}
+
+// Grouped-mime offset, single dominant route. Uses MIME_TYPE_ALL_VISUAL_MEDIA
+// (grouped path: UNION ALL CTE over MIME_TYPE_PHOTO + MIME_TYPE_VIDEO routes),
+// but the base fixture has 5 MIME_TYPE_PHOTO and 0 MIME_TYPE_VIDEO nodes, so only
+// the PHOTO route is non-empty here. With offset >= limit, the outer OFFSET skips
+// past what a wrongly-bound inner CTE would supply, so this catches the two
+// inner-LIMIT binding bugs: under-fetch (LIMIT pageSize instead of offset+pageSize
+// → outer OFFSET falls short → empty/partial slice) and double-OFFSET (inner also
+// applying OFFSET → outer over-skips). It does NOT exercise cross-route merge
+// interleave (one non-empty route) — that is covered by
+// Offset_GroupedMime_DominantRoute_CrossesBoundary.
+TEST_F(ListAllNodesByPageOffsetTest, Offset_GroupedMime_MatchesReferenceSlice)
+{
+    const int order = OrderByClause::MTIME_DESC;
+    const auto ref = reference(order, MIME_TYPE_ALL_VISUAL_MEDIA);
+    ASSERT_GE(ref.size(), 4u) << "need >=4 visual-media nodes in the fixture";
+
+    // offset >= limit: outer OFFSET exposes any inner-LIMIT under-fetch / double-OFFSET.
+    EXPECT_EQ(offsetWindow(order, /*limit=*/2, /*offset=*/2, MIME_TYPE_ALL_VISUAL_MEDIA),
+              std::vector<NodeHandle>(ref.begin() + 2, ref.begin() + 4));
+    EXPECT_EQ(offsetWindow(order, /*limit=*/3, /*offset=*/1, MIME_TYPE_ALL_VISUAL_MEDIA),
+              std::vector<NodeHandle>(ref.begin() + 1, ref.begin() + 4));
+}
+
+TEST_F(ListAllNodesByPageOffsetTest, AllOrders_OffsetMatchesReferenceSlice)
+{
+    const std::vector<int> orders = {
+        OrderByClause::DEFAULT_ASC,
+        OrderByClause::DEFAULT_DESC,
+        OrderByClause::SIZE_ASC,
+        OrderByClause::SIZE_DESC,
+        OrderByClause::MTIME_ASC,
+        OrderByClause::MTIME_DESC,
+        OrderByClause::LABEL_ASC,
+        OrderByClause::LABEL_DESC,
+        OrderByClause::FAV_ASC,
+        OrderByClause::FAV_DESC,
+    };
+
+    for (int order: orders)
+    {
+        const auto ref = reference(order);
+        const size_t len = ref.size();
+        ASSERT_GT(len, 0u) << "order=" << order;
+
+        const std::vector<int64_t> offsets = {0,
+                                              1,
+                                              static_cast<int64_t>(len / 2),
+                                              static_cast<int64_t>(len) - 1,
+                                              static_cast<int64_t>(len),
+                                              static_cast<int64_t>(len) + 5};
+        const std::vector<size_t> limits = {1, 3, len, 0 /* no limit */};
+
+        for (int64_t k: offsets)
+        {
+            if (k < 0)
+                continue;
+            for (size_t l: limits)
+            {
+                const size_t from = std::min(static_cast<size_t>(k), len);
+                const size_t count = (l == 0) ? (len - from) : std::min(l, len - from);
+                const std::vector<NodeHandle> expected(
+                    ref.begin() + static_cast<std::ptrdiff_t>(from),
+                    ref.begin() + static_cast<std::ptrdiff_t>(from + count));
+                EXPECT_EQ(offsetWindow(order, l, k), expected)
+                    << "order=" << order << " offset=" << k << " limit=" << l;
+            }
+        }
+    }
+}
+
+TEST_F(ListAllNodesByPageOffsetTest, Offset_Zero_EqualsNoOffset)
+{
+    const auto noOffset = offsetWindow(OrderByClause::MTIME_DESC, /*limit=*/5, /*offset=*/0);
+    const auto ref = reference(OrderByClause::MTIME_DESC);
+    ASSERT_GE(ref.size(), 5u);
+    const std::vector<NodeHandle> first5(ref.begin(), ref.begin() + 5);
+    EXPECT_EQ(noOffset, first5);
+}
+
+TEST_F(ListAllNodesByPageOffsetTest, Offset_BeyondEnd_ReturnsEmpty)
+{
+    EXPECT_TRUE(offsetWindow(OrderByClause::DEFAULT_ASC, /*limit=*/5, /*offset=*/100).empty());
+}
+
+// A negative offset is rejected at the engine entry (mirrors the cursor-exclusivity
+// guard): rather than let SQLite clamp a negative OFFSET to 0 and emit a full
+// unwindowed page, SqliteAccountState::listAllNodesByPage returns no rows. Exercised
+// here directly through NodeManager, bypassing the public wrapper's own >=0 check.
+TEST_F(ListAllNodesByPageOffsetTest, Offset_Negative_ReturnsEmpty)
+{
+    EXPECT_TRUE(offsetWindow(OrderByClause::DEFAULT_ASC, /*limit=*/5, /*offset=*/-1).empty());
+}
+
+// A cursor combined with a non-zero offset is rejected at the engine entry: the two
+// pagination modes are mutually exclusive. (offset==0 is a no-op and stays allowed.)
+TEST_F(ListAllNodesByPageOffsetTest, Offset_WithCursor_Rejected)
+{
+    const int order = OrderByClause::DEFAULT_ASC;
+    auto p = mega::pagetest::makeParams(MIME_TYPE_PHOTO,
+                                        order,
+                                        /*maxElements=*/5,
+                                        false,
+                                        cursorFor(hClean, order),
+                                        {},
+                                        {},
+                                        1,
+                                        /*offset=*/1);
+    EXPECT_TRUE(handlesOfParams(p).empty());
+}
+
+TEST_F(ListAllNodesByPageOffsetTest, Offset_MaxElementsZero_SkipsThenAll)
+{
+    const auto ref = reference(OrderByClause::DEFAULT_ASC);
+    ASSERT_GE(ref.size(), 5u);
+    const std::vector<NodeHandle> tail(ref.begin() + 4, ref.end());
+    EXPECT_EQ(offsetWindow(OrderByClause::DEFAULT_ASC, /*limit=*/0, /*offset=*/4), tail);
+}
+
+TEST_F(ListAllNodesByPageOffsetTest, Offset_LastPartialWindow)
+{
+    const auto ref = reference(OrderByClause::DEFAULT_ASC);
+    const size_t len = ref.size();
+    ASSERT_GE(len, 2u);
+    const std::vector<NodeHandle> last2(ref.end() - 2, ref.end());
+    EXPECT_EQ(offsetWindow(OrderByClause::DEFAULT_ASC,
+                           /*limit=*/5,
+                           /*offset=*/static_cast<int64_t>(len) - 2),
+              last2);
+}
+
+// Offset + excludeSensitive filter: window at offset=1 equals reference[1..2).
+// Reference uses the same filter (excludeSensitive=true, MTIME_DESC, photos).
+// Base fixture has 3 photos visible under default scope with sens filtered out:
+//   clean.jpg (baseMtime+1), head.jpg (baseMtime+3), vault_file.jpg (baseMtime+5).
+TEST_F(ListAllNodesByPageOffsetTest, Offset_ExcludeSensitive_Slice)
+{
+    const int order = OrderByClause::MTIME_DESC;
+    const auto ref = collectAllByPage(order,
+                                      /*pageSize=*/4,
+                                      MIME_TYPE_PHOTO,
+                                      /*startCursor=*/std::nullopt,
+                                      /*excludeSensitive=*/true);
+    ASSERT_GE(ref.size(), 2u);
+    auto got = handlesOfParams(mega::pagetest::makeParams(MIME_TYPE_PHOTO,
+                                                          order,
+                                                          /*maxElements=*/1,
+                                                          /*excludeSensitive=*/true,
+                                                          std::nullopt,
+                                                          {},
+                                                          {},
+                                                          1,
+                                                          /*offset=*/1));
+    EXPECT_EQ(got, std::vector<NodeHandle>(ref.begin() + 1, ref.begin() + 2));
+}
+
+// Offset + multi-root union: window at offset=1, limit=2 equals reference[1..3).
+// Explicit roots {hFilesRoot, hVault, hRubbish} pull in all 5 photos.
+TEST_F(ListAllNodesByPageOffsetTest, Offset_MultiRootUnion_Slice)
+{
+    const int order = OrderByClause::MTIME_ASC;
+    const std::vector<NodeHandle> roots{hFilesRoot, hVault, hRubbish};
+    const auto ref = handlesOfParams(mega::pagetest::makeParams(MIME_TYPE_PHOTO,
+                                                                order,
+                                                                /*maxElements=*/0,
+                                                                false,
+                                                                std::nullopt,
+                                                                roots,
+                                                                {},
+                                                                1,
+                                                                /*offset=*/0));
+    ASSERT_GE(ref.size(), 3u);
+    auto got = handlesOfParams(mega::pagetest::makeParams(MIME_TYPE_PHOTO,
+                                                          order,
+                                                          /*maxElements=*/2,
+                                                          false,
+                                                          std::nullopt,
+                                                          roots,
+                                                          {},
+                                                          1,
+                                                          /*offset=*/1));
+    EXPECT_EQ(got, std::vector<NodeHandle>(ref.begin() + 1, ref.begin() + 3));
+}
+
+// Offset + excludeHandles subtree: window at offset=1, limit=1 equals reference[1..2).
+// Dropping hNormalFolder leaves vault_file.jpg and under_sens.jpg in default scope.
+TEST_F(ListAllNodesByPageOffsetTest, Offset_ExcludeSubtree_Slice)
+{
+    const int order = OrderByClause::MTIME_ASC;
+    const std::vector<NodeHandle> excludes{hNormalFolder};
+    const auto ref = handlesOfParams(mega::pagetest::makeParams(MIME_TYPE_PHOTO,
+                                                                order,
+                                                                /*maxElements=*/0,
+                                                                false,
+                                                                std::nullopt,
+                                                                {},
+                                                                excludes,
+                                                                1,
+                                                                /*offset=*/0));
+    ASSERT_GE(ref.size(), 2u);
+    // offset=1 (not 0) so OFFSET skipping actually composes with the exclude-subtree
+    // filter; an impl that ignored params.offset would now fail this slice.
+    auto got = handlesOfParams(mega::pagetest::makeParams(MIME_TYPE_PHOTO,
+                                                          order,
+                                                          /*maxElements=*/1,
+                                                          false,
+                                                          std::nullopt,
+                                                          {},
+                                                          excludes,
+                                                          1,
+                                                          /*offset=*/1));
+    EXPECT_EQ(got, std::vector<NodeHandle>(ref.begin() + 1, ref.begin() + 2));
+}
+
+// Offset + timestampAnchor (DESC): window at offset=1 equals reference[1..2).
+// mEndSeconds=1'900'000'000 admits all photos (baseMtime+1..+5 < 1'900'000'000).
+TEST_F(ListAllNodesByPageOffsetTest, Offset_Anchor_DESC_Slice)
+{
+    const int order = OrderByClause::MTIME_DESC;
+    auto p = mega::pagetest::makeParams(MIME_TYPE_PHOTO,
+                                        order,
+                                        /*maxElements=*/0,
+                                        false,
+                                        std::nullopt,
+                                        {},
+                                        {},
+                                        1,
+                                        /*offset=*/0);
+    TimestampAnchorFilter ta;
+    ta.mOrder = OrderByClause::MTIME_DESC; // DESC ⇒ upper bound: mtime < mEndSeconds
+    ta.mStartSeconds = 0;
+    ta.mEndSeconds = 1'900'000'000LL; // > all photo mtimes (baseMtime=1'800'000'000)
+    p.timestampAnchor = ta;
+    const auto ref = handlesOfParams(p);
+    ASSERT_GE(ref.size(), 2u);
+
+    p.maxElements = 1;
+    p.offset = 1;
+    EXPECT_EQ(handlesOfParams(p), std::vector<NodeHandle>(ref.begin() + 1, ref.begin() + 2));
+}
+
+// Offset + timestampAnchor (ASC): half-bound is mtime >= mStartSeconds (the DESC
+// upper-bound path is covered above). mStartSeconds sits between the photo mtimes
+// (baseMtime+1..+5) so the two earliest photos are cut off, proving the anchor
+// actually excludes rows; offset=1 then slices within the survivors.
+TEST_F(ListAllNodesByPageOffsetTest, Offset_Anchor_ASC_Slice)
+{
+    const int order = OrderByClause::MTIME_ASC;
+    auto p = mega::pagetest::makeParams(MIME_TYPE_PHOTO,
+                                        order,
+                                        /*maxElements=*/0,
+                                        false,
+                                        std::nullopt,
+                                        {},
+                                        {},
+                                        1,
+                                        /*offset=*/0);
+    TimestampAnchorFilter ta;
+    ta.mOrder = OrderByClause::MTIME_ASC; // ASC ⇒ lower bound: mtime >= mStartSeconds
+    ta.mStartSeconds = 1'800'000'003LL; // cuts off photos at baseMtime+1, +2
+    ta.mEndSeconds = 1'900'000'000LL; // unused for ASC; kept > start for validity
+    p.timestampAnchor = ta;
+    const auto ref = handlesOfParams(p);
+    ASSERT_GE(ref.size(), 2u);
+
+    // The anchor really excluded rows (full unanchored set is larger).
+    const auto full = handlesOfParams(mega::pagetest::makeParams(MIME_TYPE_PHOTO,
+                                                                 order,
+                                                                 /*maxElements=*/0,
+                                                                 false,
+                                                                 std::nullopt,
+                                                                 {},
+                                                                 {},
+                                                                 1,
+                                                                 /*offset=*/0));
+    EXPECT_LT(ref.size(), full.size());
+
+    p.maxElements = 1;
+    p.offset = 1;
+    EXPECT_EQ(handlesOfParams(p), std::vector<NodeHandle>(ref.begin() + 1, ref.begin() + 2));
+}
+
+// Dominant-route: photos all EARLIER than videos so the merged ASC order is
+// all photos then all videos. An offset crossing the photo/video boundary must
+// take items from the merged stream (proves inner top-(offset+limit), not per-CTE).
+TEST_F(ListAllNodesByPageOffsetTest, Offset_GroupedMime_DominantRoute_CrossesBoundary)
+{
+    auto normal = mClient->mNodeManager.getNodeByHandle(hNormalFolder);
+    ASSERT_NE(normal, nullptr);
+    // Videos with mtimes AFTER every photo (photos use baseMtime≈1'800'000'00x).
+    addNode(FILENODE, normal, NodeMeta{"vid_1.mp4", FILENODE, 700, 1'900'000'001LL}, false);
+    addNode(FILENODE, normal, NodeMeta{"vid_2.mp4", FILENODE, 800, 1'900'000'002LL}, false);
+    if (auto* sa = dynamic_cast<SqliteAccountState*>(mClient->sctable.get()))
+        sa->createIndexes(/*enableSearch=*/true, /*enableLexi=*/true);
+
+    const int order = OrderByClause::MTIME_ASC;
+    const auto ref = reference(order, MIME_TYPE_ALL_VISUAL_MEDIA);
+    ASSERT_GE(ref.size(), 4u);
+    // A window whose offset lands near the end of the photos and whose limit
+    // spills into the videos.
+    const int64_t off = static_cast<int64_t>(ref.size()) - 3;
+    EXPECT_EQ(offsetWindow(order, /*limit=*/3, off, MIME_TYPE_ALL_VISUAL_MEDIA),
+              std::vector<NodeHandle>(ref.end() - 3, ref.end()));
+}
+
+// ---------------------------------------------------------------------------
+// CacheKeyBuilder regression coverage. Pins computeListAllCacheId /
+// computeDateSectionsCacheId (src/db/sqlite.cpp) to the pre-refactor
+// arithmetic, so any change to digit order/stride is caught here rather than
+// causing silent prepared-statement aliasing in production.
+// ---------------------------------------------------------------------------
+
+// Oracle = the v1 inline arithmetic, copied verbatim. The production
+// function in sqlite.cpp is the CacheKeyBuilder-based rewrite. They MUST
+// produce identical size_t for every legal input.
+size_t oracleComputeListAllCacheId(MimeType_t mimeType,
+                                   int order,
+                                   bool hasCursor,
+                                   AnchorDirectionDigit anchorDir,
+                                   bool excludeSensitive,
+                                   size_t numRoots,
+                                   size_t numExcludes)
+{
+    constexpr size_t orderStride = static_cast<size_t>(OrderByClause::FAV_DESC) + 1;
+    constexpr size_t maxRoots = 3; // mirrors kListAllMaxLocationHandles
+    constexpr size_t maxExcludes = 3;
+    constexpr size_t anchorStride = 3;
+
+    size_t key = static_cast<size_t>(mimeType);
+    key = key * orderStride + static_cast<size_t>(order);
+    key = key * 2 + (hasCursor ? 1u : 0u);
+    key = key * anchorStride + static_cast<size_t>(anchorDir);
+    key = key * 2 + (excludeSensitive ? 1u : 0u);
+    key = key * maxRoots + (numRoots - 1);
+    key = key * (maxExcludes + 1) + numExcludes;
+    return key;
+}
+
+size_t oracleComputeDateSectionsCacheId(MimeType_t mimeType,
+                                        int order,
+                                        DateSectionGranularity granularity,
+                                        bool excludeSensitive,
+                                        size_t numRoots,
+                                        size_t numExcludes)
+{
+    constexpr size_t orderStride = static_cast<size_t>(OrderByClause::FAV_DESC) + 1;
+    constexpr size_t maxRoots = 3;
+    constexpr size_t maxExcludes = 3;
+
+    size_t key = static_cast<size_t>(mimeType);
+    key = key * orderStride + static_cast<size_t>(order);
+    key = key * 3 + static_cast<size_t>(granularity);
+    key = key * 2 + (excludeSensitive ? 1u : 0u);
+    key = key * maxRoots + (numRoots - 1);
+    key = key * (maxExcludes + 1) + numExcludes;
+    return key;
+}
+
+// Dimension arrays (kAllMimeTypes / kAllValidOrders / kAllAnchorDirs /
+// kAllGranularities) live in CacheKeyCombinations.h.
+
+TEST(CacheKeyBuilder, ListAll_MatchesOracleArithmetic)
+{
+    // Nested for-loops, NOT TEST_P — ~24k combinations would create 24k
+    // gtest entries and dwarf the rest of test_unit's listing.
+    size_t checked = 0;
+    for (auto mime: kAllMimeTypes)
+        for (int order: kAllValidOrders)
+            for (bool hasCursor: {false, true})
+                for (auto anchorDir: kAllAnchorDirs)
+                    for (bool sens: {false, true})
+                        for (size_t roots = 1; roots <= 3; ++roots)
+                            for (size_t excludes = 0; excludes <= 3; ++excludes)
+                            {
+                                const size_t actual = computeListAllCacheId(mime,
+                                                                            order,
+                                                                            hasCursor,
+                                                                            anchorDir,
+                                                                            sens,
+                                                                            roots,
+                                                                            excludes);
+                                const size_t expected = oracleComputeListAllCacheId(mime,
+                                                                                    order,
+                                                                                    hasCursor,
+                                                                                    anchorDir,
+                                                                                    sens,
+                                                                                    roots,
+                                                                                    excludes);
+                                ASSERT_EQ(actual, expected)
+                                    << "mime=" << mime << " order=" << order
+                                    << " hasCursor=" << hasCursor
+                                    << " anchorDir=" << static_cast<int>(anchorDir)
+                                    << " sens=" << sens << " roots=" << roots
+                                    << " excludes=" << excludes;
+                                ++checked;
+                            }
+    EXPECT_EQ(checked, 14u * 12u * 2u * 3u * 2u * 3u * 4u); // 24192
+}
+
+TEST(CacheKeyBuilder, DateSections_MatchesOracleArithmetic)
+{
+    size_t checked = 0;
+    for (auto mime: kAllMimeTypes)
+        for (int order: kAllValidOrders)
+            for (auto gran: kAllGranularities)
+                for (bool sens: {false, true})
+                    for (size_t roots = 1; roots <= 3; ++roots)
+                        for (size_t excludes = 0; excludes <= 3; ++excludes)
+                        {
+                            const size_t actual = computeDateSectionsCacheId(mime,
+                                                                             order,
+                                                                             gran,
+                                                                             sens,
+                                                                             roots,
+                                                                             excludes);
+                            const size_t expected = oracleComputeDateSectionsCacheId(mime,
+                                                                                     order,
+                                                                                     gran,
+                                                                                     sens,
+                                                                                     roots,
+                                                                                     excludes);
+                            ASSERT_EQ(actual, expected)
+                                << "mime=" << mime << " order=" << order
+                                << " gran=" << static_cast<int>(gran) << " sens=" << sens
+                                << " roots=" << roots << " excludes=" << excludes;
+                            ++checked;
+                        }
+    EXPECT_EQ(checked, 14u * 12u * 3u * 2u * 3u * 4u); // 12096
+}
+
+TEST(CacheKeyBuilder, ListAll_DistinctInputsProduceDistinctKeys)
+{
+    // Spot-check the no-collision property on a handful of dimensions:
+    // any single-digit flip must change the key.
+    const auto baseKey = computeListAllCacheId(MIME_TYPE_PHOTO,
+                                               OrderByClause::MTIME_DESC,
+                                               /*hasCursor=*/false,
+                                               AnchorDirectionDigit::None,
+                                               /*sens=*/false,
+                                               /*roots=*/1,
+                                               /*excludes=*/0);
+
+    EXPECT_NE(baseKey,
+              computeListAllCacheId(MIME_TYPE_VIDEO,
+                                    OrderByClause::MTIME_DESC,
+                                    false,
+                                    AnchorDirectionDigit::None,
+                                    false,
+                                    1,
+                                    0));
+    EXPECT_NE(baseKey,
+              computeListAllCacheId(MIME_TYPE_PHOTO,
+                                    OrderByClause::MTIME_ASC,
+                                    false,
+                                    AnchorDirectionDigit::None,
+                                    false,
+                                    1,
+                                    0));
+    EXPECT_NE(baseKey,
+              computeListAllCacheId(MIME_TYPE_PHOTO,
+                                    OrderByClause::MTIME_DESC,
+                                    true,
+                                    AnchorDirectionDigit::None,
+                                    false,
+                                    1,
+                                    0));
+    EXPECT_NE(baseKey,
+              computeListAllCacheId(MIME_TYPE_PHOTO,
+                                    OrderByClause::MTIME_DESC,
+                                    false,
+                                    AnchorDirectionDigit::Asc,
+                                    false,
+                                    1,
+                                    0));
+    EXPECT_NE(baseKey,
+              computeListAllCacheId(MIME_TYPE_PHOTO,
+                                    OrderByClause::MTIME_DESC,
+                                    false,
+                                    AnchorDirectionDigit::Desc,
+                                    false,
+                                    1,
+                                    0));
 }
 
 } // anonymous namespace
