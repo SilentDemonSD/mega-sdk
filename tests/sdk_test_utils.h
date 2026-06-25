@@ -9,6 +9,7 @@
 #include <fstream>
 #include <functional>
 #include <future>
+#include <mutex>
 #include <optional>
 #include <set>
 #include <thread>
@@ -502,6 +503,7 @@ public:
     std::shared_ptr<T> add(const std::string& path)
     {
         auto tracker = std::make_shared<T>(path);
+        std::lock_guard<std::mutex> guard(mMutex);
         mTrackers.emplace_back(tracker);
         return tracker;
     }
@@ -514,6 +516,11 @@ public:
      */
     std::shared_ptr<T> getByPath(const std::string& path) const
     {
+        // mMutex serializes against add()'s emplace_back: getByPath() runs on the SDK callback
+        // thread (onSyncFileStateChanged) while the test thread registers trackers, so an
+        // unlocked iteration could read a vector being reallocated -> use-after-free.
+        std::lock_guard<std::mutex> guard(mMutex);
+
         std::shared_ptr<T> result;
 
         std::for_each(mTrackers.begin(),
@@ -530,6 +537,7 @@ public:
     }
 
 private:
+    mutable std::mutex mMutex;
     std::vector<std::shared_ptr<T>> mTrackers;
 };
 

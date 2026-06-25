@@ -82,32 +82,26 @@ protected:
     std::unique_ptr<FSACCESS_CLASS> mFsAccess;
     SyncItemTrackerManager<SyncUploadOperationsTracker> mSyncListenerTrackers;
     SyncItemTrackerManager<SyncUploadOperationsTransferTracker> mTransferListenerTrackers;
-    mutable std::recursive_timed_mutex trackerMutex;
-    using TestMutexGuard = std::unique_lock<std::recursive_timed_mutex>;
 
     std::shared_ptr<SyncUploadOperationsTracker> addSyncListenerTracker(const std::string& s)
     {
-        TestMutexGuard g(trackerMutex);
         return mSyncListenerTrackers.add(s);
     }
 
     std::shared_ptr<SyncUploadOperationsTracker> getSyncListenerTrackerByPath(const std::string& s)
     {
-        TestMutexGuard g(trackerMutex);
         return mSyncListenerTrackers.getByPath(s);
     }
 
     std::shared_ptr<SyncUploadOperationsTransferTracker>
         addTransferListenerTracker(const std::string& s)
     {
-        TestMutexGuard g(trackerMutex);
         return mTransferListenerTrackers.add(s);
     }
 
     std::shared_ptr<SyncUploadOperationsTransferTracker>
         getTransferListenerTrackerByPath(const std::string& s)
     {
-        TestMutexGuard g(trackerMutex);
         return mTransferListenerTrackers.getByPath(s);
     }
 
