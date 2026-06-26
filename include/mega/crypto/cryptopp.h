@@ -610,6 +610,10 @@ public:
     static const int MAXKEYLENGTH = 1026;   // in bytes, allows for RSA keys up
                                             // to 8192 bits
 
+    // Minimum accepted RSA modulus size, in bytes (2048-bit). Keys with a smaller
+    // modulus are rejected since not safe.
+    static const int MINKEYLENGTH = 256;
+
     /**
      * @brief Retrieve a reference to the specified key component.
      *
@@ -669,6 +673,9 @@ public:
     /**
      * @brief Decrypts a cipher text into a buffer and strips random padding.
      *
+     * The caller is responsible for calling isvalid() to check the key is valid before
+     * using it here.
+     *
      * @param cipher The cipher text to encrypt.
      * @param cipherlen Length of the cipher text.
      * @param buf Buffer to take the plain text..
@@ -679,6 +686,9 @@ public:
 
     /**
      * @brief Encrypts a plain text into a buffer.
+     *
+     * The caller is responsible for calling isvalid() to check the key is valid before
+     * using it here.
      *
      * @param plain The plain text to encrypt.
      * @param plainlen Length of the plain text.

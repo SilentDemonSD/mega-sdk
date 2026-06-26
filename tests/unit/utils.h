@@ -41,4 +41,8 @@ std::uint16_t nextRandomInt();
 
 mega::byte nextRandomByte();
 
+// Build a public-key blob (modulus followed by exponent 0x11, each MPI-encoded) with the requested
+// modulus size in bytes. Used by tests that exercise AsymmCipher / RSA key handling.
+std::string makePubKeyBlob(size_t modulusBytes);
+
 } // mt

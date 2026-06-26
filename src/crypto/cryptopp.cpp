@@ -828,7 +828,12 @@ unsigned AsymmCipher::rawencrypt(const byte* plain, size_t plainlen, byte* buf, 
 
 int AsymmCipher::encrypt(PrnGen &rng, const byte* plain, size_t plainlen, byte* buf, size_t buflen) const
 {
-    if (key[PUB_PQ].ByteCount() + 2 > buflen)
+    const size_t modBytes = key[PUB_PQ].ByteCount();
+
+    // Reject undersized moduli and oversized plaintext, otherwise (modBytes - plainlen - 2)
+    // underflows and genblock() writes past buf. Also need room for the output (modBytes + 2 byte
+    // length header).
+    if (modBytes < MINKEYLENGTH || plainlen > modBytes - 2 || modBytes + 2 > buflen)
     {
         return 0;
     }
@@ -1100,7 +1105,8 @@ auto AsymmCipher::isvalid(const Key& keyToConfirm, int type) const -> Status
 
     if (type == PUBKEY)
     {
-        if (keyToConfirm[PUB_E].BitCount() && keyToConfirm[PUB_PQ].BitCount())
+        // PUB_E must be present and the modulus must be at least MINKEYLENGTH bytes (2048-bit).
+        if (keyToConfirm[PUB_E].BitCount() && keyToConfirm[PUB_PQ].ByteCount() >= MINKEYLENGTH)
             return S_VALID;
 
         return S_INVALID;
