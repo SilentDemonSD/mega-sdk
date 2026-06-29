@@ -5805,6 +5805,23 @@ std::shared_ptr<Node> MegaClient::sc_procActionPacketWithoutCommonTags(JSON& jso
     return lastAPDeletedNode;
 }
 
+std::string MegaClient::formatReqstatOpcode(char opcode)
+{
+    // The opcode is the first letter of the raw API command holding the lock
+    // (e.g. 'p' putnodes, 'd' delete, 'm' move). The command set is a moving
+    // target, so we log the raw opcode rather than mapping it to a description;
+    // non-printable bytes are shown as hex.
+    const auto op = static_cast<unsigned char>(opcode);
+    if (std::isprint(op))
+    {
+        return std::string("'") + static_cast<char>(op) + "'";
+    }
+
+    char hex[5];
+    snprintf(hex, sizeof(hex), "0x%02x", op);
+    return hex;
+}
+
 size_t MegaClient::procreqstat()
 {
     // reqstat packet format:
@@ -5875,14 +5892,7 @@ size_t MegaClient::procreqstat()
                 oss << "/";
             }
 
-            if (mReqStatCS->in[pos + i] == 'p')
-            {
-                oss << "file or folder creation";
-            }
-            else
-            {
-                oss << "UNKNOWN operation";
-            }
+            oss << formatReqstatOpcode(mReqStatCS->in[pos + i]);
         }
     }
     pos += numOps;
