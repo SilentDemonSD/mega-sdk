@@ -946,7 +946,7 @@ TEST_F(FileServiceTests, cloud_file_removed_when_replaced_by_new_version)
     auto handle1 = mClient->upload(randomBytes(512), name, mRootHandle);
     ASSERT_EQ(handle1.errorOr(API_OK), API_OK);
 
-    // Make sure the client sees our new file.
+    // Make sure the client sees our new file wl.
     EXPECT_TRUE(waitFor(
         [&]()
         {
