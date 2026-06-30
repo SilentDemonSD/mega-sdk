@@ -2750,6 +2750,8 @@ public:
 
     size_t procreqstat();
 
+    static std::string formatReqstatOpcode(char opcode);
+
     // API warnings
     void warn(const char*);
     bool warnlevel();

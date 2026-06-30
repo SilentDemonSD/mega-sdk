@@ -102,6 +102,20 @@ TEST_F(MegaClientTest, setMaxConnectionsAndPersistRejectsZero)
     EXPECT_EQ(client->setmaxconnectionsandpersist(uint8_t{0}), API_EARGS);
 }
 
+TEST(FormatReqstatOpcode, PrintableAndNonPrintable)
+{
+    // The opcode (first letter of the API command) is surfaced verbatim rather
+    // than mapped to a description, since the command set is a moving target
+    // (SDK-6296). Printable bytes are shown as a quoted character.
+    EXPECT_EQ(MegaClient::formatReqstatOpcode('p'), "'p'");
+    EXPECT_EQ(MegaClient::formatReqstatOpcode('d'), "'d'");
+    EXPECT_EQ(MegaClient::formatReqstatOpcode('m'), "'m'");
+
+    // Non-printable bytes fall back to hex.
+    EXPECT_EQ(MegaClient::formatReqstatOpcode('\x01'), "0x01");
+    EXPECT_EQ(MegaClient::formatReqstatOpcode('\xff'), "0xff");
+}
+
 #ifdef MEGASDK_DEBUG_TEST_HOOKS_ENABLED
 TEST_F(MegaClientTest, chooseScParsingMode_EnableAndDisableStreaming)
 {
