@@ -9735,24 +9735,24 @@ void MegaClient::putnodes_prepareCopy(std::vector<NewNode>& nn,
                                       const bool isPublic)
 {
     assert(nc > 0);
-    NewNode* t = &nn[--nc];
+    NewNode& t = nn.at(--nc);
 
     // copy node
-    t->source = isPublic ? NEW_PUBLIC : NEW_NODE;
-    t->type = type;
-    t->nodehandle = nodehandle;
-    t->parenthandle = parenthandle;
+    t.source = isPublic ? NEW_PUBLIC : NEW_NODE;
+    t.type = type;
+    t.nodehandle = nodehandle;
+    t.parenthandle = parenthandle;
 
     // copy key (if file) or generate new key (if folder)
     if (type == FILENODE)
     {
-        t->nodekey = nodekey;
+        t.nodekey = nodekey;
     }
     else
     {
         byte buf[FOLDERNODEKEYLENGTH];
         rng.genblock(buf, sizeof buf);
-        t->nodekey.assign((char*)buf, FOLDERNODEKEYLENGTH);
+        t.nodekey.assign((char*)buf, FOLDERNODEKEYLENGTH);
     }
 
     AttrMap tattrs;
@@ -9770,12 +9770,12 @@ void MegaClient::putnodes_prepareCopy(std::vector<NewNode>& nn,
     }
 
     string attrstring;
-    t->attrstring.reset(new string);
+    t.attrstring.reset(new string);
     tattrs.getjson(&attrstring);
 
     SymmCipher cipher;
-    cipher.setkey((const byte*)t->nodekey.data(), type);
-    makeattr(&cipher, t->attrstring, attrstring.c_str());
+    cipher.setkey((const byte*)t.nodekey.data(), type);
+    makeattr(&cipher, t.attrstring, attrstring.c_str());
 }
 
 error MegaClient::updateNodeMtime(std::shared_ptr<Node> node,
@@ -18572,17 +18572,24 @@ void MegaClient::execmovetosyncdebris(Node* requestedNode, std::function<void(No
                     LOG_debug << "Copy and delete to cloud Syncdebris: " << n->displaypath() << " in " << debrisTarget->displaypath() << " Nhandle: " << LOG_NODEHANDLE(n->nodehandle);
                     TreeProcCopy tc;
                     proctree(n, &tc, false, false);
-                    tc.allocnodes();
-                    proctree(n, &tc, false, false);
-                    if (tc.unusableKey || tc.nn.empty())
+                    if (tc.unusableKey)
                     {
                         LOG_err << "SyncDebris: node " << toNodeHandle(n->nodehandle) << " ("
                                 << n->displaypath()
                                 << ") has an unusable key, skipping copy-to-debris";
                         if (rec.completion)
-                        {
                             rec.completion(rec.nodeHandle, API_EKEY);
-                        }
+                        continue;
+                    }
+                    tc.allocnodes();
+                    proctree(n, &tc, false, false);
+                    if (tc.nn.empty())
+                    {
+                        LOG_err << "SyncDebris: node " << toNodeHandle(n->nodehandle) << " ("
+                                << n->displaypath()
+                                << ") produced no copyable nodes, skipping copy-to-debris";
+                        if (rec.completion)
+                            rec.completion(rec.nodeHandle, API_EARGS);
                         continue;
                     }
                     tc.nn[0].parenthandle = UNDEF;
@@ -19317,14 +19324,24 @@ error MegaClient::transferRemoteCopy(File* file,
                                      std::optional<std::string> inboxTarget)
 {
     assert(file);
+    if (!sameNode)
+    {
+        LOG_err << "transferRemoteCopy: null source node, cannot copy";
+        return API_EARGS;
+    }
     TreeProcCopy tc;
     proctree(sameNode, &tc, false, true);
-    tc.allocnodes();
-    proctree(sameNode, &tc, false, true);
-    if (tc.unusableKey || tc.nn.empty())
+    if (tc.unusableKey)
     {
         LOG_err << "transferRemoteCopy: source node has an unusable key, cannot copy";
         return API_EKEY;
+    }
+    tc.allocnodes();
+    proctree(sameNode, &tc, false, true);
+    if (tc.nn.empty())
+    {
+        LOG_err << "transferRemoteCopy: source node produced no copyable nodes, cannot copy";
+        return API_EARGS;
     }
     tc.nn[0].parenthandle = UNDEF;
 

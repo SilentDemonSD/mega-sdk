@@ -879,6 +879,18 @@ inline bool isWithinActivePeriod(const TimeUnit sleepDuration, const TimeUnit ac
 #define LOG_err_timed(SLEEP, ACTIVE) LOG_generic_timed(::mega::logError, SLEEP, ACTIVE)
 #define LOG_fatal_timed(SLEEP, ACTIVE) LOG_generic_timed(::mega::logFatal, SLEEP, ACTIVE)
 
+#define MEGA_ASSERT(cond, streamArgs) \
+    do \
+    { \
+        const bool megaAssert_ = static_cast<bool>(cond); \
+        if (!megaAssert_) \
+        { \
+            LOG_err << streamArgs; \
+            assert(megaAssert_&& #cond); \
+        } \
+    } \
+    while (0)
+
 // moved from the intermediate layer
 class ExternalLogger : public Logger
 {

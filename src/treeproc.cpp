@@ -95,11 +95,8 @@ void TreeProcCopy::proc(MegaClient* client, std::shared_ptr<mega::Node> n)
     if (n->type == FILENODE && !n->keyApplied())
     {
         unusableKey = true;
-        if (allocated)
-        {
-            LOG_err << "TreeProcCopy: node " << toNodeHandle(n->nodehandle) << " ("
-                    << n->displaypath() << ") has an unapplied key, copy will be aborted";
-        }
+        LOG_err << "TreeProcCopy: node " << toNodeHandle(n->nodehandle) << " (" << n->displaypath()
+                << ") has an unapplied key, copy will be aborted";
         return;
     }
 

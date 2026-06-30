@@ -779,20 +779,20 @@ CommandGetFile::CommandGetFile(MegaClient* /*client*/,
     }
 
     assert(key && "no key provided!");
-    mFileKeyType = 0;
+    mFileKeyType = FILENODE;
     if (key && keySize == SymmCipher::KEYLENGTH)
     {
-        memcpy(filekey, key, SymmCipher::KEYLENGTH);
+        memcpy(mFileKey, key, SymmCipher::KEYLENGTH);
         mFileKeyType = 1;
     }
     else if (key && keySize == FILENODEKEYLENGTH)
     {
-        memcpy(filekey, key, FILENODEKEYLENGTH);
+        memcpy(mFileKey, key, FILENODEKEYLENGTH);
         mFileKeyType = FILENODE;
     }
     else if (key)
     {
-        LOG_err << "CommandGetFile: refusing node key of invalid length " << keySize;
+        MEGA_ASSERT(false, "CommandGetFile: refusing node key of invalid length " << keySize);
     }
 
     mCompletion = std::move(completion);
@@ -921,7 +921,8 @@ bool CommandGetFile::procresult(Result r, JSON& json)
                 }
 
                 // decrypt at and set filename
-                SymmCipher * cipherer = client->getRecycledTemporaryTransferCipher(filekey, mFileKeyType);
+                SymmCipher* cipherer =
+                    client->getRecycledTemporaryTransferCipher(mFileKey, mFileKeyType);
                 const char* eos = strchr(at, '"');
                 buf.reset(Node::decryptattr(cipherer,
                                             at,

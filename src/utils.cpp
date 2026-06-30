@@ -2832,7 +2832,7 @@ std::pair<node_comparison_result, int64_t>
                                                   const FileFingerprint& fp,
                                                   const Node* node)
 {
-    if (!node || node->type != FILENODE || node->nodekey().empty())
+    if (!node || node->type != FILENODE || !node->keyApplied())
     {
         return {NODE_COMP_EARGS, INVALID_META_MAC};
     }

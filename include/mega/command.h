@@ -661,7 +661,7 @@ class MEGA_API CommandGetFile : public Command
 
     void callFailedCompletion (const Error& e);
 
-    byte filekey[FILENODEKEYLENGTH] = {};
+    byte mFileKey[FILENODEKEYLENGTH] = {};
     int mFileKeyType; // as expected by SymmCipher::setKey
 
 public:
