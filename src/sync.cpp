@@ -2834,6 +2834,15 @@ bool Sync::checkForCompletedFolderCreateHere(SyncRow& row,
             row.syncNode->setSyncedFsid(folderCreate->originalFsid, syncs.localnodeBySyncedFsid, row.syncNode->localname, nullptr);  // setting the synced fsid enables chained moves
             row.syncNode->syncedFingerprint = row.cloudNode->fingerprint;
 
+            // The cloud folder was created from this node's name, so the names match exactly.
+            // Record that, so future case-only renames (on case-insensitive filesystems) are
+            // propagated.
+            if (mCaseInsensitive && !row.syncNode->namesSynchronized &&
+                0 == compareUtf(row.cloudNode->name, true, row.syncNode->localname, true, false))
+            {
+                row.syncNode->namesSynchronized = true;
+            }
+
             folderCreate.reset();
             row.syncNode->trimRareFields();
             statecacheadd(row.syncNode);
@@ -3030,6 +3039,16 @@ bool Sync::processCompletedUploadFromHere(SyncRow& row,
         row.syncNode->setSyncedFsid(upload->sourceFsid, syncs.localnodeBySyncedFsid, row.syncNode->localname, row.syncNode->cloneShortname());
         row.syncNode->syncedFingerprint = *upload;
         row.syncNode->setSyncedNodeHandle(upload->upsyncResultHandle);
+
+        // The cloud node was created with this file's name, so the names match exactly.
+        // Record that, so future case-only renames (on case-insensitive filesystems) are
+        // propagated.
+        if (mCaseInsensitive && !row.syncNode->namesSynchronized &&
+            upload->name == row.syncNode->toName_of_localname)
+        {
+            row.syncNode->namesSynchronized = true;
+        }
+
         statecacheadd(row.syncNode);
 
         // Record mtime-only operation to throttle future MAC computations
@@ -3088,6 +3107,15 @@ bool Sync::checkForCompletedCloudMoveToHere(SyncRow& row,
             if (sourceSyncNode == row.syncNode)
             {
                 LOG_debug << syncname << "Resolving sync cloud case-only rename from : " << sourceSyncNode->getCloudPath(true) << ", here! " << logTriplet(row, fullPath);
+
+                if (row.fsNode)
+                {
+                    row.syncNode->setSyncedFsid(row.fsNode->fsid,
+                                                syncs.localnodeBySyncedFsid,
+                                                row.fsNode->localname,
+                                                row.fsNode->cloneShortname());
+                }
+
                 sourceSyncNode->rare().moveFromHere.reset();
             }
             else if (sourceSyncNode && sourceSyncNode->rareRO().moveFromHere == moveHerePtr)
@@ -3643,9 +3671,39 @@ bool Sync::checkCloudPathForMovesRenames(SyncRow& row, SyncRow& parentRow, SyncP
 
             LOG_debug << syncname << "Sync - executed local rename/move " << sourceSyncNode->getLocalPath() << " -> " << fullPath.localPath;
 
+            auto adoptRenamedLocalFsItem = [&]()
+            {
+                auto fsNode = FSNode::fromPath(*syncs.fsaccess,
+                                               fullPath.localPath,
+                                               false,
+                                               FSLogging::logOnError);
+                if (!fsNode)
+                    return;
+
+                parentRow.fsAddedSiblings.emplace_back(std::move(*fsNode));
+                row.fsNode = &parentRow.fsAddedSiblings.back();
+                row.syncNode->slocalname = row.fsNode->cloneShortname();
+                row.syncNode->setSyncedFsid(row.fsNode->fsid,
+                                            syncs.localnodeBySyncedFsid,
+                                            row.fsNode->localname,
+                                            row.fsNode->cloneShortname());
+                row.syncNode->syncedFingerprint = row.fsNode->fingerprint;
+                row.syncNode->setSyncedNodeHandle(row.cloudNode->handle);
+                statecacheadd(row.syncNode);
+            };
+
             if (caseInsensitiveRename)
             {
-                row.syncNode->setScanAgain(false, true, false, 0); // if caseInsensitiveRename, row.syncNode is a valid pointer
+                // The local item was renamed in place to match the cloud's new case.
+                // Refresh from the new path so the LocalNode's localname adopts the new case
+                // (re-keying the parent's child map via setSyncedFsid->setnameparent).
+                adoptRenamedLocalFsItem();
+
+                row.syncNode->setScanAgain(
+                    true,
+                    true,
+                    false,
+                    0); // if caseInsensitiveRename, row.syncNode is a valid pointer
             }
             else
             {
@@ -3675,18 +3733,8 @@ bool Sync::checkCloudPathForMovesRenames(SyncRow& row, SyncRow& parentRow, SyncP
                 // and we don't get a chance to recognise the row as synced in a future pass
                 // Becuase in that case, we would end up with a download instead of a chained move
 
-                if (auto fsNode = FSNode::fromPath(*syncs.fsaccess, fullPath.localPath, false, FSLogging::logOnError))
-                {
-                    // Make this new fsNode part of our sync data structure
-                    parentRow.fsAddedSiblings.emplace_back(std::move(*fsNode));
-                    row.fsNode = &parentRow.fsAddedSiblings.back();
-                    row.syncNode->slocalname = row.fsNode->cloneShortname();
-
-                    row.syncNode->setSyncedFsid(row.fsNode->fsid, syncs.localnodeBySyncedFsid, row.fsNode->localname, row.fsNode->cloneShortname());
-                    row.syncNode->syncedFingerprint = row.fsNode->fingerprint;
-                    row.syncNode->setSyncedNodeHandle(row.cloudNode->handle);
-                    statecacheadd(row.syncNode);
-                }
+                // Make this new fsNode part of our sync data structure and mark the row synced.
+                adoptRenamedLocalFsItem();
             }
 
             rowResult = false;
@@ -7932,17 +7980,17 @@ void Sync::combineTripletSet(vector<SyncRow>::iterator a, vector<SyncRow>::itera
 {
     assert(syncs.onSyncThread());
 
-//#ifdef DEBUG
-//    // log before case
-//    LOG_debug << " combineTripletSet BEFORE " << std::distance(a, b);
-//    for (auto i = a; i != b; ++i)
-//    {
-//        LOG_debug
-//            << (i->cloudNode ? i->cloudNode->name : "<null>") << " "
-//            << (i->syncNode ? i->syncNode->localname.toPath() : "<null>") << " "
-//            << (i->fsNode ? i->fsNode->localname.toPath() : "<null>") << " ";
-//    }
-//#endif
+    // #ifdef DEBUG
+    //     // log before case
+    //     LOG_debug << " combineTripletSet BEFORE " << std::distance(a, b);
+    //     for (auto i = a; i != b; ++i)
+    //     {
+    //         LOG_debug
+    //             << (i->cloudNode ? i->cloudNode->name : "<null>") << " "
+    //             << (i->syncNode ? i->syncNode->localname.toPath(false) : "<null>") << " "
+    //             << (i->fsNode ? i->fsNode->localname.toPath(false) : "<null>") << " ";
+    //     }
+    // #endif
 
     // match up elements that are still present and were already synced
     vector<SyncRow>::iterator lastFullySynced = b;
@@ -8064,26 +8112,25 @@ void Sync::combineTripletSet(vector<SyncRow>::iterator a, vector<SyncRow>::itera
         }
     }
 
-//#ifdef DEBUG
-//    // log after case
-//    LOG_debug << " combineTripletSet AFTER " << std::distance(a, b);
-//    for (auto i = a; i != b; ++i)
-//    {
-//        LOG_debug
-//            << (i->cloudNode ? i->cloudNode->name : "<null>") << " "
-//            << (i->syncNode ? i->syncNode->localname.toPath() : "<null>") << " "
-//            << (i->fsNode ? i->fsNode->localname.toPath() : "<null>") << " ";
-//        for (auto j : i->cloudClashingNames)
-//        {
-//            LOG_debug << "with clashing cloud name: " << j->name;
-//        }
-//        for (auto j : i->fsClashingNames)
-//        {
-//            LOG_debug << "with clashing fs name: " << j->localname.toPath();
-//        }
-//    }
-//#endif
-
+    // #ifdef DEBUG
+    //     // log after case
+    //     LOG_debug << " combineTripletSet AFTER " << std::distance(a, b);
+    //     for (auto i = a; i != b; ++i)
+    //     {
+    //         LOG_debug
+    //             << (i->cloudNode ? i->cloudNode->name : "<null>") << " "
+    //             << (i->syncNode ? i->syncNode->localname.toPath(false) : "<null>") << " "
+    //             << (i->fsNode ? i->fsNode->localname.toPath(false) : "<null>") << " ";
+    //         for (auto j : i->cloudClashingNames)
+    //         {
+    //             LOG_debug << "with clashing cloud name: " << j->name;
+    //         }
+    //         for (auto j : i->fsClashingNames)
+    //         {
+    //             LOG_debug << "with clashing fs name: " << j->localname.toPath(false);
+    //         }
+    //     }
+    // #endif
 
 #ifdef DEBUG
     // confirm all are empty except target
@@ -9383,6 +9430,17 @@ bool Sync::syncItem_checkDownloadCompletion(SyncRow& row, SyncRow& parentRow, Sy
             }
 
             row.syncNode->setSyncedNodeHandle(downloadPtr->h);
+
+            // The local file was written with the cloud node's name, so the names match exactly.
+            // Record that, so future case-only renames (on case-insensitive filesystems) are
+            // propagated.
+            if (mCaseInsensitive && !row.syncNode->namesSynchronized && row.cloudNode &&
+                row.fsNode &&
+                0 == compareUtf(row.cloudNode->name, true, row.fsNode->localname, true, false))
+            {
+                row.syncNode->namesSynchronized = true;
+            }
+
             statecacheadd(row.syncNode);
         }
         else if (nameTooLong)
@@ -11513,6 +11571,20 @@ bool Sync::resolve_downsync(SyncRow& row,
 					// setting synced variables here means we can skip a scan of the parent folder, if just the one expected notification arrives for it
                     row.syncNode->setSyncedNodeHandle(row.cloudNode->handle);
                     row.syncNode->setSyncedFsid(fsnode->fsid, syncs.localnodeBySyncedFsid, fsnode->localname, fsnode->cloneShortname());
+
+                    // The local folder was created from the cloud node's name, so the names match
+                    // exactly. Record that, so future case-only renames (on case-insensitive
+                    // filesystems) are propagated.
+                    if (mCaseInsensitive && !row.syncNode->namesSynchronized &&
+                        0 == compareUtf(row.cloudNode->name,
+                                        true,
+                                        row.syncNode->localname,
+                                        true,
+                                        false))
+                    {
+                        row.syncNode->namesSynchronized = true;
+                    }
+
                     row.reassignFingerprints();
                     row.syncNode->setScannedFsid(fsnode->fsid,
                                                  syncs.localnodeByScannedFsid,

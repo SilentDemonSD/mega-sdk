@@ -6803,6 +6803,234 @@ TEST_F(SyncTest, BasicSync_RenameLocalFile)
     ASSERT_TRUE(client1->confirmModel_mainthread(model2.findnode("x"), backupId1, true));
 }
 
+// Case-only rename of a local file (e.g. f -> F) must propagate the new case up to the cloud
+// (and on to the other client). On a case-insensitive filesystem (Windows/macOS) this exercises
+// the case-only rename path; on a case-sensitive filesystem it is an ordinary rename. Either way
+// the resulting name must match exactly.
+TEST_F(SyncTest, BasicSync_CaseOnlyRenameLocalFile)
+{
+    static auto TIMEOUT = std::chrono::seconds(4);
+
+    const fs::path root = makeNewTestRoot();
+
+    auto client0 = g_clientManager->getCleanStandardClient(0, root); // user 1 client 1
+    auto client1 = g_clientManager->getCleanStandardClient(0, root); // user 1 client 2
+    ASSERT_TRUE(client0->resetBaseFolderMulticlient(client1));
+    ASSERT_TRUE(client0->makeCloudSubdirs("x", 0, 0));
+    ASSERT_TRUE(CatchupClients(client0, client1));
+
+    client0->logcb = true;
+    client1->logcb = true;
+
+    ASSERT_EQ(client0->basefolderhandle, client1->basefolderhandle);
+
+    handle backupId0 = client0->setupSync_mainthread("s0", "x", false, true);
+    ASSERT_NE(backupId0, UNDEF);
+    handle backupId1 = client1->setupSync_mainthread("s1", "x", false, false);
+    ASSERT_NE(backupId1, UNDEF);
+
+    waitonsyncs(TIMEOUT, client0, client1);
+
+    // Add x/f.
+    ASSERT_TRUE(createNameFile(client0->syncSet(backupId0).localpath, "f"));
+    client0->triggerPeriodicScanEarly(backupId0);
+    waitonsyncs(TIMEOUT, client0, client1);
+
+    Model model1, model2;
+    model1.root->addkid(model1.makeModelSubfolder("x"));
+    model1.findnode("x")->addkid(model1.makeModelSubfile("f"));
+    model2.root->addkid(model2.makeModelSubfolder("x"));
+    model2.findnode("x")->addkid(model2.makeModelSubfile("f"));
+    model2.ensureLocalDebrisTmpLock("x"); // since it downloaded f (uploaded by sync 1)
+
+    ASSERT_TRUE(client0->confirmModel_mainthread(model1.findnode("x"), backupId0));
+    ASSERT_TRUE(client1->confirmModel_mainthread(model2.findnode("x"), backupId1, true));
+
+    // Case-only rename x/f -> x/F.
+    fs::rename(client0->syncSet(backupId0).localpath / "f",
+               client0->syncSet(backupId0).localpath / "F");
+
+    client0->triggerPeriodicScanEarly(backupId0);
+    waitonsyncs(TIMEOUT, client0, client1);
+
+    // The new case must have propagated to the cloud and the second client.
+    model1.findnode("x/f")->name = "F";
+    model2.findnode("x/f")->name = "F";
+
+    ASSERT_TRUE(client0->confirmModel_mainthread(model1.findnode("x"), backupId0));
+    ASSERT_TRUE(client1->confirmModel_mainthread(model2.findnode("x"), backupId1, true));
+}
+
+// Case-only rename of a local folder (containing a child) must propagate the folder's new case
+// while leaving its contents intact.
+TEST_F(SyncTest, BasicSync_CaseOnlyRenameLocalFolder)
+{
+    static auto TIMEOUT = std::chrono::seconds(4);
+
+    const fs::path root = makeNewTestRoot();
+
+    auto client0 = g_clientManager->getCleanStandardClient(0, root); // user 1 client 1
+    auto client1 = g_clientManager->getCleanStandardClient(0, root); // user 1 client 2
+    ASSERT_TRUE(client0->resetBaseFolderMulticlient(client1));
+    ASSERT_TRUE(client0->makeCloudSubdirs("x", 0, 0));
+    ASSERT_TRUE(CatchupClients(client0, client1));
+
+    client0->logcb = true;
+    client1->logcb = true;
+
+    ASSERT_EQ(client0->basefolderhandle, client1->basefolderhandle);
+
+    handle backupId0 = client0->setupSync_mainthread("s0", "x", false, true);
+    ASSERT_NE(backupId0, UNDEF);
+    handle backupId1 = client1->setupSync_mainthread("s1", "x", false, false);
+    ASSERT_NE(backupId1, UNDEF);
+
+    waitonsyncs(TIMEOUT, client0, client1);
+
+    // Add x/d and x/d/f.
+    fs::create_directory(client0->syncSet(backupId0).localpath / "d");
+    ASSERT_TRUE(createNameFile(client0->syncSet(backupId0).localpath / "d", "f"));
+    client0->triggerPeriodicScanEarly(backupId0);
+    waitonsyncs(TIMEOUT, client0, client1);
+
+    Model model1, model2;
+    model1.root->addkid(model1.makeModelSubfolder("x"));
+    model1.findnode("x")->addkid(model1.makeModelSubfolder("d"));
+    model1.findnode("x/d")->addkid(model1.makeModelSubfile("f"));
+    model2.root->addkid(model2.makeModelSubfolder("x"));
+    model2.findnode("x")->addkid(model2.makeModelSubfolder("d"));
+    model2.findnode("x/d")->addkid(model2.makeModelSubfile("f"));
+    model2.ensureLocalDebrisTmpLock("x"); // since it downloaded f (uploaded by sync 1)
+
+    ASSERT_TRUE(client0->confirmModel_mainthread(model1.findnode("x"), backupId0));
+    ASSERT_TRUE(client1->confirmModel_mainthread(model2.findnode("x"), backupId1, true));
+
+    // Case-only rename x/d -> x/D.
+    fs::rename(client0->syncSet(backupId0).localpath / "d",
+               client0->syncSet(backupId0).localpath / "D");
+
+    client0->triggerPeriodicScanEarly(backupId0);
+    waitonsyncs(TIMEOUT, client0, client1);
+
+    // The folder's new case must propagate; the child must remain synced.
+    model1.findnode("x/d")->name = "D";
+    model2.findnode("x/d")->name = "D";
+
+    ASSERT_TRUE(client0->confirmModel_mainthread(model1.findnode("x"), backupId0));
+    ASSERT_TRUE(client1->confirmModel_mainthread(model2.findnode("x"), backupId1, true));
+}
+
+// Case-only rename made in the cloud (e.g. f -> F) must propagate down to the local filesystem.
+TEST_F(SyncTest, BasicSync_CaseOnlyRenameCloudFile)
+{
+    static auto TIMEOUT = std::chrono::seconds(4);
+
+    const fs::path root = makeNewTestRoot();
+
+    auto client0 = g_clientManager->getCleanStandardClient(0, root); // user 1 client 1
+    auto client1 = g_clientManager->getCleanStandardClient(0, root); // user 1 client 2
+    ASSERT_TRUE(client0->resetBaseFolderMulticlient(client1));
+    ASSERT_TRUE(client0->makeCloudSubdirs("x", 0, 0));
+    ASSERT_TRUE(CatchupClients(client0, client1));
+
+    client0->logcb = true;
+    client1->logcb = true;
+
+    ASSERT_EQ(client0->basefolderhandle, client1->basefolderhandle);
+
+    handle backupId0 = client0->setupSync_mainthread("s0", "x", false, true);
+    ASSERT_NE(backupId0, UNDEF);
+    handle backupId1 = client1->setupSync_mainthread("s1", "x", false, false);
+    ASSERT_NE(backupId1, UNDEF);
+
+    waitonsyncs(TIMEOUT, client0, client1);
+
+    // Add x/f (uploaded by client0, downloaded by client1).
+    ASSERT_TRUE(createNameFile(client0->syncSet(backupId0).localpath, "f"));
+    client0->triggerPeriodicScanEarly(backupId0);
+    waitonsyncs(TIMEOUT, client0, client1);
+
+    Model model1, model2;
+    model1.root->addkid(model1.makeModelSubfolder("x"));
+    model1.findnode("x")->addkid(model1.makeModelSubfile("f"));
+    model2.root->addkid(model2.makeModelSubfolder("x"));
+    model2.findnode("x")->addkid(model2.makeModelSubfile("f"));
+    model2.ensureLocalDebrisTmpLock("x");
+
+    ASSERT_TRUE(client0->confirmModel_mainthread(model1.findnode("x"), backupId0));
+    ASSERT_TRUE(client1->confirmModel_mainthread(model2.findnode("x"), backupId1, true));
+
+    // Case-only rename in the cloud: x/f -> x/F.
+    ASSERT_TRUE(client0->rename("x/f", "F"));
+
+    waitonsyncs(TIMEOUT, client0, client1);
+
+    // The new case must have propagated down to both local filesystems.
+    model1.findnode("x/f")->name = "F";
+    model2.findnode("x/f")->name = "F";
+
+    ASSERT_TRUE(client0->confirmModel_mainthread(model1.findnode("x"), backupId0));
+    ASSERT_TRUE(client1->confirmModel_mainthread(model2.findnode("x"), backupId1, true));
+}
+
+// Case-only rename of a folder made in the cloud (x/d -> x/D) must propagate
+// down to both local filesystems, and the folder's child must stay synced.
+TEST_F(SyncTest, BasicSync_CaseOnlyRenameCloudFolder)
+{
+    static auto TIMEOUT = std::chrono::seconds(4);
+
+    const fs::path root = makeNewTestRoot();
+
+    auto client0 = g_clientManager->getCleanStandardClient(0, root); // user 1 client 1
+    auto client1 = g_clientManager->getCleanStandardClient(0, root); // user 1 client 2
+    ASSERT_TRUE(client0->resetBaseFolderMulticlient(client1));
+    ASSERT_TRUE(client0->makeCloudSubdirs("x", 0, 0));
+    ASSERT_TRUE(CatchupClients(client0, client1));
+
+    client0->logcb = true;
+    client1->logcb = true;
+
+    ASSERT_EQ(client0->basefolderhandle, client1->basefolderhandle);
+
+    handle backupId0 = client0->setupSync_mainthread("s0", "x", false, true);
+    ASSERT_NE(backupId0, UNDEF);
+    handle backupId1 = client1->setupSync_mainthread("s1", "x", false, false);
+    ASSERT_NE(backupId1, UNDEF);
+
+    waitonsyncs(TIMEOUT, client0, client1);
+
+    // Add x/d and x/d/f.
+    fs::create_directory(client0->syncSet(backupId0).localpath / "d");
+    ASSERT_TRUE(createNameFile(client0->syncSet(backupId0).localpath / "d", "f"));
+    client0->triggerPeriodicScanEarly(backupId0);
+    waitonsyncs(TIMEOUT, client0, client1);
+
+    Model model1, model2;
+    model1.root->addkid(model1.makeModelSubfolder("x"));
+    model1.findnode("x")->addkid(model1.makeModelSubfolder("d"));
+    model1.findnode("x/d")->addkid(model1.makeModelSubfile("f"));
+    model2.root->addkid(model2.makeModelSubfolder("x"));
+    model2.findnode("x")->addkid(model2.makeModelSubfolder("d"));
+    model2.findnode("x/d")->addkid(model2.makeModelSubfile("f"));
+    model2.ensureLocalDebrisTmpLock("x"); // since it downloaded f (uploaded by sync 1)
+
+    ASSERT_TRUE(client0->confirmModel_mainthread(model1.findnode("x"), backupId0));
+    ASSERT_TRUE(client1->confirmModel_mainthread(model2.findnode("x"), backupId1, true));
+
+    // Case-only rename in the cloud: x/d -> x/D.
+    ASSERT_TRUE(client0->rename("x/d", "D"));
+
+    waitonsyncs(TIMEOUT, client0, client1);
+
+    // The folder's new case must propagate down to both local filesystems;
+    // the child must remain synced.
+    model1.findnode("x/d")->name = "D";
+    model2.findnode("x/d")->name = "D";
+
+    ASSERT_TRUE(client0->confirmModel_mainthread(model1.findnode("x"), backupId0));
+    ASSERT_TRUE(client1->confirmModel_mainthread(model2.findnode("x"), backupId1, true));
+}
+
 #ifdef MEGASDK_DEBUG_TEST_HOOKS_ENABLED
 TEST_F(SyncTest, TransferCountProgress)
 {
