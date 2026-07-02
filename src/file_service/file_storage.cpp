@@ -49,17 +49,17 @@ FileStorage::FileStorage(const UserStoragePath& userStoragePath):
     mUserCacheDirectory(*mFilesystem, logger(), "cache", mUserStorageDirectory),
     mFolderLocker(mUserCacheDirectory.path().asPlatformEncoded(true))
 {
-    // Storage cahce file names are now encoded as hex
+    // Storage cache file names are now encoded as hex
     // strings instead of Base64. We start to use a new user storage directory and remove the old
-    // user storage directory This is safe because, at the time of this change, only the read-only
+    // user storage directory. This is safe because, at the time of this change, only the read-only
     // streaming feature uses the File Service. The only impact is that cached files are removed and
     // will be fetched from the cloud again when accessed.
-    const common::Directory oldUserStorageDirectory(*mFilesystem,
-                                                    logger(),
-                                                    userStoragePath.userName,
-                                                    mStorageDirectory);
-    FSACCESS_CLASS::emptydirlocal(oldUserStorageDirectory.path());
-    mFilesystem->rmdirlocal(oldUserStorageDirectory.path());
+    LocalPath oldUserStorageDirectory(mStorageDirectory);
+    oldUserStorageDirectory.appendWithSeparator(
+        LocalPath::fromRelativePath(userStoragePath.userName),
+        true);
+    FSACCESS_CLASS::emptydirlocal(oldUserStorageDirectory);
+    mFilesystem->rmdirlocal(oldUserStorageDirectory);
 }
 
 FileStorage::~FileStorage() = default;
