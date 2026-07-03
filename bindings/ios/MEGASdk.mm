@@ -29,6 +29,7 @@
 #import "MEGATransfer+init.h"
 #import "MEGATransferList+init.h"
 #import "MEGANodeList+init.h"
+#import "MEGADateSection+init.h"
 #import "MEGAUserList+init.h"
 #import "MEGAUserAlertList+init.h"
 #import "MEGAIntegerList+init.h"
@@ -3326,6 +3327,31 @@ using namespace mega;
     return [MEGANodeList.alloc initWithNodeList:nodeList cMemoryOwn:YES];
 }
 
+- (nullable NSArray<MEGADateSection *> *)groupAllNodesByDateWithFilter:(MEGAGroupNodesByDateFilter *)filter
+                                                             orderType:(MEGASortOrderType)orderType
+                                                           cancelToken:(MEGACancelToken *)cancelToken {
+    if (self.megaApi == nil || filter == nil) return nil;
+
+    auto cppFilter = [self generateMegaGroupNodesByDateFilterFrom:filter];
+
+    std::unique_ptr<MegaDateSectionList> sectionList(self.megaApi->groupAllNodesByDate(cppFilter.get(),
+                                                                                       static_cast<int>(orderType),
+                                                                                       cancelToken.getCPtr));
+
+    if (sectionList == nullptr) {
+        return @[];
+    }
+
+    NSMutableArray<MEGADateSection *> *sections = [NSMutableArray arrayWithCapacity:sectionList->size()];
+    for (int i = 0; i < sectionList->size(); i++) {
+        const MegaDateSection *section = sectionList->get(i);
+        if (section == nullptr) continue;
+        [sections addObject:[MEGADateSection.alloc initWithDateSection:section->copy() cMemoryOwn:YES]];
+    }
+
+    return sections;
+}
+
 - (void)getRecentActionsAsyncSinceDays:(NSInteger)days maxNodes:(NSInteger)maxNodes excludeSensitives:(BOOL)excludeSensitives delegate:(id<MEGARequestDelegate>)delegate {
     if (self.megaApi != nil) {
         self.megaApi->getRecentActionsAsync((int)days, (unsigned int)maxNodes, excludeSensitives, [self createDelegateMEGARequestListener:delegate singleListener:YES]);
@@ -4100,6 +4126,81 @@ using namespace mega;
     if (filter.sensitivityFilter != MEGAListAllNodesFilterSensitivityOptionDisabled) {
         megaFilter->bySensitivity(static_cast<int>(filter.sensitivityFilter));
     }
+
+    // Forward the date-bucket anchor only when a direction is set; the C++
+    // filter validates the bounds (rejects startDate >= endDate, negatives)
+    // when the query runs. The section order maps to a modification-time order
+    // constant and is independent of the listing's own ORDER BY.
+    switch (filter.timestampAnchorSectionOrder) {
+        case MEGAListAllNodesTimestampAnchorOrderModificationAsc:
+            megaFilter->byTimestampAnchor(filter.timestampAnchorStartDate,
+                                          filter.timestampAnchorEndDate,
+                                          MegaApi::ORDER_MODIFICATION_ASC);
+            break;
+        case MEGAListAllNodesTimestampAnchorOrderModificationDesc:
+            megaFilter->byTimestampAnchor(filter.timestampAnchorStartDate,
+                                          filter.timestampAnchorEndDate,
+                                          MegaApi::ORDER_MODIFICATION_DESC);
+            break;
+        case MEGAListAllNodesTimestampAnchorOrderNone:
+            break;
+        default:
+            // An out-of-range raw value (ObjC NS_ENUM is not a closed type) still
+            // signals intent to anchor. Forward an order the anchor path does not
+            // support (ORDER_NONE is not in {MODIFICATION_ASC, MODIFICATION_DESC}
+            // nor the -1 disable sentinel) so the query fails loudly with an empty
+            // list + warning, rather than silently degrading to a global scan.
+            megaFilter->byTimestampAnchor(filter.timestampAnchorStartDate,
+                                          filter.timestampAnchorEndDate,
+                                          MegaApi::ORDER_NONE);
+            break;
+    }
+
+    return megaFilter;
+}
+
+- (std::unique_ptr<MegaGroupNodesByDateFilter>)generateMegaGroupNodesByDateFilterFrom:(MEGAGroupNodesByDateFilter *)filter {
+    std::unique_ptr<MegaGroupNodesByDateFilter> megaFilter(MegaGroupNodesByDateFilter::createInstance());
+
+    megaFilter->byCategory(static_cast<int>(filter.category));
+
+    auto buildHandleList = [](NSArray<NSNumber *> * _Nullable handles) -> std::unique_ptr<MegaHandleList> {
+        if (handles.count == 0) {
+            return nullptr;
+        }
+        std::unique_ptr<MegaHandleList> list(MegaHandleList::createInstance());
+        for (NSNumber *h in handles) {
+            // Forward unusable entries as INVALID_HANDLE so the C++ validator
+            // rejects the request instead of silently dropping them.
+            if (h == nil || ![h isKindOfClass:[NSNumber class]]) {
+                list->addMegaHandle(::mega::INVALID_HANDLE);
+                continue;
+            }
+            list->addMegaHandle(static_cast<MegaHandle>(h.unsignedLongLongValue));
+        }
+        return list;
+    };
+
+    if (auto includeList = buildHandleList(filter.locationHandles)) {
+        megaFilter->byLocationHandles(includeList.get());
+    }
+
+    if (auto excludeList = buildHandleList(filter.excludeLocationHandles)) {
+        megaFilter->byExcludeLocationHandles(excludeList.get());
+    }
+
+    // byLocation is consulted only when locationHandles is empty (priority rule
+    // shared with MegaListAllNodesFilter). Forwarding it unconditionally would
+    // let an invalid `filter.location` cast void otherwise-valid locationHandles.
+    if (filter.locationHandles.count == 0) {
+        megaFilter->byLocation(static_cast<int>(filter.location));
+    }
+
+    if (filter.sensitivityFilter != MEGAListAllNodesFilterSensitivityOptionDisabled) {
+        megaFilter->bySensitivity(static_cast<int>(filter.sensitivityFilter));
+    }
+
+    megaFilter->byGranularity(static_cast<int>(filter.granularity));
 
     return megaFilter;
 }
