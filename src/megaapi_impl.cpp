@@ -17246,11 +17246,12 @@ void MegaApiImpl::checkLastPurgeNotification()
         return;
     }
 
-    // EXPIRED ^!lpack: a 'ua' reported it changed (likely acknowledged elsewhere) but we lack the
-    // value -> suppress this alarming alert. Missing attribute -> never set -> not acknowledged.
+    // Only EXPIRED means "changed elsewhere, value pending" -> defer. Missing or
+    // CACHED_NOT_EXISTING means never acknowledged -> fire (so isExpired(), not !isValid()).
     const UserAttribute* attr = u->getAttribute(ATTR_LAST_PURGE_ACKNOWLEDGED);
-    if (attr && !attr->isValid())
+    if (attr && attr->isExpired())
     {
+        LOG_debug << "EVENT_LAST_PURGE deferred: ^!lpack expired, awaiting reload";
         return; // don't mark; a later loaded value can re-evaluate
     }
 
@@ -17286,6 +17287,8 @@ void MegaApiImpl::checkLastPurgeNotification()
         stack.pop_back();
         if (n->ctime > client->mLastPurge.ts)
         {
+            LOG_debug << "EVENT_LAST_PURGE suppressed: node newer than purge (ctime " << n->ctime
+                      << " > purgeTs " << client->mLastPurge.ts << ")";
             return; // a node newer than the purge exists -> the notification is obsolete
         }
         if (n->type != FILENODE)
