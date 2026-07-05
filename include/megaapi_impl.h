@@ -50,6 +50,7 @@
 #include <evt-tls/evt_tls.h>
 #define ENABLE_EVT_TLS 1
 #endif
+#include "mega/auto_uvfile.h"
 
 #endif
 
@@ -5856,6 +5857,10 @@ public:
     uv_buf_t nextBuffer();
     // Increase the free data counter
     void freeData(size_t len);
+    // Get a writable uv_buf_t into the contiguous free space up to the wrap-around point
+    uv_buf_t nextWriteBuffer(size_t maxLen);
+    // Advance the write position after a direct write of bytesWritten bytes
+    void commitWrite(size_t bytesWritten);
     // Set upper bound limit for capacity
     void setMaxBufferSize(unsigned int bufferSize);
     // Set upper bound limit for chunk size to write to the consumer
@@ -6151,19 +6156,6 @@ public:
     void readData(MegaTCPContext* tcpctx);
 };
 
-struct FileStreamResultConsumption
-{
-    struct Value
-    {
-        // Result returned from file service stream callback
-        file_service::FileStreamResult mFileStreamResult;
-        // How many length has been consumed
-        std::uint64_t mConsumedLength{};
-    };
-
-    std::optional<Value> mValue;
-};
-
 class PublicNodeCache
 {
 public:
@@ -6200,14 +6192,43 @@ private:
     static std::atomic_uint32_t nextId;
     const uint32_t contextId;
     std::string logname;
-    FileStreamResultConsumption mFileStreamResultConsumption{};
-
-    auto processFileStreamResult() -> std::unique_ptr<TaskContext>;
-
-    static void afterContinueStream(uv_work_t* request, int status);
-    static void continueStream(uv_work_t* request);
 
 public:
+    // mAvailableBytes is atomic: written by the file service callback thread, read on the uv loop
+    // thread.
+    // mOffset is immutable after init() — set once, then read-only.
+    class CacheFile
+    {
+        std::atomic<m_off_t> mAvailableBytes{0};
+
+        m_off_t mConsumedBytes{0};
+
+        AutoUVFile mFd;
+
+        bool mReading{false};
+
+        m_off_t mOffset{0};
+
+    public:
+        m_off_t availableBytes() const;
+
+        m_off_t consumedBytes() const;
+
+        uv_file fd() const;
+
+        void init(AutoUVFile&& fd, m_off_t offset);
+
+        m_off_t offset() const;
+
+        void addConsumedBytes(m_off_t delta);
+
+        std::optional<m_off_t> onReceived(m_off_t receivedOffset, m_off_t receivedLength);
+
+        bool isReading() const;
+
+        void setReading(bool value);
+    };
+
     MegaHTTPContext();
     ~MegaHTTPContext();
 
@@ -6224,6 +6245,8 @@ public:
 
     bool nodereceived;
     std::atomic_bool failed{false};
+
+    CacheFile mCacheFile{};
 
     // Request information
     bool range;
