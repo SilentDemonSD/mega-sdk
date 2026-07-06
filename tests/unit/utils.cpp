@@ -77,17 +77,24 @@ std::shared_ptr<mega::MegaClient> makeClient(mega::MegaApp& app, mega::DbAccess*
     return client;
 }
 
-mega::Node& makeNode(mega::MegaClient& client, const mega::nodetype_t type, mega::NodeHandle handle, mega::Node* const parent)
+std::shared_ptr<mega::Node> makeNode(mega::MegaClient& client,
+                                     const mega::nodetype_t type,
+                                     mega::NodeHandle handle,
+                                     mega::Node* const parent)
 {
     assert(client.nodeByHandle(handle) == nullptr);
     const auto ph = parent ? parent->nodeHandle() : ::mega::NodeHandle();
-    auto n = new mega::Node{client, handle, ph, type, -1, mega::UNDEF, nullptr, 0}; // owned by the client
+    auto n = std::make_shared<mega::Node>(client, handle, ph, type, -1, mega::UNDEF, nullptr, 0);
     if (type == mega::FILENODE || type == mega::FOLDERNODE || type == mega::TYPE_UNKNOWN)
     {
-        n->setkey(reinterpret_cast<const mega::byte*>(std::string((type == mega::FILENODE) ? mega::FILENODEKEYLENGTH : mega::FOLDERNODEKEYLENGTH, 'X').c_str()));
+        n->setkey(reinterpret_cast<const mega::byte*>(std::string((type == mega::FILENODE) ?
+                                                                      mega::FILENODEKEYLENGTH :
+                                                                      mega::FOLDERNODEKEYLENGTH,
+                                                                  'X')
+                                                          .c_str()));
     }
 
-    return *n;
+    return n;
 }
 
 std::uint16_t nextRandomInt()

@@ -106,8 +106,7 @@ protected:
                                   std::function<void(Node&)> extraSetup = nullptr)
     {
         NodeHandle handle = NodeHandle().set6byte(mNextHandle++);
-        Node& nodeRef = mt::makeNode(*mClient, nodeType, handle, parent.get());
-        auto node = std::shared_ptr<Node>(&nodeRef);
+        auto node = mt::makeNode(*mClient, nodeType, handle, parent.get());
 
         if (!name.empty())
         {

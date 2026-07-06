@@ -131,8 +131,7 @@ protected:
                                   int label = 0)
     {
         NodeHandle handle = NodeHandle().set6byte(mNextHandle++);
-        Node& nodeRef = mt::makeNode(*mClient, nodeType, handle, parent.get());
-        auto node = std::shared_ptr<Node>(&nodeRef);
+        auto node = mt::makeNode(*mClient, nodeType, handle, parent.get());
 
         // Name attribute
         static const nameid nameId = AttrMap::string2nameid("n");
@@ -1136,11 +1135,10 @@ TEST_F(DISABLED_SqliteNodesPerfTest, PerfPutNode)
 
     // Create a fresh node outside the main dataset; re-insert it every iteration.
     NodeHandle freshHandle = NodeHandle().set6byte(mNextHandle++);
-    Node& freshRef = mt::makeNode(*mClient,
+    auto freshNode = mt::makeNode(*mClient,
                                   FILENODE,
                                   freshHandle,
                                   /*parent=*/nullptr);
-    auto freshNode = std::shared_ptr<Node>(&freshRef);
 
     static const nameid nameId = AttrMap::string2nameid("n");
     freshNode->attrs.map[nameId] = "perf_test_node.dat";

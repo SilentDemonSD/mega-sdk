@@ -17,7 +17,6 @@
  */
 
 #include "mega/base64.h"
-#include "mega/db/sqlite.h"
 #include "mega/megaapp.h"
 #include "mega/megaclient.h"
 #include "mega/sc_streaming_parser.h"
@@ -52,7 +51,6 @@ protected:
 
     std::shared_ptr<Node> initNodes()
     {
-        client->dbaccess = new SqliteDbAccess(LocalPath::fromAbsolutePath("."));
         client->sid =
             "AWA5YAbtb4JO-y2zWxmKZpSe5-6XM7CTEkA-3Nv7J4byQUpOazdfSC1ZUFlS-kah76gPKUEkTF9g7MeE";
         client->opensctable();
@@ -73,9 +71,8 @@ protected:
 
     std::shared_ptr<Node> addNode(nodetype_t nodeType, handle nodeHandle)
     {
-        auto& nodeRef =
+        auto node =
             mt::makeNode(*client, nodeType, mega::NodeHandle().set6byte(nodeHandle), nullptr);
-        std::shared_ptr<Node> node(&nodeRef);
 
         NodeManager::MissingParentNodes missingParentNodes;
 

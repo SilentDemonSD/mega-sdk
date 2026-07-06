@@ -529,8 +529,7 @@ struct SeedRow
 std::string buildSeedNodeBlob(MegaClient& client, const SeedRow& r)
 {
     const NodeHandle h = NodeHandle().set6byte(r.nh);
-    Node& nodeRef = mt::makeNode(client, FILENODE, h);
-    auto node = std::shared_ptr<Node>(&nodeRef);
+    auto node = mt::makeNode(client, FILENODE, h);
 
     // mtime is read from the 'c' attr fingerprint, not a direct field.
     node->size = 100;
