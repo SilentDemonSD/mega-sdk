@@ -48,15 +48,24 @@
 using namespace mega;
 using ::testing::Test;
 
-// IMPORTANT: the main account must be empty (Cloud & Rubbish) before starting the test and it will be purged at exit.
-// Both main and auxiliar accounts shouldn't be contacts yet and shouldn't have any pending contact requests.
-// Set your login credentials as environment variables: $MEGA_EMAIL and $MEGA_PWD (and $MEGA_EMAIL_AUX / $MEGA_PWD_AUX for shares * contacts)
+// IMPORTANT: the main account must be empty (Cloud & Rubbish) before starting the test and it will
+// be purged at exit. Both main and auxiliar accounts shouldn't be contacts yet and shouldn't have
+// any pending contact requests. Set your login credentials as environment variables: $MEGA_EMAIL
+// and $MEGA_PWD (and $MEGA_EMAIL_AUX / $MEGA_PWD_AUX for shares * contacts)
 
-static const unsigned int pollingT      = 500000;   // (microseconds) to check if response from server is received
-static const unsigned int maxTimeout    = 600;      // Maximum time (seconds) to wait for response from server
-static const unsigned int defaultTimeout = 60;      // Normal time for most operations (seconds) to wait for response from server
-static const unsigned int defaultTimeoutMs = defaultTimeout * 1000;
-static const unsigned int waitForSyncsMs = 4000;    // Time to wait after a sync has been created and before adding new files to it
+// Microseconds to check if response from server is received
+constexpr unsigned int pollingT = 500000;
+// Maximum time (seconds) to wait for response from server
+constexpr unsigned int maxTimeout = 600;
+// Moderate time (seconds) for operations that require more time to wait for response from server
+constexpr unsigned int moderateTimeout = 240;
+// Normal time (seconds) for most operations to wait for response from server
+constexpr unsigned int defaultTimeout = 60;
+// Default time (milliseconds) for most operations to wait for response from server
+constexpr unsigned int defaultTimeoutMs = defaultTimeout * 1000;
+// Time to wait after a sync has been created and before adding new files to it
+constexpr unsigned int waitForSyncsMs = 4000;
+// Timeout (seconds) for cleanup operations
 constexpr unsigned int cleanupCatchupTimeoutSecs = 15;
 
 #ifdef ENABLE_SYNC
@@ -1251,7 +1260,8 @@ public:
                       const char* appData,
                       bool isSourceTemporary,
                       bool startFirst,
-                      MegaCancelToken* cancelToken)
+                      MegaCancelToken* cancelToken,
+                      int timeout = defaultTimeout)
     {
         TransferTracker tt(megaApi[apiIndex].get());
         MegaUploadOptions uploadOptions;
@@ -1266,7 +1276,7 @@ public:
 
         const std::string pathStr = localPath ? localPath : "";
         megaApi[apiIndex]->startUpload(pathStr, parent, cancelToken, &uploadOptions, &tt);
-        auto e = tt.waitForResult();
+        auto e = tt.waitForResult(timeout);
         if (newNodeHandleResult)
             *newNodeHandleResult = tt.resultNodeHandle;
         return e;
