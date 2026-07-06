@@ -34141,8 +34141,6 @@ void StreamingBuffer::calcMaxBufferAndMaxOutputSize()
     maxBufferSize = (std::max(maxBufferSize, minNeededBufferSize) / maxReadChunkSize) * maxReadChunkSize;
     // Set max outputSize depending on maxDeliveryChunksPerByteRate. Limit is maxBufferSize.
     maxOutputSize = std::min(maxDeliveryChunksPerByteRate * maxReadChunkSize, maxBufferSize);
-    // Limit single TCP write size to 128KB for throttled delivery
-    maxOutputSize = std::min(maxOutputSize, static_cast<size_t>(1u << 17));
 }
 
 void StreamingBuffer::reset(bool freeData, size_t sizeToReset)
@@ -34385,6 +34383,19 @@ std::string StreamingBuffer::bufferStatus() const
             std::to_string(partialDuration(static_cast<m_off_t>(capacity))).append(" secs)"));
     bufferState.append("]");
     return bufferState;
+}
+
+HttpStreamingBuffer::HttpStreamingBuffer(const std::string& logName):
+    StreamingBuffer(logName)
+{}
+
+void HttpStreamingBuffer::calcMaxBufferAndMaxOutputSize()
+{
+    StreamingBuffer::calcMaxBufferAndMaxOutputSize();
+    maxBufferSize =
+        std::min(maxBufferSize, static_cast<size_t>(HttpStreamingBuffer::HTTP_MAX_BUFFER_SIZE));
+    maxOutputSize =
+        std::min(maxOutputSize, static_cast<size_t>(HttpStreamingBuffer::HTTP_MAX_OUTPUT_SIZE));
 }
 
 // http_parser settings
