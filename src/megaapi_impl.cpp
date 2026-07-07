@@ -6577,7 +6577,7 @@ MegaFileGet::MegaFileGet(MegaClient *client, Node *n, const LocalPath& dstPath, 
     size = n->size;
     mtime = n->mtime;
 
-    if(n->nodekey().size()>=sizeof(filekey))
+    if (n->nodekey().size() == sizeof(filekey))
         memcpy(filekey,n->nodekey().data(),sizeof filekey);
 
     setLocalname(finalPath);
@@ -6621,7 +6621,7 @@ MegaFileGet::MegaFileGet(MegaClient *client, MegaNode *n, const LocalPath& dstPa
     size = n->getSize();
     mtime = n->getModificationTime();
 
-    if(n->getNodeKey()->size()>=sizeof(filekey))
+    if (n->getNodeKey()->size() == sizeof(filekey))
         memcpy(filekey,n->getNodeKey()->data(),sizeof filekey);
 
     setLocalname(finalPath);
@@ -20578,6 +20578,19 @@ unsigned MegaApiImpl::sendPendingTransfers(TransferQueue *queue, MegaRecursiveOp
                         if (startPos >= notOwnedNode->getSize() || endPos >= notOwnedNode->getSize())
                         {
                             e = API_EARGS;
+                            break;
+                        }
+
+                        // Refuse an invalid/unapplied key rather than
+                        // build a zero-key cipher or read the IV past a short key buffer.
+                        const std::string* nodeKey = notOwnedNode->getNodeKey();
+                        if (!nodeKey || nodeKey->size() != FILENODEKEYLENGTH)
+                        {
+                            LOG_err << "Streaming download: foreign node "
+                                    << toNodeHandle(notOwnedNode->getHandle())
+                                    << " has an invalid key (size "
+                                    << (nodeKey ? nodeKey->size() : 0) << ")";
+                            e = API_EKEY;
                             break;
                         }
 

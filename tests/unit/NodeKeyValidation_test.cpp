@@ -29,6 +29,8 @@
 #include <mega/types.h>
 #include <mega/utils.h>
 
+#include <megaapi.h>
+#include <megaapi_impl.h>
 #include <memory>
 #include <optional>
 #include <string>
@@ -86,8 +88,7 @@ protected:
 
     std::shared_ptr<Node> addNode(const nodetype_t type, const handle h)
     {
-        auto& nodeRef = mt::makeNode(*client, type, NodeHandle().set6byte(h), nullptr);
-        std::shared_ptr<Node> node(&nodeRef);
+        auto node = mt::makeNode(*client, type, NodeHandle().set6byte(h), nullptr);
 
         NodeManager::MissingParentNodes missingParentNodes;
         client->mNodeManager.addNode(node, false, false, missingParentNodes);
@@ -294,6 +295,50 @@ TEST_F(NodeKeyValidationTest, TreeProcCopyFlagsUnappliedKey)
         tc.allocnodes();
         tc.proc(client.get(), node);
         EXPECT_FALSE(tc.unusableKey);
+    }
+}
+
+TEST_F(NodeKeyValidationTest, MegaTreeProcCopyFlagsUnappliedKey)
+{
+    const std::string emptyAttrs;
+
+    {
+        MegaNodePrivate badNode("f",
+                                MegaNode::TYPE_FILE,
+                                1,
+                                0,
+                                0,
+                                60,
+                                &kRawShortKey,
+                                &emptyAttrs,
+                                nullptr,
+                                nullptr,
+                                INVALID_HANDLE);
+        ASSERT_NE(badNode.getNodeKey()->size(), static_cast<size_t>(FILENODEKEYLENGTH));
+
+        MegaTreeProcCopy tc(client.get());
+        tc.processMegaNode(&badNode);
+        EXPECT_TRUE(tc.unusableKey);
+    }
+    {
+        const std::string goodKey(FILENODEKEYLENGTH, 'K');
+        MegaNodePrivate goodNode("f",
+                                 MegaNode::TYPE_FILE,
+                                 1,
+                                 0,
+                                 0,
+                                 61,
+                                 &goodKey,
+                                 &emptyAttrs,
+                                 nullptr,
+                                 nullptr,
+                                 INVALID_HANDLE);
+        ASSERT_EQ(goodNode.getNodeKey()->size(), static_cast<size_t>(FILENODEKEYLENGTH));
+
+        MegaTreeProcCopy tc(client.get());
+        tc.processMegaNode(&goodNode);
+        EXPECT_FALSE(tc.unusableKey);
+        EXPECT_EQ(tc.nc, 1u);
     }
 }
 

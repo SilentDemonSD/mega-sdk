@@ -3134,7 +3134,7 @@ public:
     MegaApiImpl* api;
     string url;
     chunkmac_map chunkmacs;
-    byte filekey[FILENODEKEYLENGTH];
+    byte filekey[FILENODEKEYLENGTH] = {};
     MediaProperties mediaproperties;
 
     double latitude = MegaNode::INVALID_COORDINATE;
