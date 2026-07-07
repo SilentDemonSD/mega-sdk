@@ -769,6 +769,19 @@ TEST_F(SdkTestShares, SdkTestShares)
     auto nodeCountAfterInShares = megaApi[1]->getAccurateNumNodes();
     ASSERT_EQ(ownedNodeCount + inSharedNodeCount, nodeCountAfterInShares);
 
+    // --- Move in-share file to its current parent folder (no-op) ---
+    {
+        std::unique_ptr<MegaNode> sharedFile(megaApi[1]->getNodeByHandle(hfile1));
+        std::unique_ptr<MegaNode> sharedFolder(megaApi[1]->getNodeByHandle(hfolder1));
+        ASSERT_NE(sharedFile.get(), nullptr);
+        ASSERT_NE(sharedFolder.get(), nullptr);
+        ASSERT_EQ(sharedFile->getParentHandle(), sharedFolder->getHandle());
+        ASSERT_TRUE(sharedFolder->isInShare());
+        ASSERT_EQ(API_OK, doMoveNode(1, nullptr, sharedFile.get(), sharedFolder.get()));
+        sharedFile.reset(megaApi[1]->getNodeByHandle(hfile1));
+        ASSERT_NE(sharedFile.get(), nullptr) << "Move to same in-share folder must be a no-op";
+    }
+
     // --- Move share file from different subtree, same file and fingerprint ---
     // Pre-requisite, the movement finds a file with same name and fp at target folder
     // Since the source and target folders belong to different trees, it will attempt to copy+delete
