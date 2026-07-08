@@ -11,8 +11,10 @@ import android.graphics.Rect;
 import android.media.MediaMetadataRetriever;
 import android.media.ThumbnailUtils;
 import android.net.Uri;
+import android.os.Build;
 import android.provider.BaseColumns;
 import android.provider.MediaStore;
+import android.util.Size;
 
 import androidx.exifinterface.media.ExifInterface;
 
@@ -181,19 +183,78 @@ public class AndroidGfxProcessor extends MegaGfxProcessor {
         return size.bottom;
     }
 
-    static public Bitmap getBitmap(String path, Rect rect, int orientation, int w, int h) {
+    private static boolean isContentUri(Uri uri) {
+        String scheme = uri == null ? null : uri.getScheme();
+        return scheme != null && scheme.equals("content");
+    }
+
+    /**
+     * Load a thumbnail via {@link ContentResolver#loadThumbnail(Uri, Size, CancellationSignal)}
+     * for {@code content://} URIs (API 29+). Returns pre-cached MediaStore thumbnails when
+     * available, avoiding a full decode. Returns null if unavailable or unsupported.
+     */
+    private static Bitmap loadThumbnail(Uri uri, int targetW, int targetH) {
+        try {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || context == null) {
+                return null;
+            }
+
+            int hintW = Math.max(targetW, 100);
+            int hintH = Math.max(targetH, 100);
+            return context.getContentResolver().loadThumbnail(uri, new Size(hintW, hintH), null);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * Decode a thumbnail via {@link BitmapFactory} with subsampling, EXIF correction, and scaling.
+     */
+    private static Bitmap decodeThumbnail(String path, Rect rect, int orientation,
+                                          int w, int h) {
         int width;
         int height;
+        if ((orientation < 5) || (orientation > 8)) {
+            width = rect.right;
+            height = rect.bottom;
+        } else {
+            width = rect.bottom;
+            height = rect.right;
+        }
+
+        try {
+            int scale = 1;
+            while (width / scale / 2 >= w && height / scale / 2 >= h) {
+                scale *= 2;
+            }
+
+            BitmapFactory.Options options = new BitmapFactory.Options();
+            options.inJustDecodeBounds = false;
+            options.inSampleSize = scale;
+            InputStream inputStream = getInputStreamFromPath(path);
+            Bitmap tmp = BitmapFactory.decodeStream(inputStream, null, options);
+            tmp = fixExifOrientation(tmp, orientation);
+            return Bitmap.createScaledBitmap(tmp, w, h, true);
+        } catch (Throwable e) {
+            return null;
+        }
+    }
+
+    static public Bitmap getBitmap(String path, Rect rect, int orientation, int w, int h) {
+        if (path == null) {
+            return null;
+        }
 
         if (isVideoFile(path)) {
             Uri uri = Uri.parse(path);
-            String scheme = uri == null ? null : uri.getScheme();
-            boolean isContentUri = scheme != null && scheme.equals("content");
+            boolean contentUri = isContentUri(uri);
 
             Bitmap bmThumbnail = null;
             Cursor cursor = null;
 
-            if (!isContentUri) {
+            if (contentUri) {
+                bmThumbnail = loadThumbnail(uri, w, h);
+            } else {
                 try {
                     bmThumbnail = ThumbnailUtils.createVideoThumbnail(
                             path, MediaStore.Video.Thumbnails.FULL_SCREEN_KIND);
@@ -238,7 +299,7 @@ public class AndroidGfxProcessor extends MegaGfxProcessor {
                 }
             }
 
-            if (!isContentUri && bmThumbnail == null) {
+            if (!contentUri && bmThumbnail == null) {
                 try {
                     bmThumbnail = ThumbnailUtils.createVideoThumbnail(path, MediaStore.Video.Thumbnails.MINI_KIND);
                     if (context != null && bmThumbnail == null) {
@@ -271,28 +332,19 @@ public class AndroidGfxProcessor extends MegaGfxProcessor {
             } catch (Exception e) {
             }
         } else {
-            if ((orientation < 5) || (orientation > 8)) {
-                width = rect.right;
-                height = rect.bottom;
-            } else {
-                width = rect.bottom;
-                height = rect.right;
+            Uri uri = Uri.parse(path);
+            if (isContentUri(uri)) {
+                Bitmap thumbnail = loadThumbnail(uri, w, h);
+                if (thumbnail != null) {
+                    try {
+                        return Bitmap.createScaledBitmap(thumbnail, w, h, true);
+                    } catch (Exception e) {
+                    }
+                }
             }
 
-            try {
-                int scale = 1;
-                while (width / scale / 2 >= w && height / scale / 2 >= h)
-                    scale *= 2;
-
-                BitmapFactory.Options options = new BitmapFactory.Options();
-                options.inJustDecodeBounds = false;
-                options.inSampleSize = scale;
-                InputStream inputStream = getInputStreamFromPath(path);
-                Bitmap tmp = BitmapFactory.decodeStream(inputStream, null, options);
-                tmp = fixExifOrientation(tmp, orientation);
-                return Bitmap.createScaledBitmap(tmp, w, h, true);
-            } catch (Throwable e) {
-            }
+            // Fallback
+            return decodeThumbnail(path, rect, orientation, w, h);
         }
 
         return null;
