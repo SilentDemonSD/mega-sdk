@@ -515,7 +515,8 @@ struct MEGA_API FileAccess
                unsigned long padding,
                m_off_t offset,
                FSLogging logging,
-               bool* retry = nullptr);
+               bool* retry = nullptr,
+               int* errorcode = nullptr);
 
     // absolute position read to byte buffer
     virtual bool frawread(void* buffer,
@@ -523,7 +524,8 @@ struct MEGA_API FileAccess
                           m_off_t offset,
                           bool alreadyOpened,
                           FSLogging logging,
-                          bool* retry = nullptr);
+                          bool* retry = nullptr,
+                          int* errorcode = nullptr);
 
     // After a successful nonblocking fopen(), call openf() to really open the file (by localname)
     // (this is a lazy-type approach in case we don't actually need to open the file after finding out type/size/mtime).
@@ -583,7 +585,11 @@ protected:
     int numAsyncReads;
 
     // system-specific raw read/open/close to be provided by platform implementation.   fopen / openf / fread etc are implemented by calling these.
-    virtual bool sysread(void* buffer, unsigned long length, m_off_t offset, bool* retry) = 0;
+    virtual bool sysread(void* buffer,
+                         unsigned long length,
+                         m_off_t offset,
+                         bool* retry,
+                         int* cerrorcode) = 0;
     virtual bool sysstat(m_time_t*, m_off_t*, FSLogging) = 0;
     virtual bool sysopen(bool async, FSLogging) = 0;
     virtual void sysclose() = 0;

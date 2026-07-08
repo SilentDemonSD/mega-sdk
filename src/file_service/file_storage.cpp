@@ -12,6 +12,8 @@ namespace file_service
 
 using namespace common;
 
+static constexpr const char* USER_STORAGE_VER = "_v1";
+
 FileAccessPtr FileStorage::openFile(const LocalPath& path, bool mustCreate)
 {
     // So we can access the filesystem.
@@ -40,10 +42,25 @@ FileAccessPtr FileStorage::openFile(const LocalPath& path, bool mustCreate)
 FileStorage::FileStorage(const UserStoragePath& userStoragePath):
     mFilesystem(std::make_unique<FSACCESS_CLASS>()),
     mStorageDirectory(*mFilesystem, logger(), "file-service", userStoragePath.dbRoot),
-    mUserStorageDirectory(*mFilesystem, logger(), userStoragePath.userName, mStorageDirectory),
+    mUserStorageDirectory(*mFilesystem,
+                          logger(),
+                          userStoragePath.userName + USER_STORAGE_VER,
+                          mStorageDirectory),
     mUserCacheDirectory(*mFilesystem, logger(), "cache", mUserStorageDirectory),
     mFolderLocker(mUserCacheDirectory.path().asPlatformEncoded(true))
-{}
+{
+    // Storage cache file names are now encoded as hex
+    // strings instead of Base64. We start to use a new user storage directory and remove the old
+    // user storage directory. This is safe because, at the time of this change, only the read-only
+    // streaming feature uses the File Service. The only impact is that cached files are removed and
+    // will be fetched from the cloud again when accessed.
+    LocalPath oldUserStorageDirectory(mStorageDirectory);
+    oldUserStorageDirectory.appendWithSeparator(
+        LocalPath::fromRelativePath(userStoragePath.userName),
+        true);
+    FSACCESS_CLASS::emptydirlocal(oldUserStorageDirectory);
+    mFilesystem->rmdirlocal(oldUserStorageDirectory);
+}
 
 FileStorage::~FileStorage() = default;
 

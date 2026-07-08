@@ -50,7 +50,13 @@ public:
         throw NotImplemented{__func__};
     }
 
-    virtual bool frawread(void*, unsigned long, m_off_t, bool, FSLogging, bool* = nullptr) override
+    virtual bool frawread(void*,
+                          unsigned long,
+                          m_off_t,
+                          bool,
+                          FSLogging,
+                          bool* = nullptr,
+                          int* = nullptr) override
     {
         throw NotImplemented{__func__};
         return false;
@@ -101,7 +107,7 @@ public:
         return std::nullopt;
     }
 
-    virtual bool sysread(void*, unsigned long, m_off_t, bool*) override
+    virtual bool sysread(void*, unsigned long, m_off_t, bool*, int*) override
     {
         throw NotImplemented{__func__};
         return false;

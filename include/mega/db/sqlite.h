@@ -33,6 +33,11 @@
 
 namespace mega {
 
+// Forward declaration (full enum in mega/nodemanager.h) so
+// computeDateSectionsCacheId() below can take it by value without pulling
+// nodemanager.h into every TU that includes sqlite.h.
+enum class DateSectionGranularity : int;
+
 class MEGA_API SqliteDbTable : public DbTable
 {
 protected:
@@ -151,6 +156,11 @@ public:
                             std::vector<std::pair<NodeHandle, NodeSerialized>>& nodes,
                             CancelToken cancelFlag) override;
 
+    bool groupAllNodesByDate(const DateSectionParams& params,
+                             const std::vector<NodeHandle>& filesRoots,
+                             std::vector<DateSection>& out,
+                             CancelToken cancelFlag) override;
+
     void createIndexes(bool enableIndexesForSearching,
                        bool enableIndexesForLexicographicalList) override;
     void dropSearchDBIndexes() override;
@@ -193,6 +203,13 @@ private:
     // Allow at least the following containers:
     bool processSqlQueryNodes(sqlite3_stmt *stmt, std::vector<std::pair<mega::NodeHandle, mega::NodeSerialized>>& nodes);
 
+    // Shared input validation for both entry points; false + LOG_warn(logPrefix)
+    // on any invalid field.
+    bool validateListAllEntry(MimeType_t mimeType,
+                              const std::vector<NodeHandle>& filesRoots,
+                              const std::vector<NodeHandle>& excludeHandles,
+                              const char* logPrefix);
+
     // if add a new sqlite3_stmt update finalise()
     sqlite3_stmt* mStmtPutNode = nullptr;
     sqlite3_stmt* mStmtUpdateNode = nullptr;
@@ -209,6 +226,7 @@ private:
     sqlite3_stmt* mStmtGetChildrenLexiNoOffset = nullptr;
     std::map<size_t, sqlite3_stmt*> mStmtSearchNodes;
     std::map<size_t, sqlite3_stmt*> mStmtListAllNodesByPage;
+    std::map<size_t, sqlite3_stmt*> mStmtDateSections;
     sqlite3_stmt* mStmtNodeTagsBelow = nullptr;
     sqlite3_stmt* mStmtNodesByFpNoMtime = nullptr;
     sqlite3_stmt* mStmtNodeByFp = nullptr;
@@ -373,9 +391,45 @@ public:
         CTIME_ASC, CTIME_DESC,
         MTIME_ASC, MTIME_DESC,
         LABEL_ASC = 17, LABEL_DESC,
-        FAV_ASC, FAV_DESC
+        FAV_ASC,
+        FAV_DESC,
+        LAST = FAV_DESC // largest value; bump when adding orders (cache-key stride base)
     };
 };
+
+/// Timestamp-anchor presence + direction packed as one cache-key digit.
+/// 0 = no anchor; 1 = anchor with ASC direction (SQL `<col> >= ?`);
+/// 2 = anchor with DESC direction (SQL `<col> < ?`). Used as input to
+/// computeListAllCacheId below. Internal-only; declared here so the
+/// CacheKeyBuilder regression test can reach it.
+enum class AnchorDirectionDigit : uint8_t
+{
+    None = 0,
+    Asc = 1,
+    Desc = 2,
+    Max = Desc,
+};
+
+/// Cache key for mStmtListAllNodesByPage. Positional-number digit packing.
+/// Distinct SQL shapes produce distinct keys, so prepared statements never
+/// alias. Internal-only (see note above).
+size_t computeListAllCacheId(MimeType_t mimeType,
+                             int order,
+                             bool hasCursor,
+                             AnchorDirectionDigit anchorDir,
+                             bool excludeSensitive,
+                             size_t numRoots,
+                             size_t numExcludes);
+
+/// Cache key for mStmtDateSections. Same shape as computeListAllCacheId but
+/// with a granularity digit instead of cursor + anchor (the section query
+/// has neither). Internal-only (see note above).
+size_t computeDateSectionsCacheId(MimeType_t mimeType,
+                                  int order,
+                                  DateSectionGranularity granularity,
+                                  bool excludeSensitive,
+                                  size_t numRoots,
+                                  size_t numExcludes);
 
 } // namespace
 

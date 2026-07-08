@@ -760,6 +760,10 @@ public:
     // track the signature of a public key in the authring for a given user
     error trackSignature(attr_t signatureType, handle uh, const std::string &signature);
 
+    // Apply an authentication-method change to a contact's entry in the live in-memory authring
+    // immediately, without waiting for the ^!keys round-trip
+    void updateActiveAuthring(attr_t authringType, handle uh, AuthMethod newValue);
+
     // update the authring if needed on the server and manage the deactivation of the temporal authring
     error updateAuthring(AuthRing *authring, attr_t authringType, bool temporalAuthring, handle updateduh);
 
@@ -1705,6 +1709,12 @@ public:
 
     // deadline timestamp related to storage overquota in paywall mode
     m_time_t mOverquotaDeadlineTs;
+
+    // last purge info from 'ug' response
+    LastPurgeInfo mLastPurge;
+
+    // last purge timestamp already notified this session, to avoid re-firing on ug refresh
+    m_time_t mLastPurgeNotifiedTs = 0;
 
     // minimum bytes per second for streaming (0 == no limit, -1 == use default)
     int minstreamingrate;
@@ -3154,7 +3164,6 @@ private:
     // Since it's quite expensive to create a SymmCipher, this is provided to use for quick operation - just set the key and use.
     SymmCipher tmptransfercipher;
 
-    error changePasswordV1(User* u, const char* password, const char* pin);
     error changePasswordV2(const char* password, const char* pin);
     void fillCypheredAccountDataV2(const char* password, vector<byte>& clientRandomValue, vector<byte>& encmasterkey,
                                    string& hashedauthkey, string& salt);

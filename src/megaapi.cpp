@@ -3183,16 +3183,6 @@ void MegaApi::submitPurchaseReceipt(int gateway, const char *receipt, MegaReques
     pImpl->submitPurchaseReceipt(gateway, receipt, UNDEF, AFFILIATE_TYPE_INVALID, 0, listener);
 }
 
-void MegaApi::submitPurchaseReceipt(int gateway, const char *receipt, MegaHandle lastPublicHandle, MegaRequestListener *listener)
-{
-    pImpl->submitPurchaseReceipt(gateway, receipt, lastPublicHandle, AFFILIATE_TYPE_INVALID, 0, listener);
-}
-
-void MegaApi::submitPurchaseReceipt(int gateway, const char *receipt, MegaHandle lastPublicHandle, int lastPublicHandleType, int64_t lastAccessTimestamp, MegaRequestListener *listener)
-{
-    pImpl->submitPurchaseReceipt(gateway, receipt, lastPublicHandle, lastPublicHandleType, lastAccessTimestamp, listener);
-}
-
 void MegaApi::creditCardStore(const char* address1, const char* address2, const char* city,
                      const char* province, const char* country, const char *postalcode,
                      const char* firstname, const char* lastname, const char* creditcard,
@@ -4640,6 +4630,26 @@ MegaNodeList* MegaApi::listAllNodesByPage(const MegaListAllNodesFilter* filter,
                                      convertToCancelToken(cancelToken),
                                      maxElements,
                                      cursor);
+}
+
+MegaNodeList* MegaApi::listAllNodesByPageAtOffset(const MegaListAllNodesFilter* filter,
+                                                  int order,
+                                                  MegaCancelToken* cancelToken,
+                                                  size_t maxElements,
+                                                  int64_t offset)
+{
+    return pImpl->listAllNodesByPageAtOffset(filter,
+                                             order,
+                                             convertToCancelToken(cancelToken),
+                                             maxElements,
+                                             offset);
+}
+
+MegaDateSectionList* MegaApi::groupAllNodesByDate(const MegaGroupNodesByDateFilter* filter,
+                                                  int order,
+                                                  MegaCancelToken* cancelToken)
+{
+    return pImpl->groupAllNodesByDate(filter, order, convertToCancelToken(cancelToken));
 }
 
 long long MegaApi::getSize(MegaNode *n)
@@ -6379,6 +6389,16 @@ void MegaApi::getLastActionedBanner(MegaRequestListener* listener)
     pImpl->getLastActionedBanner(listener);
 }
 
+void MegaApi::setLastPurgeAcknowledged(int64_t ts, MegaRequestListener* listener)
+{
+    pImpl->setLastPurgeAcknowledged(ts, listener);
+}
+
+void MegaApi::getLastPurgeAcknowledged(MegaRequestListener* listener)
+{
+    pImpl->getLastPurgeAcknowledged(listener);
+}
+
 MegaFlag* MegaApi::getFlag(const char* flagName, bool commit, MegaRequestListener* listener)
 {
     return pImpl->getFlag(flagName, commit, listener);
@@ -7546,6 +7566,50 @@ bool MegaSearchFilter::useAndForTextQuery() const
     return false;
 }
 
+MegaNodeScopeFilter::MegaNodeScopeFilter() {}
+
+MegaNodeScopeFilter* MegaNodeScopeFilter::copy() const
+{
+    return nullptr;
+}
+
+MegaNodeScopeFilter::~MegaNodeScopeFilter() {}
+
+void MegaNodeScopeFilter::byCategory(int /*mimeType*/) {}
+
+int MegaNodeScopeFilter::byCategory() const
+{
+    return MegaApi::FILE_TYPE_DEFAULT;
+}
+
+void MegaNodeScopeFilter::byLocationHandles(const MegaHandleList* /*ancestorHandles*/) {}
+
+MegaHandleList* MegaNodeScopeFilter::byLocationHandles() const
+{
+    return nullptr;
+}
+
+void MegaNodeScopeFilter::byExcludeLocationHandles(const MegaHandleList* /*excludeHandles*/) {}
+
+MegaHandleList* MegaNodeScopeFilter::byExcludeLocationHandles() const
+{
+    return nullptr;
+}
+
+void MegaNodeScopeFilter::byLocation(int /*scope*/) {}
+
+int MegaNodeScopeFilter::byLocation() const
+{
+    return MegaNodeScopeFilter::LOCATION_CLOUD_DRIVE_AND_VAULT;
+}
+
+void MegaNodeScopeFilter::bySensitivity(int /*filterOption*/) {}
+
+int MegaNodeScopeFilter::bySensitivity() const
+{
+    return MegaNodeScopeFilter::SENSITIVITY_SHOW_ALL;
+}
+
 MegaListAllNodesFilter::MegaListAllNodesFilter() {}
 
 MegaListAllNodesFilter* MegaListAllNodesFilter::createInstance()
@@ -7560,39 +7624,93 @@ MegaListAllNodesFilter* MegaListAllNodesFilter::copy() const
 
 MegaListAllNodesFilter::~MegaListAllNodesFilter() {}
 
-void MegaListAllNodesFilter::byCategory(int /*mimeType*/) {}
+void MegaListAllNodesFilter::byTimestampAnchor(int64_t /*startDate*/,
+                                               int64_t /*endDate*/,
+                                               int /*sectionOrder*/)
+{}
 
-int MegaListAllNodesFilter::byCategory() const
+int64_t MegaListAllNodesFilter::byTimestampAnchorStartDate() const
 {
-    return MegaApi::FILE_TYPE_DEFAULT;
+    return 0;
 }
 
-void MegaListAllNodesFilter::byLocationHandles(const MegaHandleList* /*ancestorHandles*/) {}
+int64_t MegaListAllNodesFilter::byTimestampAnchorEndDate() const
+{
+    return 0;
+}
 
-MegaHandleList* MegaListAllNodesFilter::byLocationHandles() const
+int MegaListAllNodesFilter::byTimestampAnchorOrder() const
+{
+    return -1;
+}
+
+MegaGroupNodesByDateFilter::MegaGroupNodesByDateFilter() {}
+
+MegaGroupNodesByDateFilter* MegaGroupNodesByDateFilter::createInstance()
+{
+    return new MegaGroupNodesByDateFilterPrivate();
+}
+
+MegaGroupNodesByDateFilter* MegaGroupNodesByDateFilter::copy() const
 {
     return nullptr;
 }
 
-void MegaListAllNodesFilter::byExcludeLocationHandles(const MegaHandleList* /*excludeHandles*/) {}
+MegaGroupNodesByDateFilter::~MegaGroupNodesByDateFilter() {}
 
-MegaHandleList* MegaListAllNodesFilter::byExcludeLocationHandles() const
+void MegaGroupNodesByDateFilter::byGranularity(int /*granularity*/) {}
+
+int MegaGroupNodesByDateFilter::byGranularity() const
+{
+    return MegaGroupNodesByDateFilter::SECTION_GRANULARITY_MONTH;
+}
+
+MegaDateSection::MegaDateSection() {}
+
+MegaDateSection::~MegaDateSection() {}
+
+MegaDateSection* MegaDateSection::copy() const
 {
     return nullptr;
 }
 
-void MegaListAllNodesFilter::byLocation(int /*scope*/) {}
-
-int MegaListAllNodesFilter::byLocation() const
+const char* MegaDateSection::getGroupId() const
 {
-    return MegaListAllNodesFilter::LOCATION_CLOUD_DRIVE_AND_VAULT;
+    return nullptr;
 }
 
-void MegaListAllNodesFilter::bySensitivity(int /*filterOption*/) {}
-
-int MegaListAllNodesFilter::bySensitivity() const
+int64_t MegaDateSection::getStartDate() const
 {
-    return MegaListAllNodesFilter::SENSITIVITY_SHOW_ALL;
+    return 0;
+}
+
+int64_t MegaDateSection::getEndDate() const
+{
+    return 0;
+}
+
+int64_t MegaDateSection::getCount() const
+{
+    return 0;
+}
+
+MegaDateSectionList::MegaDateSectionList() {}
+
+MegaDateSectionList::~MegaDateSectionList() {}
+
+MegaDateSectionList* MegaDateSectionList::copy() const
+{
+    return nullptr;
+}
+
+const MegaDateSection* MegaDateSectionList::get(int /*i*/) const
+{
+    return nullptr;
+}
+
+int MegaDateSectionList::size() const
+{
+    return 0;
 }
 
 MegaSearchPage::MegaSearchPage()
@@ -8044,9 +8162,14 @@ const char *MegaEvent::getEventString() const
     return NULL;
 }
 
-std::optional<int64_t> MegaEvent::getNumber(const std::string& /* key */) const
+int64_t MegaEvent::getNumber(const std::string& /* key */) const
 {
-    return std::nullopt;
+    return 0;
+}
+
+bool MegaEvent::hasNumber(const std::string& /* key */) const
+{
+    return false;
 }
 
 MegaIntegerList* MegaEvent::getIntegerList() const

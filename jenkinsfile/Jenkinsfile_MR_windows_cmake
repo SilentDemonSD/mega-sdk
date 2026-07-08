@@ -237,8 +237,14 @@ pipeline {
                                         """
                                         if (integration_tests_error) {
                                             sh """
+                                                # Compress dumps
                                                 tar czf dumps.tgz dumps || true
-                                                tar czf procdump.tgz procdump*.log || true
+
+                                                # Compress procdump logs for archive
+                                                mkdir -p ./procdump_dir
+                                                (mv procdump*.log procdump_dir/ && tar czf procdump.tgz procdump_dir) || true
+
+                                                # Compress pdbs for archive
                                                 tar czf pdbs.tgz $BUILD_DIR/Debug/*.pdb $BUILD_DIR/tests/integration/Debug/*.pdb
                                                 exit ${integration_tests_error}
                                             """

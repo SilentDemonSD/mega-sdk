@@ -245,9 +245,6 @@ public:
     auto open(NodeHandle parent, const std::string& name) -> FileServiceResultOr<File>;
     auto open(FileID id) -> FileServiceResultOr<File>;
 
-    // Find out where the service is storing the specified file.
-    LocalPath path(FileID id) const;
-
     // Return a reference to this service's queries.
     FileServiceQueries& queries();
 

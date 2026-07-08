@@ -2,6 +2,7 @@
 #include <mega/common/query.h>
 #include <mega/file_service/file_id.h>
 #include <mega/types.h>
+#include <mega/utils.h>
 
 #include <cinttypes>
 #include <limits>
@@ -78,25 +79,17 @@ FileID FileID::from(NodeHandle handle)
     return FileID();
 }
 
-FileID FileID::from(const std::string& string)
-{
-    if (!string.empty())
-        return from(string.c_str());
-
-    return FileID();
-}
-
-FileID FileID::from(const char* string)
+FileID FileID::from(const std::string& str)
 {
     FileID id;
 
-    if (!string)
+    if (str.empty())
         return id;
 
-    auto length = Base64::atob(string, reinterpret_cast<byte*>(&id.mID), sizeof(id.mID));
-
-    if (static_cast<std::size_t>(length) < sizeof(id.mID))
-        return FileID();
+    if (const auto [value, success] = fromHex<std::uint64_t>(str); success)
+    {
+        id.mID = value;
+    }
 
     return id;
 }
@@ -118,7 +111,7 @@ NodeHandle FileID::toHandle() const
 
 std::string FileID::toString() const
 {
-    return std::string(Base64Str<sizeof(mID)>(&mID));
+    return Utils::uint64ToHexString(mID);
 }
 
 std::uint64_t FileID::toU64() const

@@ -32,6 +32,7 @@ target_sources(test_integration
     SdkTestSyncPrevalidation_test.cpp
     Sync_test.cpp
     one_question_survey_test.cpp
+    sdk_test_purge_notification.cpp
     integration_test_utils.cpp
     DisableBackupSync_test.cpp
     SdkTestPersistConnections_test.cpp
@@ -56,6 +57,7 @@ target_sources(test_integration
     SdkTestGetChildrenLexicographic_test.cpp
     SdkTestListAllNodesByPage_test.cpp
     SdkTestTransferResume_test.cpp
+    SdkTestNodeDateSections_test.cpp
     sdk_test_share.cpp
     sdk_test_share_nested.cpp
     SdkTestMassiveActionPackets_test.cpp

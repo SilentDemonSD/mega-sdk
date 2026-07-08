@@ -8114,6 +8114,33 @@ typedef NS_ENUM(NSInteger, PasswordManagerNodeType) {
                                         cursor:(nullable MEGASearchCursorOffset *)cursor
                                    cancelToken:(MEGACancelToken *)cancelToken;
 
+/**
+ * @brief Fetch a contiguous window of nodes by offset + limit from the ordered result.
+ *
+ * Skips @p offset nodes and returns up to @p maxElements. Compose with
+ * MEGAListAllNodesFilter's byTimestampAnchor to anchor a page at a date section
+ * (from groupAllNodesByDate), then pass the local position within that section
+ * as @p offset to land on the on-screen window. Offset positions are NOT stable
+ * under concurrent add/delete; re-fetch on change notifications.
+ *
+ * This method takes no cursor: offset windowing and keyset cursor pagination
+ * are mutually exclusive.
+ *
+ * @param filter      Filter describing the mime category and optional ancestor /
+ *                    sensitivity constraint. Must not be nil.
+ * @param orderType   Sort order constant.
+ * @param maxElements Window size (limit). 0 means no limit.
+ * @param offset      Leading nodes to skip; must be >= 0 (negative => empty list).
+ * @param cancelToken Cancellation token; may be nil.
+ *
+ * @return Up to maxElements nodes starting at offset; empty on invalid args or no match.
+ */
+- (MEGANodeList *)listAllNodesByPageWithFilter:(MEGAListAllNodesFilter *)filter
+                                     orderType:(MEGASortOrderType)orderType
+                                   maxElements:(NSUInteger)maxElements
+                                        offset:(int64_t)offset
+                                   cancelToken:(MEGACancelToken *)cancelToken;
+
 /// Get a list of buckets, each bucket containing a list of recently added/modified nodes
 ///
 /// Each bucket contains files that were added/modified in a set, by a single user.
@@ -10248,6 +10275,14 @@ typedef NS_ENUM(NSInteger, PasswordManagerNodeType) {
  * @param options Options to set for reclaiming storage used by MEGA's file services.
  */
 - (void)setFileServiceReclaimOptions:(MEGAFileServiceReclaimOptions *)options;
+
+/**
+ * @brief Acknowledge a purge notification so it is not shown again.
+ *
+ * @param timestamp Unix timestamp of the purge to acknowledge (from EventLastPurge).
+ * @param delegate MEGARequestDelegate to track this request.
+ */
+- (void)setLastPurgeAcknowledgedWithTimestamp:(int64_t)timestamp delegate:(id<MEGARequestDelegate>)delegate;
 
 @end
 

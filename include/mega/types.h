@@ -448,6 +448,9 @@ typedef enum { MIME_TYPE_UNKNOWN    = 0,
                MIME_TYPE_ALL_DOCS   = 11,   // any of {document, pdf, presentation, spreadsheet}
                MIME_TYPE_OTHERS = 12, // any other file not included in previous types
                MIME_TYPE_ALL_VISUAL_MEDIA = 13, // any of {photo, video}
+               // Largest value (aliases the last entry, so -Wswitch stays clean). Bump when
+               // adding a type; also the mime cache-key base in db/sqlite.cpp.
+               MIME_TYPE_MAX = MIME_TYPE_ALL_VISUAL_MEDIA,
              } MimeType_t;
 
 typedef enum { LBL_UNKNOWN = 0, LBL_RED = 1, LBL_ORANGE = 2, LBL_YELLOW = 3, LBL_GREEN = 4,
@@ -862,6 +865,29 @@ typedef vector<recentaction> recentactions_vector;
 
 typedef enum { BIZ_STATUS_UNKNOWN = -2, BIZ_STATUS_EXPIRED = -1, BIZ_STATUS_INACTIVE = 0, BIZ_STATUS_ACTIVE = 1, BIZ_STATUS_GRACE_PERIOD = 2 } BizStatus;
 typedef enum { BIZ_MODE_UNKNOWN = -1, BIZ_MODE_SUBUSER = 0, BIZ_MODE_MASTER = 1 } BizMode;
+
+typedef enum
+{
+    PURGE_REASON_UNKNOWN = 0,
+    PURGE_REASON_PARKED = 1,
+    PURGE_REASON_BLOCKED = 2,
+    PURGE_REASON_INACTIVE = 4,
+    PURGE_REASON_STOPLIGHT = 5, // replaced by PURGE_REASON_ODQPAYWALL
+    PURGE_REASON_CREDENTIALSTUFFED = 6,
+    PURGE_REASON_ODQPAYWALL = 7,
+    PURGE_REASON_BUSINESSBLACKLISTED = 8,
+    PURGE_REASON_BUSINESSPAYMENTOVERDUE = 9,
+} PurgeReason;
+
+struct LastPurgeInfo
+{
+    m_time_t ts = 0;
+    PurgeReason reason = PURGE_REASON_UNKNOWN;
+    // Only present when reason is PURGE_REASON_INACTIVE and warning history is available; 0 =
+    // absent
+    m_time_t warningTs = 0; // timestamp of the first inactivity warning
+    m_time_t lastActiveTs = 0; // last activity prior to the warning
+};
 
 typedef enum {
     ACCOUNT_TYPE_UNKNOWN = -1,

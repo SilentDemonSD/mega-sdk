@@ -2,10 +2,10 @@
 #define MEGA_MAJOR_VERSION 10
 #endif
 #ifndef MEGA_MINOR_VERSION
-#define MEGA_MINOR_VERSION 15
+#define MEGA_MINOR_VERSION 16
 #endif
 #ifndef MEGA_MICRO_VERSION
-#define MEGA_MICRO_VERSION 1
+#define MEGA_MICRO_VERSION 0
 #endif
 
 // Supports versions [0-255].[0-255].[0-255]

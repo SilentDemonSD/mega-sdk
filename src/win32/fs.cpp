@@ -338,14 +338,21 @@ m_off_t sysread(OsFileDescriptor fd,
     return static_cast<m_off_t>(numRead);
 }
 
-bool WinFileAccess::sysread(void* buffer, unsigned long length, m_off_t offset, bool* cretry)
+bool WinFileAccess::sysread(void* buffer,
+                            unsigned long length,
+                            m_off_t offset,
+                            bool* cretry,
+                            int* cerrorcode)
 {
     // Keeps logic simple.
+    if (!cerrorcode)
+        cerrorcode = &errorcode;
+
     if (!cretry)
         cretry = &retry;
 
     // Perform read.
-    auto numRead = ::mega::sysread(hFile, buffer, length, offset, cretry, &errorcode);
+    auto numRead = ::mega::sysread(hFile, buffer, length, offset, cretry, cerrorcode);
 
     // Error
     if (numRead < 0)

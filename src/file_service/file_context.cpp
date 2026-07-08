@@ -2387,7 +2387,7 @@ void FileContext::FlushContext::operator()(FlushContextPtr& context, FileResult 
         return;
 
     // Where is this file's data stored?
-    auto path = service.path(info.id());
+    auto path = service.userFilePath(info.id());
 
     // Convenience.
     auto& [name, parent] = mLocation;

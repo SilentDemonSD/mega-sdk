@@ -1044,14 +1044,21 @@ AutoFileHandle AndroidFileAccess::dupFileDescriptor()
     return dup(fd);
 }
 
-bool AndroidFileAccess::sysread(void* buffer, unsigned long length, m_off_t offset, bool* cretry)
+bool AndroidFileAccess::sysread(void* buffer,
+                                unsigned long length,
+                                m_off_t offset,
+                                bool* cretry,
+                                int* cerrorcode)
 {
     // Keeps logic simple.
+    if (!cerrorcode)
+        cerrorcode = &errorcode;
+
     if (!cretry)
         cretry = &retry;
 
     // Perform the read.
-    auto result = ::mega::sysread(fd, buffer, length, offset, cretry, &errorcode);
+    auto result = ::mega::sysread(fd, buffer, length, offset, cretry, cerrorcode);
 
     // Read failed.
     if (result < 0)
