@@ -232,15 +232,25 @@ pipeline {
                                             fi
                                         fi
 
-                                        # Process ips files in case some test crashes
+                                        # Collect PIDs of test processes to match against macOS crash reports.
                                         if [ -z \"${TESTS_PARALLEL}\" ]; then
                                             pid_list=\$pid
                                         else
                                             pid_list=`grep \"<< PROCESS\" tests.stdout | sed 's/.*PID:\\([0-9]*\\).*/\\1/' | tr '\\n' ' '`
                                         fi
+                                        # macOS 12+ .ips files contain two JSON objects: metadata on line 1 and
+                                        # the crash report body on the remaining lines. pid lives in the body.
+                                        # jq must not parse the whole file as a single JSON object.
+                                        # https://developer.apple.com/documentation/xcode/interpreting-the-json-format-of-a-crash-report
                                         for ips_file in ~/Library/Logs/DiagnosticReports/*.ips; do
-                                            ips_pid=`jq '.pid?, .PID?' \$ips_file | grep -iv null`
-                                            if echo \$pid_list | grep -q -w "\$ips_pid" ; then
+                                            # Modern format: crash body starts at line 2.
+                                            ips_pid=`tail -n +2 \"\$ips_file\" 2>/dev/null | jq -r '.pid? // .PID? // empty' 2>/dev/null`
+                                            if [ -z \"\$ips_pid\" ]; then
+                                                # Legacy format: single JSON object on line 1.
+                                                ips_pid=`head -1 \"\$ips_file\" 2>/dev/null | jq -r '.pid? // .PID? // empty' 2>/dev/null`
+                                            fi
+                                            # Archive only reports that belong to this test run.
+                                            if [ -n \"\$ips_pid\" ] && echo \$pid_list | grep -q -w \"\$ips_pid\" ; then
                                                 cp -v \$ips_file .
                                                 cat \$ips_file
                                             fi
