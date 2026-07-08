@@ -7,6 +7,10 @@ JavaVM* MEGAjvm = nullptr;
 jclass fileWrapper = nullptr;
 jclass integerClass = nullptr;
 jclass arrayListClass = nullptr;
+/// Cached java/util/List class and method IDs — set at JNI_OnLoad, safe for background threads.
+jclass listClass = nullptr;
+jmethodID listSizeMethod = nullptr;
+jmethodID listGetMethod = nullptr;
 
 namespace mega
 {
@@ -17,6 +21,46 @@ LRUCache<std::string, AndroidFileWrapper::URIData> AndroidFileWrapper::URIDataCa
 LRUCache<std::string, std::string> AndroidFileWrapper::localPathURICache(LRUCacheSize);
 std::mutex AndroidFileWrapper::URIDataCacheLock;
 std::mutex AndroidFileWrapper::localPathURICacheLock;
+
+namespace
+{
+// Check JNIEnv for a pending exception. If one is found: describe it, clear it, log an
+// error mentioning the calling context, and return true. Returns false when no
+// exception was pending.
+//
+// ALWAYS clear a pending exception before the next JNI call as required by the official docs:
+//
+// https://docs.oracle.com/en/java/javase/25/docs/specs/jni/design.html
+// "After an exception has been raised, the native code must first clear the exception
+// before making other JNI calls."
+//
+// Usage after CallBooleanMethod / CallIntMethod / CallLongMethod (no null return):
+//
+//     jboolean result = env->CallBooleanMethod(...);
+//     if (checkAndClearJniException(...))
+//         return ...;
+//
+// Usage after GetMethodID / GetStaticMethodID / GetFieldID:
+//
+//     jmethodID methodID = env->GetMethodID(...);
+//     if (methodID == nullptr)
+//     {
+//         checkAndClearJniException(...);
+//         return ...;
+//     }
+//
+bool checkAndClearJniException(JNIEnv* env, const char* callerFn, const char* javaMethod)
+{
+    if (!env->ExceptionCheck())
+    {
+        return false;
+    }
+    env->ExceptionDescribe();
+    env->ExceptionClear();
+    LOG_err << callerFn << ": " << javaMethod << " threw a JNI exception";
+    return true;
+}
+} // anonymous namespace
 
 AndroidFileWrapper::AndroidFileWrapper(const std::string& path):
     mURI(path)
@@ -36,26 +80,40 @@ AndroidFileWrapper::AndroidFileWrapper(const std::string& path):
 
     if (getAndroidFileMethod == nullptr)
     {
-        env->ExceptionDescribe();
-        env->ExceptionClear();
-        LOG_err << "Error: AndroidFileWrapper::AndroidFileWrapper";
+        checkAndClearJniException(env,
+                                  "AndroidFileWrapper::AndroidFileWrapper",
+                                  "GetStaticMethodID(FileWrapper.getFromUri)");
         return;
     }
 
     jstring jPath = env->NewStringUTF(mURI.c_str());
     jobject temporalObject = env->CallStaticObjectMethod(fileWrapper, getAndroidFileMethod, jPath);
+    checkAndClearJniException(env,
+                              "AndroidFileWrapper::AndroidFileWrapper",
+                              "FileWrapper.getFromUri");
     env->DeleteLocalRef(jPath);
 
     if (temporalObject != nullptr)
     {
         mJavaObject = std::make_shared<JavaObject>(env->NewGlobalRef(temporalObject));
         env->DeleteLocalRef(temporalObject);
+
+        constexpr const char contentScheme[] = "content://";
+        // content:// URIs (e.g. from getChildrenUris()) are already canonical, skip
+        // updateURIFromFileWrapper() call. Sync mURI otherwise.
+        auto isContentUri = mURI.compare(0, sizeof(contentScheme) - 1, contentScheme) == 0;
+        if (!isContentUri)
+        {
+            updateURIFromFileWrapper();
+        }
     }
 }
 
 AndroidFileWrapper::AndroidFileWrapper(std::shared_ptr<JavaObject> javaObject):
     mJavaObject(javaObject)
-{}
+{
+    updateURIFromFileWrapper();
+}
 
 AndroidFileWrapper::~AndroidFileWrapper() {}
 
@@ -73,22 +131,34 @@ int AndroidFileWrapper::getFileDescriptor(bool write)
         env->GetMethodID(fileWrapper, "getFileDescriptor", "(Z)Ljava/lang/Integer;");
     if (methodID == nullptr)
     {
-        env->ExceptionDescribe();
-        env->ExceptionClear();
-        LOG_err << "Error: AndroidFileWrapper::getFileDescriptor";
+        checkAndClearJniException(env,
+                                  "AndroidFileWrapper::getFileDescriptor",
+                                  "GetMethodID(FileWrapper.getFileDescriptor)");
         return -1;
     }
 
     jobject fileDescriptorObj = env->CallObjectMethod(mJavaObject->mObj, methodID, write);
+    checkAndClearJniException(env,
+                              "AndroidFileWrapper::getFileDescriptor",
+                              "FileWrapper.getFileDescriptor");
     if (fileDescriptorObj && integerClass)
     {
         jmethodID intValueMethod = env->GetMethodID(integerClass, "intValue", "()I");
-        if (!intValueMethod)
+        if (intValueMethod == nullptr)
         {
+            checkAndClearJniException(env,
+                                      "AndroidFileWrapper::getFileDescriptor",
+                                      "GetMethodID(Integer.intValue)");
+            env->DeleteLocalRef(fileDescriptorObj);
             return -1;
         }
 
-        return env->CallIntMethod(fileDescriptorObj, intValueMethod);
+        const jint result = env->CallIntMethod(fileDescriptorObj, intValueMethod);
+        const bool threw = checkAndClearJniException(env,
+                                                     "AndroidFileWrapper::getFileDescriptor",
+                                                     "Integer.intValue");
+        env->DeleteLocalRef(fileDescriptorObj);
+        return threw ? -1 : result;
     }
 
     return -1;
@@ -116,13 +186,18 @@ bool AndroidFileWrapper::isFolder()
     jmethodID methodID = env->GetMethodID(fileWrapper, IS_FOLDER, "()Z");
     if (methodID == nullptr)
     {
-        env->ExceptionDescribe();
-        env->ExceptionClear();
-        LOG_err << "Error: AndroidFileWrapper::isFolder";
+        checkAndClearJniException(env,
+                                  "AndroidFileWrapper::isFolder",
+                                  "GetMethodID(FileWrapper.isFolder)");
         return false;
     }
 
-    data->mIsFolder = env->CallBooleanMethod(mJavaObject->mObj, methodID);
+    const jboolean isFolder = env->CallBooleanMethod(mJavaObject->mObj, methodID);
+    if (checkAndClearJniException(env, "AndroidFileWrapper::isFolder", "FileWrapper.isFolder"))
+    {
+        return false;
+    }
+    data->mIsFolder = isFolder;
     setUriData(data.value());
     return data->mIsFolder.value();
 }
@@ -150,15 +225,22 @@ bool AndroidFileWrapper::isURI()
     jmethodID methodID = env->GetStaticMethodID(fileWrapper, IS_PATH, "(Ljava/lang/String;)Z");
     if (methodID == nullptr)
     {
-        env->ExceptionDescribe();
-        env->ExceptionClear();
-
-        LOG_err << "Critical error AndroidPlatformHelper::isURI";
+        checkAndClearJniException(env,
+                                  "AndroidFileWrapper::isURI",
+                                  "GetStaticMethodID(FileWrapper.isPath)");
         return false;
     }
 
-    data->mIsURI =
-        !env->CallStaticBooleanMethod(fileWrapper, methodID, env->NewStringUTF(mURI.c_str()));
+    jstring jUri = env->NewStringUTF(mURI.c_str());
+    const jboolean isPath = env->CallStaticBooleanMethod(fileWrapper, methodID, jUri);
+    const bool threw =
+        checkAndClearJniException(env, "AndroidFileWrapper::isURI", "FileWrapper.isPath");
+    env->DeleteLocalRef(jUri);
+    if (threw)
+    {
+        return false;
+    }
+    data->mIsURI = !isPath;
     setUriData(data.value());
     return data->mIsURI.value();
 }
@@ -204,11 +286,11 @@ std::string AndroidFileWrapper::getName()
     return data->mName.value();
 }
 
-std::vector<std::shared_ptr<AndroidFileWrapper>> AndroidFileWrapper::getChildren()
+std::optional<std::vector<std::shared_ptr<AndroidFileWrapper>>> AndroidFileWrapper::getChildren()
 {
     if (!exists())
     {
-        return {};
+        return std::nullopt;
     }
 
     JNIEnv* env{nullptr};
@@ -216,34 +298,119 @@ std::vector<std::shared_ptr<AndroidFileWrapper>> AndroidFileWrapper::getChildren
     jmethodID methodID = env->GetMethodID(fileWrapper, GET_CHILDREN_URIS, "()Ljava/util/List;");
     if (methodID == nullptr)
     {
-        env->ExceptionDescribe();
-        env->ExceptionClear();
-        LOG_err << "Error: AndroidFileWrapper::getchildren";
-        return {};
+        checkAndClearJniException(env,
+                                  "AndroidFileWrapper::getChildren",
+                                  "GetMethodID(FileWrapper.getChildrenUris)");
+        return std::nullopt;
     }
 
     jobject childrenUris = env->CallObjectMethod(mJavaObject->mObj, methodID);
-    jclass listClass = env->FindClass("java/util/List");
-    jmethodID sizeMethod = env->GetMethodID(listClass, "size", "()I");
-    jmethodID getMethod = env->GetMethodID(listClass, "get", "(I)Ljava/lang/Object;");
-    jint size = env->CallIntMethod(childrenUris, sizeMethod);
+    if (checkAndClearJniException(env,
+                                  "AndroidFileWrapper::getChildren",
+                                  "FileWrapper.getChildrenUris") ||
+        !childrenUris)
+    {
+        return std::nullopt;
+    }
+
+    // Use cached List class and method IDs (set at JNI_OnLoad).
+    if (!listClass || !listSizeMethod || !listGetMethod)
+    {
+        LOG_err << "Error: List class/methods not initialized";
+        env->DeleteLocalRef(childrenUris);
+        return std::nullopt;
+    }
+
+    jint size = env->CallIntMethod(childrenUris, listSizeMethod);
+    if (checkAndClearJniException(env, "AndroidFileWrapper::getChildren", "List.size"))
+    {
+        env->DeleteLocalRef(childrenUris);
+        return std::nullopt;
+    }
 
     std::vector<std::shared_ptr<AndroidFileWrapper>> children;
-    children.reserve(size);
+    children.reserve(static_cast<size_t>(size));
     for (jint i = 0; i < size; ++i)
     {
-        jstring element = (jstring)env->CallObjectMethod(childrenUris, getMethod, i);
+        jstring element = (jstring)env->CallObjectMethod(childrenUris, listGetMethod, i);
+        if (checkAndClearJniException(env, "AndroidFileWrapper::getChildren", "List.get"))
+        {
+            env->DeleteLocalRef(childrenUris);
+            return std::nullopt;
+        }
+        if (!element)
+        {
+            env->DeleteLocalRef(childrenUris);
+            return std::nullopt;
+        }
         const char* elementStr = env->GetStringUTFChars(element, nullptr);
         if (!elementStr)
         {
-            return {};
+            checkAndClearJniException(env, "AndroidFileWrapper::getChildren", "GetStringUTFChars");
+            env->DeleteLocalRef(element);
+            env->DeleteLocalRef(childrenUris);
+            return std::nullopt;
         }
         children.push_back(AndroidFileWrapper::getAndroidFileWrapper(elementStr));
         env->ReleaseStringUTFChars(element, elementStr);
         env->DeleteLocalRef(element);
     }
+    env->DeleteLocalRef(childrenUris);
 
     return children;
+}
+
+bool AndroidFileWrapper::updateURIFromFileWrapper()
+{
+    if (mJavaObject == nullptr || mJavaObject->mObj == nullptr)
+    {
+        LOG_err << "updateURIFromFileWrapper: mJavaObject object is not valid";
+        return false;
+    }
+    if (fileWrapper == nullptr)
+    {
+        LOG_err << "updateURIFromFileWrapper: fileWrapper class not initialized";
+        return false;
+    }
+
+    JNIEnv* env{nullptr};
+    MEGAjvm->AttachCurrentThread(&env, NULL);
+    jmethodID getUriMethodID = env->GetMethodID(fileWrapper, GET_URI, "()Ljava/lang/String;");
+    if (getUriMethodID == nullptr)
+    {
+        checkAndClearJniException(env,
+                                  "AndroidFileWrapper::updateURIFromFileWrapper",
+                                  "GetMethodID(FileWrapper.getUri)");
+        return false;
+    }
+
+    jstring jUri = (jstring)env->CallObjectMethod(mJavaObject->mObj, getUriMethodID);
+    if (checkAndClearJniException(env,
+                                  "AndroidFileWrapper::updateURIFromFileWrapper",
+                                  "FileWrapper.getUri"))
+    {
+        return false;
+    }
+    if (jUri == nullptr)
+    {
+        LOG_err << "updateURIFromFileWrapper: getUri() returned null";
+        return false;
+    }
+
+    const char* uriStr = env->GetStringUTFChars(jUri, nullptr);
+    if (uriStr == nullptr)
+    {
+        checkAndClearJniException(env,
+                                  "AndroidFileWrapper::updateURIFromFileWrapper",
+                                  "GetStringUTFChars");
+        LOG_err << "updateURIFromFileWrapper: GetStringUTFChars() returned null";
+        env->DeleteLocalRef(jUri);
+        return false;
+    }
+    mURI = uriStr;
+    env->ReleaseStringUTFChars(jUri, uriStr);
+    env->DeleteLocalRef(jUri);
+    return true;
 }
 
 std::shared_ptr<AndroidFileWrapper>
@@ -275,6 +442,7 @@ jobject AndroidFileWrapper::vectorToJavaList(JNIEnv* env, const std::vector<std:
     {
         jstring jstr = env->NewStringUTF(str.c_str());
         env->CallBooleanMethod(list, add, jstr);
+        checkAndClearJniException(env, "AndroidFileWrapper::vectorToJavaList", "ArrayList.add");
         env->DeleteLocalRef(jstr);
     }
 
@@ -294,12 +462,11 @@ std::optional<std::string> AndroidFileWrapper::createOrReturnElement(const std::
     MEGAjvm->AttachCurrentThread(&env, NULL);
     jmethodID methodID =
         env->GetMethodID(fileWrapper, CREATE_NESTED_PATH, "(Ljava/util/List;ZZ)Ljava/lang/String;");
-
     if (methodID == nullptr)
     {
-        env->ExceptionDescribe();
-        env->ExceptionClear();
-        LOG_err << "Error: AndroidFileWrapper::createOrReturnElement";
+        checkAndClearJniException(env,
+                                  "AndroidFileWrapper::createOrReturnElement",
+                                  "GetMethodID(FileWrapper.createNestedPath)");
         return std::nullopt;
     }
 
@@ -310,23 +477,29 @@ std::optional<std::string> AndroidFileWrapper::createOrReturnElement(const std::
 
     jstring uriString = static_cast<jstring>(
         env->CallObjectMethod(mJavaObject->mObj, methodID, list, create, isFolder));
-
+    const bool threw = checkAndClearJniException(env,
+                                                 "AndroidFileWrapper::createOrReturnElement",
+                                                 "FileWrapper.createNestedPath");
     env->DeleteLocalRef(list);
-    if (uriString != nullptr)
+    if (threw || uriString == nullptr)
     {
-        const char* elementStr = env->GetStringUTFChars(uriString, nullptr);
-        if (!elementStr)
-        {
-            return std::nullopt;
-        }
-
-        std::string uri{elementStr};
-        env->ReleaseStringUTFChars(uriString, elementStr);
-        env->DeleteLocalRef(uriString);
-        return uri;
+        return std::nullopt;
     }
 
-    return std::nullopt;
+    const char* elementStr = env->GetStringUTFChars(uriString, nullptr);
+    if (elementStr == nullptr)
+    {
+        checkAndClearJniException(env,
+                                  "AndroidFileWrapper::createOrReturnElement",
+                                  "GetStringUTFChars");
+        env->DeleteLocalRef(uriString);
+        return std::nullopt;
+    }
+
+    std::string uri{elementStr};
+    env->ReleaseStringUTFChars(uriString, elementStr);
+    env->DeleteLocalRef(uriString);
+    return uri;
 }
 
 std::shared_ptr<AndroidFileWrapper> AndroidFileWrapper::createChild(const std::string& childName,
@@ -343,17 +516,19 @@ std::shared_ptr<AndroidFileWrapper> AndroidFileWrapper::createChild(const std::s
         fileWrapper,
         CREATE_CHILD,
         "(Ljava/lang/String;Z)Lmega/privacy/android/data/filewrapper/FileWrapper;");
-
     if (methodID == nullptr)
     {
-        env->ExceptionDescribe();
-        env->ExceptionClear();
-        LOG_err << "Error: AndroidFileWrapper::createChild";
+        checkAndClearJniException(env,
+                                  "AndroidFileWrapper::createChild",
+                                  "GetMethodID(FileWrapper.createChildFile)");
         return nullptr;
     }
 
     jstring jname{env->NewStringUTF(childName.c_str())};
     jobject temporalObject{env->CallObjectMethod(mJavaObject->mObj, methodID, jname, isFolder)};
+    checkAndClearJniException(env,
+                              "AndroidFileWrapper::createChild",
+                              "FileWrapper.createChildFile");
     env->DeleteLocalRef(jname);
     jobject globalObject{nullptr};
     if (temporalObject != nullptr)
@@ -382,27 +557,32 @@ std::shared_ptr<AndroidFileWrapper> AndroidFileWrapper::getChildByName(const std
     MEGAjvm->AttachCurrentThread(&env, NULL);
     jmethodID methodID =
         env->GetMethodID(fileWrapper, GET_CHILD_BY_NAME, "(Ljava/lang/String;)Ljava/lang/String;");
-    if (!methodID)
+    if (methodID == nullptr)
     {
-        env->ExceptionDescribe();
-        env->ExceptionClear();
-        LOG_err << "Error: AndroidFileWrapper::getChildByName";
+        checkAndClearJniException(env,
+                                  "AndroidFileWrapper::getChildByName",
+                                  "GetMethodID(FileWrapper.getChildByName)");
         return nullptr;
     }
 
     jstring jname{env->NewStringUTF(name.c_str())};
     jstring uriString =
         static_cast<jstring>(env->CallObjectMethod(mJavaObject->mObj, methodID, jname));
+    const bool threw = checkAndClearJniException(env,
+                                                 "AndroidFileWrapper::getChildByName",
+                                                 "FileWrapper.getChildByName");
     env->DeleteLocalRef(jname);
-    if (!uriString)
+    if (threw || uriString == nullptr)
     {
         return nullptr;
     }
 
     const char* elementStr = env->GetStringUTFChars(uriString, nullptr);
-    if (!elementStr)
+    if (elementStr == nullptr)
     {
-        return {};
+        checkAndClearJniException(env, "AndroidFileWrapper::getChildByName", "GetStringUTFChars");
+        env->DeleteLocalRef(uriString);
+        return nullptr;
     }
 
     auto aux = AndroidFileWrapper::getAndroidFileWrapper(elementStr);
@@ -423,16 +603,16 @@ std::shared_ptr<AndroidFileWrapper> AndroidFileWrapper::getParent() const
     jmethodID methodID = env->GetMethodID(fileWrapper,
                                           GET_PARENT,
                                           "()Lmega/privacy/android/data/filewrapper/FileWrapper;");
-
     if (methodID == nullptr)
     {
-        env->ExceptionDescribe();
-        env->ExceptionClear();
-        LOG_err << "Error: AndroidFileWrapper::getParent";
+        checkAndClearJniException(env,
+                                  "AndroidFileWrapper::getParent",
+                                  "GetMethodID(FileWrapper.getParentFile)");
         return nullptr;
     }
 
     jobject temporalObject = env->CallObjectMethod(mJavaObject->mObj, methodID);
+    checkAndClearJniException(env, "AndroidFileWrapper::getParent", "FileWrapper.getParentFile");
     jobject globalObject{nullptr};
     if (temporalObject != nullptr)
     {
@@ -474,16 +654,17 @@ std::optional<std::string> AndroidFileWrapper::getPath()
     JNIEnv* env{nullptr};
     MEGAjvm->AttachCurrentThread(&env, NULL);
     jmethodID methodID = env->GetMethodID(fileWrapper, GET_PATH, "()Ljava/lang/String;");
-    if (!methodID)
+    if (methodID == nullptr)
     {
-        env->ExceptionDescribe();
-        env->ExceptionClear();
-        LOG_err << "Error: AndroidFileWrapper::getPath";
+        checkAndClearJniException(env,
+                                  "AndroidFileWrapper::getPath",
+                                  "GetMethodID(FileWrapper.getPath)");
         return std::nullopt;
     }
 
     jstring pathString = static_cast<jstring>(env->CallObjectMethod(mJavaObject->mObj, methodID));
-    if (!pathString)
+    if (checkAndClearJniException(env, "AndroidFileWrapper::getPath", "FileWrapper.getPath") ||
+        !pathString)
     {
         return std::nullopt;
     }
@@ -491,6 +672,8 @@ std::optional<std::string> AndroidFileWrapper::getPath()
     const char* chars = env->GetStringUTFChars(pathString, nullptr);
     if (!chars)
     {
+        checkAndClearJniException(env, "AndroidFileWrapper::getPath", "GetStringUTFChars");
+        env->DeleteLocalRef(pathString);
         return std::nullopt;
     }
 
@@ -508,18 +691,34 @@ bool AndroidFileWrapper::deleteFile()
         return false;
     }
 
+    const std::optional<std::string> localPath = getPath();
+
     JNIEnv* env{nullptr};
     MEGAjvm->AttachCurrentThread(&env, NULL);
     jmethodID methodID = env->GetMethodID(fileWrapper, DELETE_FILE, "()Z");
-    if (!methodID)
+    if (methodID == nullptr)
     {
-        env->ExceptionDescribe();
-        env->ExceptionClear();
-        LOG_err << "Error: AndroidFileWrapper::deleteFile";
+        checkAndClearJniException(env,
+                                  "AndroidFileWrapper::deleteFile",
+                                  "GetMethodID(FileWrapper.deleteFile)");
         return false;
     }
 
-    return env->CallBooleanMethod(mJavaObject->mObj, methodID);
+    const jboolean success = env->CallBooleanMethod(mJavaObject->mObj, methodID);
+    if (checkAndClearJniException(env, "AndroidFileWrapper::deleteFile", "FileWrapper.deleteFile"))
+    {
+        return false;
+    }
+    if (success)
+    {
+        removeUriDataFromCache(mURI);
+        if (localPath.has_value())
+        {
+            removeLocalPathURI(localPath.value());
+        }
+    }
+
+    return success;
 }
 
 bool AndroidFileWrapper::deleteEmptyFolder()
@@ -529,18 +728,116 @@ bool AndroidFileWrapper::deleteEmptyFolder()
         return false;
     }
 
+    const std::optional<std::string> localPath = getPath();
+
     JNIEnv* env{nullptr};
     MEGAjvm->AttachCurrentThread(&env, NULL);
     jmethodID methodID = env->GetMethodID(fileWrapper, DELETE_EMPTY_FOLDER, "()Z");
-    if (!methodID)
+    if (methodID == nullptr)
     {
-        env->ExceptionDescribe();
-        env->ExceptionClear();
-        LOG_err << "Error: AndroidFileWrapper::deleteEmptyFolder";
+        checkAndClearJniException(env,
+                                  "AndroidFileWrapper::deleteEmptyFolder",
+                                  "GetMethodID(FileWrapper.deleteFolderIfEmpty)");
         return false;
     }
 
-    return env->CallBooleanMethod(mJavaObject->mObj, methodID);
+    const jboolean success = env->CallBooleanMethod(mJavaObject->mObj, methodID);
+    if (checkAndClearJniException(env,
+                                  "AndroidFileWrapper::deleteEmptyFolder",
+                                  "FileWrapper.deleteFolderIfEmpty"))
+    {
+        return false;
+    }
+    if (success)
+    {
+        removeUriDataFromCache(mURI);
+        if (localPath.has_value())
+        {
+            removeLocalPathURI(localPath.value());
+        }
+    }
+
+    return success;
+}
+
+bool AndroidFileWrapper::move(const std::string& sourceParentUri,
+                              const std::string& targetParentUri)
+{
+    if (!exists())
+    {
+        LOG_warn << "Warning: AndroidFileWrapper::move source wrapper does not exist";
+        return false;
+    }
+
+    JNIEnv* env{nullptr};
+    MEGAjvm->AttachCurrentThread(&env, NULL);
+    jmethodID methodID = env->GetMethodID(fileWrapper,
+                                          MOVE,
+                                          "(Ljava/lang/String;Ljava/lang/String;)Lmega/privacy/"
+                                          "android/data/filewrapper/FileWrapper;");
+    if (methodID == nullptr)
+    {
+        checkAndClearJniException(env,
+                                  "AndroidFileWrapper::move",
+                                  "GetMethodID(FileWrapper.moveDocument)");
+        return false;
+    }
+
+    jstring jSourceParent = env->NewStringUTF(sourceParentUri.c_str());
+    if (jSourceParent == nullptr)
+    {
+        checkAndClearJniException(env, "AndroidFileWrapper::move", "NewStringUTF(sourceParent)");
+        return false;
+    }
+
+    jstring jTargetParent = env->NewStringUTF(targetParentUri.c_str());
+    if (jTargetParent == nullptr)
+    {
+        checkAndClearJniException(env, "AndroidFileWrapper::move", "NewStringUTF(targetParent)");
+        env->DeleteLocalRef(jSourceParent);
+        return false;
+    }
+
+    jobject temporalObject =
+        env->CallObjectMethod(mJavaObject->mObj, methodID, jSourceParent, jTargetParent);
+    checkAndClearJniException(env, "AndroidFileWrapper::move", "FileWrapper.moveDocument");
+    env->DeleteLocalRef(jSourceParent);
+    env->DeleteLocalRef(jTargetParent);
+
+    if (temporalObject != nullptr)
+    {
+        jobject newGlobalObject = env->NewGlobalRef(temporalObject);
+        if (newGlobalObject == nullptr)
+        {
+            checkAndClearJniException(env, "AndroidFileWrapper::move", "NewGlobalRef");
+            env->DeleteLocalRef(temporalObject);
+            return false;
+        }
+
+        env->DeleteGlobalRef(mJavaObject->mObj);
+        mJavaObject->mObj = newGlobalObject;
+        env->DeleteLocalRef(temporalObject);
+
+        auto uriData = getURIData(mURI);
+        removeUriDataFromCache(mURI);
+        if (!updateURIFromFileWrapper())
+        {
+            LOG_err << "AndroidFileWrapper::move: failed to sync URI from FileWrapper after move";
+            return false;
+        }
+
+        if (uriData.has_value())
+        {
+            uriData->mName = std::nullopt;
+            uriData->mPath = std::nullopt;
+            setUriData(uriData.value());
+        }
+
+        return true;
+    }
+
+    LOG_warn << "Warning: AndroidFileWrapper::move failed";
+    return false;
 }
 
 bool AndroidFileWrapper::rename(const std::string& parentPath,
@@ -558,11 +855,11 @@ bool AndroidFileWrapper::rename(const std::string& parentPath,
                                           RENAME_OVERRIDE,
                                           "(Ljava/lang/String;Ljava/lang/String;Z)Lmega/privacy/"
                                           "android/data/filewrapper/FileWrapper;");
-    if (!methodID)
+    if (methodID == nullptr)
     {
-        env->ExceptionDescribe();
-        env->ExceptionClear();
-        LOG_err << "Error: AndroidFileWrapper::rename";
+        checkAndClearJniException(env,
+                                  "AndroidFileWrapper::rename",
+                                  "GetMethodID(FileWrapper.renameOverwrite)");
         return false;
     }
 
@@ -570,6 +867,7 @@ bool AndroidFileWrapper::rename(const std::string& parentPath,
     jstring jnewName = env->NewStringUTF(newName.c_str());
     jobject temporalObject =
         env->CallObjectMethod(mJavaObject->mObj, methodID, jPathName, jnewName, overwrite);
+    checkAndClearJniException(env, "AndroidFileWrapper::rename", "FileWrapper.renameOverwrite");
     env->DeleteLocalRef(jnewName);
     env->DeleteLocalRef(jPathName);
     if (temporalObject != nullptr)
@@ -577,6 +875,36 @@ bool AndroidFileWrapper::rename(const std::string& parentPath,
         env->DeleteGlobalRef(mJavaObject->mObj);
         mJavaObject->mObj = env->NewGlobalRef(temporalObject);
         env->DeleteLocalRef(temporalObject);
+
+        auto uriData = getURIData(mURI);
+        const std::optional<std::string> oldLocalPath = getPath();
+
+        const std::string oldUri = mURI;
+        removeUriDataFromCache(oldUri);
+        if (oldLocalPath.has_value())
+        {
+            removeLocalPathURI(oldLocalPath.value());
+        }
+
+        if (!updateURIFromFileWrapper())
+        {
+            LOG_err
+                << "AndroidFileWrapper::rename: failed to sync URI from FileWrapper after rename";
+            return false;
+        }
+
+        if (uriData.has_value())
+        {
+            uriData->mName = newName;
+            uriData->mPath = std::nullopt;
+            setUriData(uriData.value());
+        }
+
+        if (auto newLocalPath = getPath(); newLocalPath.has_value())
+        {
+            setLocalPathURI(newLocalPath.value(), mURI);
+        }
+
         return true;
     }
 
@@ -606,6 +934,31 @@ std::optional<std::string> AndroidFileWrapper::getLocalPathURI(const std::string
 {
     std::unique_lock<std::mutex> lock(localPathURICacheLock);
     return localPathURICache.get(path);
+}
+
+void AndroidFileWrapper::removeLocalPathURI(const std::string& path)
+{
+    if (path.empty())
+    {
+        return;
+    }
+    std::unique_lock<std::mutex> lock(localPathURICacheLock);
+    localPathURICache.erase(path);
+}
+
+bool AndroidFileWrapper::ensureDotNoMediaFile(const LocalPath& directory,
+                                              FileSystemAccess& fsAccess)
+{
+    LocalPath noMediaPath = directory;
+    noMediaPath.appendWithSeparator(LocalPath::fromRelativePath(".nomedia"), true);
+
+    if (fsAccess.fileExistsAt(noMediaPath))
+    {
+        return true;
+    }
+
+    auto fa = fsAccess.newfileaccess();
+    return fa && fa->fopen(noMediaPath, OPEN_WRONLY, FSLogging::logOnError);
 }
 
 std::shared_ptr<AndroidFileWrapper>
@@ -727,6 +1080,17 @@ std::shared_ptr<AndroidFileWrapper>
     }
 
     return nullptr;
+}
+
+void AndroidFileWrapper::removeUriDataFromCache(const std::string& uri)
+{
+    if (uri.empty())
+    {
+        return;
+    }
+
+    std::unique_lock<std::mutex> lock(URIDataCacheLock);
+    URIDataCache.erase(uri);
 }
 
 bool AndroidFileWrapper::exists() const
@@ -1250,7 +1614,14 @@ bool AndroidDirAccess::dopen(LocalPath* path, FileAccess* f, bool doglob)
         return false;
     }
 
-    mChildren = mFileWrapper->getChildren();
+    auto children = mFileWrapper->getChildren();
+    if (!children.has_value())
+    {
+        mChildren.clear();
+        return false;
+    }
+
+    mChildren = std::move(children.value());
     return true;
 }
 
@@ -1347,24 +1718,154 @@ bool AndroidFileSystemAccess::renamelocal(const LocalPath& oldname,
             bool success = oldNameWrapper->rename(parent->getURI(),
                                                   newname.leafName().toPath(false),
                                                   overwrite);
+            if (success)
+            {
+                AndroidFileWrapper::removeLocalPathURI(oldname.toPath(false));
+                AndroidFileWrapper::setLocalPathURI(newname.toPath(false),
+                                                    oldNameWrapper->getURI());
+            }
             target_exists = !overwrite && !success;
             return success;
         }
         else
         {
-            if (copy(oldname, newname, overwrite))
+            // Cross-parent move within the same SAF tree. Preferred flow:
+            //   1. Rename source to the final leaf inside the source parent. Typical sync
+            //      finalize has source parent = .debris/tmp (hidden, not indexed by
+            //      MediaProvider), so SAF renameDocument is cheap (~50 ms).
+            //   2. moveDocument with the final leaf already in place — one SAF call, no
+            //      follow-up rename at the indexed target parent.
+            //
+            // This avoids the ~687 ms follow-up rename observed when moveDocument keeps
+            // the source's temp name (.getxfer.*.mega) and forces a rename into an indexed
+            // folder (e.g. Pictures/), which triggers MediaProvider reindex synchronously.
+            //
+            // Fallbacks (in order): move-then-rename at the target parent when pre-rename
+            // fails; copy+delete when moveDocument fails.
+            LOG_verbose << "AndroidFileSystemAccess::renamelocal cross-parent URI rename: "
+                        << oldname.toPath(false) << " -> " << newname.toPath(false);
+
+            auto sourceParent =
+                AndroidFileWrapper::getAndroidFileWrapper(oldname.parentPath(), false, true);
+            auto targetParent =
+                AndroidFileWrapper::getAndroidFileWrapper(newname.parentPath(), false, true);
+
+            // Where the file actually lives on disk by the time we reach the
+            // copy+delete fallback.
+            LocalPath copySource = oldname;
+            if (sourceParent == nullptr || targetParent == nullptr)
+            {
+                LOG_warn << "AndroidFileSystemAccess::renamelocal cannot resolve source/target "
+                            "parent wrappers "
+                            "(sourceParent="
+                         << (sourceParent ? "ok" : "null")
+                         << " targetParent=" << (targetParent ? "ok" : "null")
+                         << "); falling back to copy+delete";
+            }
+            else
+            {
+                const std::string oldLeaf = oldname.leafName().toPath(false);
+                const std::string newLeaf = newname.leafName().toPath(false);
+
+                // Step 1: pre-move rename inside source parent (skip if leaf names already match).
+                bool preRenameAttempted = (oldLeaf != newLeaf);
+                bool preRenameOk = !preRenameAttempted;
+                if (preRenameAttempted)
+                {
+                    // override always false, we don't want overwrite if file already exists.
+                    // This file is going to be moved
+                    preRenameOk = oldNameWrapper->rename(sourceParent->getURI(), newLeaf, false);
+                    if (preRenameOk)
+                    {
+                        LOG_verbose << "AndroidFileSystemAccess::renamelocal pre-move rename OK ("
+                                    << oldLeaf << " -> " << newLeaf << " in source parent)";
+                    }
+                }
+
+                // Step 2: moveDocument to target parent.
+                if (oldNameWrapper->move(sourceParent->getURI(), targetParent->getURI()))
+                {
+                    if (preRenameOk)
+                    {
+                        // File already carries the final leaf — no target-side rename needed.
+                        const char* tag = preRenameAttempted ? "rename+move" : "move only";
+                        LOG_verbose << "AndroidFileSystemAccess::renamelocal FAST PATH OK (" << tag
+                                    << ") " << oldname.toPath(false) << " -> "
+                                    << newname.toPath(false);
+                        // Populate path → URI cache so the post-finalize fsFingerprint hits
+                        // instantly instead of walking SAF segments.
+                        AndroidFileWrapper::setLocalPathURI(newname.toPath(false),
+                                                            oldNameWrapper->getURI());
+                        AndroidFileWrapper::removeLocalPathURI(oldname.toPath(false));
+                        return true;
+                    }
+
+                    // Pre-rename failed but move succeeded — fall back to target-parent rename.
+                    bool renamed =
+                        oldNameWrapper->rename(targetParent->getURI(), newLeaf, overwrite);
+                    if (renamed)
+                    {
+                        LOG_info << "AndroidFileSystemAccess::renamelocal move+rename fallback OK "
+                                 << oldname.toPath(false) << " -> " << newname.toPath(false);
+                        AndroidFileWrapper::setLocalPathURI(newname.toPath(false),
+                                                            oldNameWrapper->getURI());
+                        AndroidFileWrapper::removeLocalPathURI(oldname.toPath(false));
+                    }
+
+                    target_exists = !overwrite && !renamed;
+                    return renamed;
+                }
+
+                // moveDocument failed. If we pre-renamed, the source now lives at
+                // <sourceParent>/<newLeaf>; route copy+delete from that effective source.
+                if (preRenameAttempted && preRenameOk)
+                {
+                    // Try to undo the pre-rename so the source is restored to its original
+                    // name, then we can fallback to copy+delete which uses oldname
+                    if (oldNameWrapper->rename(sourceParent->getURI(), oldLeaf, false))
+                    {
+                        LOG_info << "AndroidFileSystemAccess::renamelocal: rolled back "
+                                    "pre-rename; source restored to "
+                                 << oldname.toPath(false);
+                    }
+                    else
+                    {
+                        // Rollback failed — file still sits at <sourceParent>/<newLeaf>.
+                        // Point copySource there so the copy+delete below can still
+                        // physically reach the file (last-resort to avoid orphaning)
+                        copySource = oldname.parentPath();
+                        copySource.appendWithSeparator(newname.leafName(), true);
+                        LOG_warn << "AndroidFileSystemAccess::renamelocal: pre-rename "
+                                    "rollback FAILED; copy+delete will use renamed "
+                                    "source at "
+                                 << copySource.toPath(false);
+                    }
+                }
+            }
+            // Unified copy+delete fallback. copySource was selected above:
+            //   - oldname in the common case (or after a successful rollback)
+            //   - <sourceParent>/<newLeaf> only if rollback failed
+            LOG_warn << "AndroidFileSystemAccess::renamelocal SLOW PATH copy+delete: "
+                     << copySource.toPath(false) << " -> " << newname.toPath(false);
+
+            if (copy(copySource, newname, overwrite))
             {
                 if (oldNameWrapper->isFolder())
                 {
-                    rmdirlocal(oldname);
+                    rmdirlocal(copySource);
                 }
                 else
                 {
-                    unlinklocal(oldname);
+                    unlinklocal(copySource);
                 }
+                LOG_info << "AndroidFileSystemAccess::renamelocal SLOW PATH completed "
+                         << "(copy+delete) -> " << copySource.toPath(false) << " -> "
+                         << newname.toPath(false);
                 return true;
             }
 
+            LOG_err << "AndroidFileSystemAccess::renamelocal SLOW PATH copy+delete FAILED for "
+                    << copySource.toPath(false) << " -> " << newname.toPath(false);
             return false;
         }
     }
@@ -1395,7 +1896,12 @@ bool AndroidFileSystemAccess::unlinklocal(const LocalPath& p1)
     if (auto wrapper{AndroidFileWrapper::getAndroidFileWrapper(p1, false, false)};
         wrapper && !wrapper->isFolder())
     {
-        return wrapper->deleteFile();
+        const bool ok = wrapper->deleteFile();
+        if (ok)
+        {
+            AndroidFileWrapper::removeLocalPathURI(p1.toPath(false));
+        }
+        return ok;
     }
 
     return false;
@@ -1406,17 +1912,34 @@ bool AndroidFileSystemAccess::rmdirlocal(const LocalPath& p1)
     emptydirlocal(p1);
 
     auto androidFileWrapper{AndroidFileWrapper::getAndroidFileWrapper(p1, false, false)};
-    if (!androidFileWrapper || androidFileWrapper->getChildren().size())
+    if (!androidFileWrapper)
     {
         return false;
     }
 
-    return androidFileWrapper->deleteEmptyFolder();
+    auto children = androidFileWrapper->getChildren();
+    if (!children.has_value() || !children->empty())
+    {
+        return false;
+    }
+
+    const bool ok = androidFileWrapper->deleteEmptyFolder();
+    if (ok)
+    {
+        AndroidFileWrapper::removeLocalPathURI(p1.toPath(false));
+    }
+    return ok;
 }
 
 bool AndroidFileSystemAccess::mkdirlocal(const LocalPath& name, bool, bool)
 {
-    return AndroidFileWrapper::getAndroidFileWrapper(name, true, true) != nullptr;
+    auto wrapper = AndroidFileWrapper::getAndroidFileWrapper(name, true, true);
+    if (!wrapper)
+    {
+        return false;
+    }
+
+    return true;
 }
 
 bool AndroidFileSystemAccess::setmtimelocal(const LocalPath& path, m_time_t mtime)
@@ -1575,7 +2098,13 @@ ScanResult AndroidFileSystemAccess::directoryScan(const LocalPath& targetPath,
     auto device = metadata.st_dev;
 
     auto children = targetWrapper->getChildren();
-    for (auto child: children)
+    if (!children.has_value())
+    {
+        LOG_warn << "directoryScan: getChildren() failed for: " << targetPath;
+        return SCAN_INACCESSIBLE;
+    }
+
+    for (const auto& child: children.value())
     {
         auto& result = (results.emplace_back(), results.back());
         result.localname = LocalPath::fromPlatformEncodedRelative(child->getName());
@@ -1706,7 +2235,15 @@ void AndroidFileSystemAccess::emptydirlocal(const LocalPath& path, dev_t)
         return;
     }
 
-    for (const auto& child: wrapper->getChildren())
+    auto children = wrapper->getChildren();
+    if (!children.has_value())
+    {
+        LOG_warn << "AndroidFileSystemAccess::emptydirlocal: getChildren() failed for "
+                 << path.toPath(false);
+        return;
+    }
+
+    for (const auto& child: children.value())
     {
         if (child->isFolder())
         {
@@ -1755,21 +2292,37 @@ bool AndroidFileSystemAccess::copy(const LocalPath& oldname,
 
     if (androidfileWrapper->isFolder())
     {
-        if (mkdirlocal(newname, false, true))
+        if (!mkdirlocal(newname, false, true))
         {
-            for (const auto& child: androidfileWrapper->getChildren())
+            LOG_err << "AndroidFileSystemAccess::copy: mkdirlocal failed for "
+                    << newname.toPath(false);
+            return false;
+        }
+
+        auto children = androidfileWrapper->getChildren();
+        if (!children.has_value())
+        {
+            LOG_err << "AndroidFileSystemAccess::copy: getChildren() failed for "
+                    << oldname.toPath(false) << "; aborting to avoid partial copy";
+            return false;
+        }
+
+        bool allOk = true;
+        for (const auto& child: children.value())
+        {
+            LocalPath childNewPath{newname};
+            childNewPath.appendWithSeparator(LocalPath::fromRelativePath(child->getName()), false);
+            LocalPath childOldPath{oldname};
+            childOldPath.appendWithSeparator(LocalPath::fromRelativePath(child->getName()), false);
+            if (!copy(childOldPath, childNewPath, overwrite))
             {
-                LocalPath childNewPath{newname};
-                childNewPath.appendWithSeparator(LocalPath::fromRelativePath(child->getName()),
-                                                 false);
-                LocalPath childOldPath{oldname};
-                childOldPath.appendWithSeparator(LocalPath::fromRelativePath(child->getName()),
-                                                 false);
-                copy(childOldPath, childNewPath, overwrite);
+                LOG_warn << "AndroidFileSystemAccess::copy: child copy failed: "
+                         << childOldPath.toPath(false) << " -> " << childNewPath.toPath(false);
+                allOk = false;
             }
         }
 
-        return true;
+        return allOk;
     }
 
     unique_ptr<FileAccess> oldFile{newfileaccess()};

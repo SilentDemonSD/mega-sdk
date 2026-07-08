@@ -1402,6 +1402,12 @@ void Sync::createDebrisTmpLockOnce()
                 LOG_verbose << syncname << "Created local sync debris folder";
             }
 
+#ifdef __ANDROID__
+            // Hide .debris from MediaProvider so finalize can pre-rename in .debris/tmp
+            // before cross-parent move without slow/blocked SAF renameDocument calls.
+            AndroidFileWrapper::ensureDotNoMediaFile(localdebris, *syncs.fsaccess);
+#endif
+
             LocalPath tmpname = LocalPath::fromRelativePath("tmp");
             localfilename.appendWithSeparator(tmpname, true);
             if (syncs.fsaccess->mkdirlocal(localfilename, false, false))

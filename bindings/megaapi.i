@@ -17,6 +17,9 @@ jmethodID getBytes = NULL;
 extern jclass fileWrapper;
 extern jclass integerClass;
 extern jclass arrayListClass;
+extern jclass listClass;
+extern jmethodID listSizeMethod;
+extern jmethodID listGetMethod;
 
 namespace megajni
 {
@@ -88,6 +91,21 @@ jint on_load(JavaVM *jvm, void *reserved)
 
     arrayListClass = megajni_new_global_ref_class(jenv, localArrayListClass, "global ref ArrayList");
     if (localArrayListClass) jenv->DeleteLocalRef(localArrayListClass);
+
+    jclass localListClass = jenv->FindClass("java/util/List");
+    if (!localListClass)
+    {
+        jenv->ExceptionDescribe();
+        jenv->ExceptionClear();
+    }
+
+    listClass = megajni_new_global_ref_class(jenv, localListClass, "global ref List");
+    if (localListClass) jenv->DeleteLocalRef(localListClass);
+    if (listClass)
+    {
+        listSizeMethod = jenv->GetMethodID(listClass, "size", "()I");
+        listGetMethod = jenv->GetMethodID(listClass, "get", "(I)Ljava/lang/Object;");
+    }
 
     return JNI_VERSION_1_6;
 }

@@ -19,6 +19,10 @@
 extern jclass fileWrapper;
 extern jclass integerClass;
 extern jclass arrayListClass;
+/// Cached java/util/List class and method IDs — set at JNI_OnLoad, safe for background threads.
+extern jclass listClass;
+extern jmethodID listSizeMethod;
+extern jmethodID listGetMethod;
 extern JavaVM* MEGAjvm;
 
 namespace mega
@@ -46,7 +50,12 @@ public:
     bool exists() const;
     int getFileDescriptor(bool write);
     std::string getName();
-    std::vector<std::shared_ptr<AndroidFileWrapper>> getChildren();
+    // Returns std::nullopt on JNI/Java failure (caller cannot distinguish "empty
+    // folder" from "enumeration failed" otherwise). On success returns the full
+    // child list — never a partial view: any mid-iteration error fails the whole
+    // call. Callers that act destructively on the result MUST treat std::nullopt
+    // as "do not proceed" (see copy/rmdirlocal/emptydirlocal).
+    std::optional<std::vector<std::shared_ptr<AndroidFileWrapper>>> getChildren();
     // Check if tree exists
     std::shared_ptr<AndroidFileWrapper> pathExists(const std::vector<std::string>& subPaths);
 
@@ -67,6 +76,9 @@ public:
     bool deleteEmptyFolder();
     // Rename an element. It is kept at same folder
     bool rename(const std::string& parentPath, const std::string& newName, bool overwrite);
+    // SAF moveDocument (API 24+), same tree only. Used by cross-parent renamelocal;
+    // returns false if unsupported or on failure (caller falls back to copy+delete).
+    bool move(const std::string& sourceParentUri, const std::string& targetParentUri);
 
     // Returns true if it's a folder
     bool isFolder();
@@ -78,10 +90,20 @@ public:
     std::optional<std::string> getPath();
     bool isURI();
 
+    // Refresh mURI from the backing Java FileWrapper after move/rename.
+    bool updateURIFromFileWrapper();
+
     static std::shared_ptr<AndroidFileWrapper> getAndroidFileWrapper(const std::string& path);
     static std::shared_ptr<AndroidFileWrapper> getAndroidFileWrapper(const LocalPath& localPath,
                                                                      bool create,
                                                                      bool lastIsFolder);
+
+    static void setLocalPathURI(const std::string& path, const std::string& uri);
+    static std::optional<std::string> getLocalPathURI(const std::string& path);
+    static void removeLocalPathURI(const std::string& path);
+
+    // Create .nomedia if missing. Returns true when the marker exists afterward.
+    static bool ensureDotNoMediaFile(const LocalPath& directory, FileSystemAccess& fsAccess);
 
 private:
     class JavaObject
@@ -134,6 +156,8 @@ private:
     static constexpr char RENAME[] = "rename";
     static constexpr char RENAME_OVERRIDE[] = "renameOverwrite";
     static constexpr char CREATE_NESTED_PATH[] = "createNestedPath";
+    static constexpr char MOVE[] = "moveDocument";
+    static constexpr char GET_URI[] = "getUri";
 
     void setUriData(const URIData& uriData);
     std::optional<URIData> getURIData(const std::string& uri) const;
@@ -142,13 +166,13 @@ private:
     static LRUCache<std::string, std::string> localPathURICache;
     static std::mutex URIDataCacheLock;
     static std::mutex localPathURICacheLock;
-    static void setLocalPathURI(const std::string& path, const std::string& uri);
-    static std::optional<std::string> getLocalPathURI(const std::string& path);
     static std::shared_ptr<AndroidFileWrapper>
         getAndroidFileWrapperFromURI(const LocalPath& localPath, bool create, bool lastIsFolder);
 
     static std::shared_ptr<AndroidFileWrapper>
         getAndroidFileWrapperFromPath(const LocalPath& localPath, bool create, bool lastIsFolder);
+
+    static void removeUriDataFromCache(const std::string& uri);
 };
 
 /**
