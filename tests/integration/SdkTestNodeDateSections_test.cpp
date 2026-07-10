@@ -266,6 +266,32 @@ TEST_F(SdkTestNodeDateSections, Public_GroupAllNodesByDate_UnsupportedOrder_Empt
     EXPECT_EQ(list->size(), 0);
 }
 
+// ─── 6b: malformed UTC offset → empty list ──────────────────────────────────
+
+TEST_F(SdkTestNodeDateSections, Public_GroupAllNodesByDate_InvalidUtcOffset_EmptyList)
+{
+    auto filter = makePhotoGroupFilter();
+    filter->byUtcOffset("+9"); // malformed: not ±HH:MM
+    std::unique_ptr<MegaDateSectionList> list(
+        megaApi[0]->groupAllNodesByDate(filter.get(), MegaApi::ORDER_MODIFICATION_DESC, nullptr));
+    ASSERT_NE(list, nullptr);
+    EXPECT_EQ(list->size(), 0) << "malformed UTC offset must yield an empty list";
+}
+
+// ─── 6c: valid UTC offset → non-empty list ──────────────────────────────────
+
+TEST_F(SdkTestNodeDateSections, Public_GroupAllNodesByDate_ValidUtcOffset_NonEmpty)
+{
+    // A well-formed offset must NOT be rejected: the public path still returns
+    // the section list (smoke test for the accept branch).
+    auto filter = makePhotoGroupFilter();
+    filter->byUtcOffset("+14:00");
+    std::unique_ptr<MegaDateSectionList> list(
+        megaApi[0]->groupAllNodesByDate(filter.get(), MegaApi::ORDER_MODIFICATION_DESC, nullptr));
+    ASSERT_NE(list, nullptr);
+    EXPECT_GT(list->size(), 0) << "valid UTC offset must be accepted";
+}
+
 // ─── 7: inverted byTimestampAnchor range → empty page ───────────────────────
 
 TEST_F(SdkTestNodeDateSections, Public_ByTimestampAnchor_InvertedRange_EmptyPage)

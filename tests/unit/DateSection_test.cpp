@@ -127,7 +127,8 @@ protected:
                                          MimeType_t mime = MIME_TYPE_PHOTO,
                                          bool excludeSensitive = false,
                                          std::vector<NodeHandle> excludeHandles = {},
-                                         std::vector<NodeHandle> roots = {})
+                                         std::vector<NodeHandle> roots = {},
+                                         int64_t tzOffsetSeconds = 0)
     {
         DateSectionParams p;
         p.mimeType = mime;
@@ -135,6 +136,7 @@ protected:
         p.granularity = g;
         p.excludeSensitive = excludeSensitive;
         p.excludeHandles = std::move(excludeHandles);
+        p.tzOffsetSeconds = tzOffsetSeconds;
 
         std::vector<DateSection> out;
         const std::vector<NodeHandle> filesRoots =
@@ -388,6 +390,130 @@ TEST_F(DateSectionTest, DateSection_BoundsAreInt64NotText)
     EXPECT_EQ(sqlite3_column_int64(stmt, 0), 1719792000);
     sqlite3_finalize(stmt);
     sqlite3_close(db);
+}
+
+// ─── B2b: UTC offset shifts buckets and bounds ─────────────────────────────
+
+// +09:00 pushes the last second of Jul 31 UTC into the Aug 1 local bucket,
+// which then also contains aug01.jpg → count 2. At UTC that bucket has count 1.
+TEST_F(DateSectionTest, DateSection_UtcOffset_PositiveOffset_MovesToNextDay)
+{
+    const int64_t tz = 9 * 3600; // +09:00
+    auto sections = runSections(DateSectionGranularity::Day,
+                                OrderByClause::MTIME_DESC,
+                                MIME_TYPE_PHOTO,
+                                false,
+                                {},
+                                {},
+                                tz);
+
+    const auto* aug01 = find(sections, "2024-08-01");
+    ASSERT_NE(aug01, nullptr);
+    EXPECT_EQ(aug01->mCount, 2); // jul31 (23:59:59Z) joined aug01 (UTC: count 1)
+    // 2024-08-01 00:00 local == 2024-07-31T15:00:00Z == 1722470400 - 32400.
+    EXPECT_EQ(aug01->mStartDate, 1722470400LL - tz); // UTC value would be 1722470400
+    EXPECT_EQ(aug01->mEndDate, 1722556800LL - tz); // +1 day
+    EXPECT_EQ(find(sections, "2024-07-31"), nullptr); // jul31 left Jul 31 (UTC: present)
+}
+
+// -05:30 pulls midnight-UTC Jul 15 back into Jul 14 local. jul15 was the only
+// photo in 2024-07-15, so that bucket disappears entirely.
+TEST_F(DateSectionTest, DateSection_UtcOffset_NegativeHalfHour_MovesToPrevDay)
+{
+    const int64_t tz = -(5 * 3600 + 30 * 60); // -05:30
+    auto sections = runSections(DateSectionGranularity::Day,
+                                OrderByClause::MTIME_DESC,
+                                MIME_TYPE_PHOTO,
+                                false,
+                                {},
+                                {},
+                                tz);
+
+    const auto* jul14 = find(sections, "2024-07-14");
+    ASSERT_NE(jul14, nullptr); // UTC: no photo maps to 2024-07-14 → null
+    // 2024-07-14 00:00 local == 2024-07-14T05:30:00Z == 1720915200 - (-19800).
+    EXPECT_EQ(jul14->mStartDate, 1720915200LL - tz);
+    EXPECT_EQ(find(sections, "2024-07-15"), nullptr); // jul15 left (UTC: present)
+}
+
+// :45 minutes must be honoured (not truncated to :00/:30). The bound value
+// uniquely identifies +05:45: :30 would give 1722450600, UTC gives 1722470400.
+TEST_F(DateSectionTest, DateSection_UtcOffset_FortyFiveMinuteZone)
+{
+    const int64_t tz = 5 * 3600 + 45 * 60; // +05:45 (Nepal) == 20700
+    auto sections = runSections(DateSectionGranularity::Day,
+                                OrderByClause::MTIME_DESC,
+                                MIME_TYPE_PHOTO,
+                                false,
+                                {},
+                                {},
+                                tz);
+    const auto* aug01 = find(sections, "2024-08-01");
+    ASSERT_NE(aug01, nullptr);
+    EXPECT_EQ(aug01->mStartDate, 1722470400LL - tz); // == 1722449700, only :45 gives this
+}
+
+// Month granularity: -01:00 pulls aug01 (00:00Z on the 1st) back into July local.
+// aug01 was the only August photo, so the 2024-08 bucket disappears.
+TEST_F(DateSectionTest, DateSection_UtcOffset_MonthGranularity_CrossesMonth)
+{
+    const int64_t tz = -3600; // -01:00
+    auto sections = runSections(DateSectionGranularity::Month,
+                                OrderByClause::MTIME_DESC,
+                                MIME_TYPE_PHOTO,
+                                false,
+                                {},
+                                {},
+                                tz);
+
+    EXPECT_EQ(find(sections, "2024-08"), nullptr); // aug01 → July local (UTC: present)
+    const auto* jul = find(sections, "2024-07");
+    ASSERT_NE(jul, nullptr);
+    // 2024-07 month start local-midnight == 2024-07-01T01:00:00Z == 1719792000 - (-3600).
+    EXPECT_EQ(jul->mStartDate, 1719792000LL - tz);
+}
+
+// Year granularity: -01:00 pulls jan01 (00:00Z on Jan 1) back into 2023 local,
+// where it joins dec31 → the 2023 bucket goes from count 1 (UTC) to 2.
+TEST_F(DateSectionTest, DateSection_UtcOffset_YearGranularity_CrossesYear)
+{
+    const int64_t tz = -3600; // -01:00
+    auto sections = runSections(DateSectionGranularity::Year,
+                                OrderByClause::MTIME_DESC,
+                                MIME_TYPE_PHOTO,
+                                false,
+                                {},
+                                {},
+                                tz);
+
+    const auto* y2023 = find(sections, "2023");
+    ASSERT_NE(y2023, nullptr);
+    EXPECT_EQ(y2023->mCount, 2); // dec31 + jan01 (UTC: only dec31, count 1)
+    // 2023 start local-midnight == 2023-01-01T01:00:00Z == 1672531200 - (-3600).
+    EXPECT_EQ(y2023->mStartDate, 1672531200LL - tz);
+}
+
+// Offset combined with an exclude: subA is dropped AND +09:00 is applied. This
+// exercises the tz bind slot AFTER the exclude-handle run (numExcludes=1 shifts
+// it right), the path the simple no-exclude tests above never reach.
+TEST_F(DateSectionTest, DateSection_UtcOffset_WithExcludeHandles_ShiftedSlot)
+{
+    const int64_t tz = 9 * 3600; // +09:00
+    auto sections = runSections(DateSectionGranularity::Day,
+                                OrderByClause::MTIME_DESC,
+                                MIME_TYPE_PHOTO,
+                                false,
+                                {mSubFolderA}, // exclude subA → drops jul_subA
+                                {},
+                                tz);
+
+    // Offset still correct at the shifted slot: jul31 (23:59:59Z) joins aug01.
+    const auto* aug01 = find(sections, "2024-08-01");
+    ASSERT_NE(aug01, nullptr);
+    EXPECT_EQ(aug01->mCount, 2);
+    EXPECT_EQ(aug01->mStartDate, 1722470400LL - tz);
+    // jul_subA (the only 2024-07-07 photo) was excluded → its local bucket is gone.
+    EXPECT_EQ(find(sections, "2024-07-07"), nullptr);
 }
 
 // ─── B3: mtime <= 0 exclusion ──────────────────────────────────────────────

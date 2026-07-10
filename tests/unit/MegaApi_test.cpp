@@ -16,15 +16,15 @@
  * program.
  */
 
-#include <atomic>
-#include <memory>
-#include <thread>
-
 #include <gtest/gtest.h>
-
 #include <mega/types.h>
+
+#include <atomic>
 #include <megaapi.h>
 #include <megaapi_impl.h>
+#include <memory>
+#include <optional>
+#include <thread>
 
 using namespace std;
 using namespace mega;
@@ -633,5 +633,66 @@ TEST(MegaApi, MegaListAllNodesFilter_byTimestampAnchorContract)
         auto f = make();
         f->byTimestampAnchor(100, 200, MegaApi::ORDER_SIZE_ASC);
         expectAnchor(*f, 100, 200, MegaApi::ORDER_SIZE_ASC);
+    }
+}
+
+TEST(MegaApi, MegaGroupNodesByDateFilter_ByUtcOffset_RoundTripsAndDefaultsToEmpty)
+{
+    std::unique_ptr<MegaGroupNodesByDateFilter> f{MegaGroupNodesByDateFilter::createInstance()};
+
+    // Default: never null, empty string.
+    ASSERT_NE(f->byUtcOffset(), nullptr);
+    EXPECT_STREQ(f->byUtcOffset(), "");
+
+    f->byUtcOffset("+09:00");
+    EXPECT_STREQ(f->byUtcOffset(), "+09:00");
+
+    // copy() must carry the UTC offset.
+    std::unique_ptr<MegaGroupNodesByDateFilter> c{f->copy()};
+    EXPECT_STREQ(c->byUtcOffset(), "+09:00");
+
+    // Null resets to empty.
+    f->byUtcOffset(nullptr);
+    EXPECT_STREQ(f->byUtcOffset(), "");
+}
+
+TEST(MegaApi, ParseUtcOffsetSeconds_ValidUnsetAndBoundaries)
+{
+    using ::mega::parseUtcOffsetSeconds;
+
+    // Unset / empty → UTC (0), NOT nullopt.
+    EXPECT_EQ(parseUtcOffsetSeconds(nullptr), std::optional<int64_t>{0});
+    EXPECT_EQ(parseUtcOffsetSeconds(""), std::optional<int64_t>{0});
+
+    // Well-formed values.
+    EXPECT_EQ(parseUtcOffsetSeconds("+00:00"), std::optional<int64_t>{0});
+    EXPECT_EQ(parseUtcOffsetSeconds("+09:00"), std::optional<int64_t>{32400});
+    EXPECT_EQ(parseUtcOffsetSeconds("-05:30"), std::optional<int64_t>{-19800});
+    EXPECT_EQ(parseUtcOffsetSeconds("+05:45"), std::optional<int64_t>{20700}); // :45 zone
+    EXPECT_EQ(parseUtcOffsetSeconds("-12:00"), std::optional<int64_t>{-43200});
+    EXPECT_EQ(parseUtcOffsetSeconds("+14:00"), std::optional<int64_t>{50400});
+}
+
+TEST(MegaApi, ParseUtcOffsetSeconds_RejectsMalformedAndOutOfRange)
+{
+    using ::mega::parseUtcOffsetSeconds;
+
+    // Only the exact "±HH:MM" form is accepted; other valid ISO-8601 spellings
+    // ("+0900", "Z", "+09") are rejected.
+    for (const char* bad: {"+9",
+                           "09:00",
+                           "+9:00",
+                           "+09:99",
+                           "+0900",
+                           "Z",
+                           "+09:0",
+                           "+09:000",
+                           "++9:00",
+                           "+aa:bb",
+                           "+15:00",
+                           "-13:00",
+                           "+14:01"})
+    {
+        EXPECT_FALSE(parseUtcOffsetSeconds(bad).has_value()) << "should reject: " << bad;
     }
 }
