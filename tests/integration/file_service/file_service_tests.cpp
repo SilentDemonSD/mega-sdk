@@ -1410,6 +1410,33 @@ TEST_F(FileServiceTests, flush_removed_file_fails)
     ASSERT_EQ(execute(flush, *file), FILE_REMOVED);
 }
 
+TEST_F(FileServiceTests, reopen_by_handle_after_purge_succeeds)
+{
+    auto initial = randomBytes(512_KiB);
+
+    auto oldHandle = mClient->upload(initial, randomName(), "/z");
+    ASSERT_EQ(oldHandle.errorOr(API_OK), API_OK);
+
+    auto oldFile = mClient->fileOpen(*oldHandle);
+    ASSERT_EQ(oldFile.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+
+    auto content = randomBytes(128_KiB);
+    ASSERT_EQ(execute(write, content.data(), *oldFile, 128_KiB, 128_KiB), FILE_SUCCESS);
+
+    ASSERT_EQ(execute(flush, *oldFile), FILE_SUCCESS);
+
+    auto newHandle = oldFile->info().handle();
+    ASSERT_NE(newHandle, *oldHandle);
+
+    // Keep the purged file context alive so its tombstone remains in the database.
+    auto pinnedFile = *oldFile;
+
+    ASSERT_EQ(execute(purge, std::move(*oldFile)), FILE_SUCCESS);
+
+    auto newFile = mClient->fileOpen(newHandle);
+    ASSERT_EQ(newFile.errorOr(FILE_SERVICE_SUCCESS), FILE_SERVICE_SUCCESS);
+}
+
 TEST_F(FileServiceTests, flush_succeeds)
 {
     // Generate content for us to mutate.
