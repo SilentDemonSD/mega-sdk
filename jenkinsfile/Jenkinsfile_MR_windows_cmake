@@ -242,8 +242,9 @@ pipeline {
 
                                                 # Compress procdump logs for archive
                                                 mkdir -p procdumps
-                                                # Use find to avoid error with too many files
-                                                find . -maxdepth 1 -name 'procdump*.log' -exec mv '{}' procdumps/ ';' || true
+                                                # Use find to avoid error with too many files.
+                                                # Must use /usr/bin/find: plain "find" resolves to Windows FIND.EXE
+                                                /usr/bin/find . -maxdepth 1 -name 'procdump*.log' -exec mv '{}' procdumps/ ';' || true
                                                 tar czf procdumps.tgz procdumps
 
                                                 # Compress pdbs for archive
