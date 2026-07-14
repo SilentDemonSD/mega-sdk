@@ -7,6 +7,10 @@ JavaVM* MEGAjvm = nullptr;
 jclass fileWrapper = nullptr;
 jclass integerClass = nullptr;
 jclass arrayListClass = nullptr;
+/// Global reference to ChildMetadata class, cached at JNI_OnLoad time.
+/// Must NOT use FindClass() from background threads — those use the bootstrap classloader
+/// and cannot find application classes like ChildMetadata.
+jclass childMetadataClass = nullptr;
 /// Cached java/util/List class and method IDs — set at JNI_OnLoad, safe for background threads.
 jclass listClass = nullptr;
 jmethodID listSizeMethod = nullptr;
@@ -267,22 +271,30 @@ std::string AndroidFileWrapper::getName()
     jmethodID methodID = env->GetMethodID(fileWrapper, GET_NAME, "()Ljava/lang/String;");
     if (methodID == nullptr)
     {
-        env->ExceptionDescribe();
-        env->ExceptionClear();
-        LOG_err << "Error: AndroidFileWrapper::getName";
+        checkAndClearJniException(env,
+                                  "AndroidFileWrapper::getName",
+                                  "GetMethodID(FileWrapper.getName)");
         return "";
     }
 
     jstring name = static_cast<jstring>(env->CallObjectMethod(mJavaObject->mObj, methodID));
+    if (checkAndClearJniException(env, "AndroidFileWrapper::getName", "FileWrapper.getName") ||
+        !name)
+    {
+        return {};
+    }
 
     const char* nameStr = env->GetStringUTFChars(name, nullptr);
     if (!nameStr)
     {
+        checkAndClearJniException(env, "AndroidFileWrapper::getName", "GetStringUTFChars");
+        env->DeleteLocalRef(name);
         return {};
     }
     data->mName = nameStr;
     setUriData(data.value());
     env->ReleaseStringUTFChars(name, nameStr);
+    env->DeleteLocalRef(name);
     return data->mName.value();
 }
 
@@ -411,6 +423,247 @@ bool AndroidFileWrapper::updateURIFromFileWrapper()
     env->ReleaseStringUTFChars(jUri, uriStr);
     env->DeleteLocalRef(jUri);
     return true;
+}
+
+std::optional<std::vector<AndroidFileWrapper::ChildMetadata>>
+    AndroidFileWrapper::getChildrenWithMetadata()
+{
+    if (!exists())
+        return std::nullopt;
+
+    JNIEnv* env{nullptr};
+    MEGAjvm->AttachCurrentThread(&env, NULL);
+
+    // "()Ljava/util/List;" — returns a java.util.List<ChildMetadata>
+    jmethodID methodID =
+        env->GetMethodID(fileWrapper, GET_CHILDREN_META_DATA, "()Ljava/util/List;");
+    if (methodID == nullptr)
+    {
+        checkAndClearJniException(env,
+                                  "AndroidFileWrapper::getChildrenWithMetadata",
+                                  "GetMethodID(FileWrapper.getChildrenWithMetadata)");
+        return std::nullopt;
+    }
+
+    jobject resultList = env->CallObjectMethod(mJavaObject->mObj, methodID);
+    if (checkAndClearJniException(env,
+                                  "AndroidFileWrapper::getChildrenWithMetadata",
+                                  "FileWrapper.getChildrenWithMetadata") ||
+        !resultList)
+    {
+        return std::nullopt;
+    }
+
+    // Use the class reference cached at JNI_OnLoad time.
+    // FindClass() from a background thread (AttachCurrentThread) only has access to the
+    // bootstrap classloader and cannot find app classes like ChildMetadata at runtime.
+    if (!childMetadataClass)
+    {
+        LOG_err << "Error: childMetadataClass not initialized (missing JNI_OnLoad registration?)";
+        env->DeleteLocalRef(resultList);
+        return std::nullopt;
+    }
+
+    jfieldID uriField = env->GetFieldID(childMetadataClass, "uri", "Ljava/lang/String;");
+    if (uriField == nullptr)
+    {
+        checkAndClearJniException(env,
+                                  "AndroidFileWrapper::getChildrenWithMetadata",
+                                  "GetFieldID(ChildMetadata.uri)");
+        env->DeleteLocalRef(resultList);
+        return std::nullopt;
+    }
+
+    jfieldID nameField = env->GetFieldID(childMetadataClass, "name", "Ljava/lang/String;");
+    if (nameField == nullptr)
+    {
+        checkAndClearJniException(env,
+                                  "AndroidFileWrapper::getChildrenWithMetadata",
+                                  "GetFieldID(ChildMetadata.name)");
+        env->DeleteLocalRef(resultList);
+        return std::nullopt;
+    }
+
+    jfieldID isFolderField = env->GetFieldID(childMetadataClass, "isFolder", "Z");
+    if (isFolderField == nullptr)
+    {
+        checkAndClearJniException(env,
+                                  "AndroidFileWrapper::getChildrenWithMetadata",
+                                  "GetFieldID(ChildMetadata.isFolder)");
+        env->DeleteLocalRef(resultList);
+        return std::nullopt;
+    }
+
+    jfieldID sizeField = env->GetFieldID(childMetadataClass, "size", "J");
+    if (sizeField == nullptr)
+    {
+        checkAndClearJniException(env,
+                                  "AndroidFileWrapper::getChildrenWithMetadata",
+                                  "GetFieldID(ChildMetadata.size)");
+        env->DeleteLocalRef(resultList);
+        return std::nullopt;
+    }
+
+    jfieldID lastModField = env->GetFieldID(childMetadataClass, "lastModified", "J");
+    if (lastModField == nullptr)
+    {
+        checkAndClearJniException(env,
+                                  "AndroidFileWrapper::getChildrenWithMetadata",
+                                  "GetFieldID(ChildMetadata.lastModified)");
+        env->DeleteLocalRef(resultList);
+        return std::nullopt;
+    }
+
+    jfieldID pathField = env->GetFieldID(childMetadataClass, "path", "Ljava/lang/String;");
+    if (pathField == nullptr)
+    {
+        checkAndClearJniException(env,
+                                  "AndroidFileWrapper::getChildrenWithMetadata",
+                                  "GetFieldID(ChildMetadata.path)");
+        env->DeleteLocalRef(resultList);
+        return std::nullopt;
+    }
+
+    // Use cached List class and method IDs (set at JNI_OnLoad).
+    // Avoids FindClass() from background threads.
+    if (!listClass || !listSizeMethod || !listGetMethod)
+    {
+        LOG_err << "Error: List class/methods not initialized";
+        env->DeleteLocalRef(resultList);
+        return std::nullopt;
+    }
+
+    jint count = env->CallIntMethod(resultList, listSizeMethod);
+    if (checkAndClearJniException(env, "AndroidFileWrapper::getChildrenWithMetadata", "List.size"))
+    {
+        env->DeleteLocalRef(resultList);
+        return std::nullopt;
+    }
+
+    std::vector<ChildMetadata> children;
+    children.reserve(static_cast<size_t>(count));
+    const LocalPath parentPath = LocalPath::fromURIPath(mURI);
+
+    for (jint i = 0; i < count; ++i)
+    {
+        // PushLocalFrame/PopLocalFrame prevents JNI local reference table overflow.
+        // Default table limit is 512 entries.  Each iteration creates up to 7 local
+        // refs (list item + up to 6 string fields).  Without framing, directories
+        // larger than ~70 entries would crash with a hard JNI abort.
+        if (env->PushLocalFrame(16) < 0)
+        {
+            checkAndClearJniException(env,
+                                      "AndroidFileWrapper::getChildrenWithMetadata",
+                                      "PushLocalFrame");
+            LOG_err
+                << "AndroidFileWrapper::getChildrenWithMetadata: PushLocalFrame failed at index "
+                << i;
+            env->DeleteLocalRef(resultList);
+            return std::nullopt;
+        }
+
+        jobject item = env->CallObjectMethod(resultList, listGetMethod, i);
+        if (checkAndClearJniException(env,
+                                      "AndroidFileWrapper::getChildrenWithMetadata",
+                                      "List.get"))
+        {
+            env->PopLocalFrame(nullptr);
+            env->DeleteLocalRef(resultList);
+            return std::nullopt;
+        }
+        if (!item)
+        {
+            LOG_warn << "AndroidFileWrapper::getChildrenWithMetadata: Item is null at index " << i
+                     << " of " << count << " for uri=" << mURI;
+            env->PopLocalFrame(nullptr);
+            continue;
+        }
+
+        auto getString = [&](jfieldID fid) -> std::string
+        {
+            auto jstr = (jstring)env->GetObjectField(item, fid);
+            if (checkAndClearJniException(env,
+                                          "AndroidFileWrapper::getChildrenWithMetadata",
+                                          "GetObjectField(ChildMetadata)") ||
+                !jstr)
+            {
+                return {};
+            }
+            const char* chars = env->GetStringUTFChars(jstr, nullptr);
+            std::string result(chars ? chars : "");
+            if (chars)
+            {
+                env->ReleaseStringUTFChars(jstr, chars);
+            }
+            else
+            {
+                // GetStringUTFChars failed (typically OOM) — clear any pending
+                // JNI exception so subsequent fields don't short-circuit.
+                checkAndClearJniException(env,
+                                          "AndroidFileWrapper::getChildrenWithMetadata",
+                                          "GetStringUTFChars");
+            }
+            // No DeleteLocalRef needed — PopLocalFrame frees all local refs
+            return result;
+        };
+
+        const jboolean isFolder = env->GetBooleanField(item, isFolderField);
+        if (checkAndClearJniException(env,
+                                      "AndroidFileWrapper::getChildrenWithMetadata",
+                                      "GetBooleanField(isFolder)"))
+        {
+            env->PopLocalFrame(nullptr);
+            env->DeleteLocalRef(resultList);
+            return std::nullopt;
+        }
+
+        const jlong size = env->GetLongField(item, sizeField);
+        if (checkAndClearJniException(env,
+                                      "AndroidFileWrapper::getChildrenWithMetadata",
+                                      "GetLongField(size)"))
+        {
+            env->PopLocalFrame(nullptr);
+            env->DeleteLocalRef(resultList);
+            return std::nullopt;
+        }
+
+        const jlong lastModified = env->GetLongField(item, lastModField);
+        if (checkAndClearJniException(env,
+                                      "AndroidFileWrapper::getChildrenWithMetadata",
+                                      "GetLongField(lastModified)"))
+        {
+            env->PopLocalFrame(nullptr);
+            env->DeleteLocalRef(resultList);
+            return std::nullopt;
+        }
+
+        auto child = ChildMetadata{getString(uriField),
+                                   getString(nameField),
+                                   isFolder != JNI_FALSE,
+                                   size,
+                                   lastModified,
+                                   getString(pathField)};
+        {
+            // child.path is empty when path resolution is not available (see
+            // ChildMetadata::path); it must not be cached as a resolved path,
+            // otherwise getPath() would later return "" instead of std::nullopt.
+            std::optional<std::string> cachedPath =
+                child.path.empty() ? std::nullopt : std::make_optional(child.path);
+            std::unique_lock<std::mutex> lock(URIDataCacheLock);
+            URIDataCache.put(
+                child.uri,
+                AndroidFileWrapper::URIData{true, child.isFolder, child.name, cachedPath});
+        }
+        LocalPath childPath = parentPath;
+        childPath.appendWithSeparator(LocalPath::fromRelativePath(child.name), true);
+        setLocalPathURI(childPath.toPath(false), child.uri);
+        children.push_back(std::move(child));
+
+        env->PopLocalFrame(nullptr);
+    }
+
+    env->DeleteLocalRef(resultList);
+    return children;
 }
 
 std::shared_ptr<AndroidFileWrapper>
@@ -926,6 +1179,10 @@ std::shared_ptr<AndroidFileWrapper>
 
 void AndroidFileWrapper::setLocalPathURI(const std::string& path, const std::string& uri)
 {
+    if (path.empty() || uri.empty())
+    {
+        return;
+    }
     std::unique_lock<std::mutex> lock(localPathURICacheLock);
     localPathURICache.put(path, uri);
 }
@@ -1614,14 +1871,16 @@ bool AndroidDirAccess::dopen(LocalPath* path, FileAccess* f, bool doglob)
         return false;
     }
 
-    auto children = mFileWrapper->getChildren();
-    if (!children.has_value())
+    auto childrenMetaData = mFileWrapper->getChildrenWithMetadata();
+    if (!childrenMetaData.has_value())
     {
+        LOG_warn << "AndroidDirAccess::dopen: getChildrenWithMetadata() failed for "
+                 << mFileWrapper->getURI();
         mChildren.clear();
         return false;
     }
 
-    mChildren = std::move(children.value());
+    mChildren = std::move(childrenMetaData.value());
     return true;
 }
 
@@ -1640,13 +1899,12 @@ bool AndroidDirAccess::dnext(LocalPath& path,
         return false;
     }
 
-    auto& next = mChildren[mIndex];
-    assert(next.get());
-    path = LocalPath::fromPlatformEncodedAbsolute(next->getURI());
-    name = LocalPath::fromPlatformEncodedRelative(next->getName());
+    const auto& next = mChildren[mIndex];
+    path = LocalPath::fromPlatformEncodedAbsolute(next.uri);
+    name = LocalPath::fromPlatformEncodedRelative(next.name);
     if (type)
     {
-        *type = next->isFolder() ? FOLDERNODE : FILENODE;
+        *type = next.isFolder ? FOLDERNODE : FILENODE;
     }
 
     mIndex++;
@@ -2097,99 +2355,86 @@ ScanResult AndroidFileSystemAccess::directoryScan(const LocalPath& targetPath,
     // What device is this directory on?
     auto device = metadata.st_dev;
 
-    auto children = targetWrapper->getChildren();
-    if (!children.has_value())
+    // Batch metadata retrieval — single JNI call regardless of directory size.
+    auto childrenMetadata = targetWrapper->getChildrenWithMetadata();
+    if (!childrenMetadata.has_value())
     {
-        LOG_warn << "directoryScan: getChildren() failed for: " << targetPath;
+        LOG_warn << "directoryScan: getChildrenWithMetadata() failed for: " << targetPath;
         return SCAN_INACCESSIBLE;
     }
 
-    for (const auto& child: children.value())
+    for (const auto& childMeta: childrenMetadata.value())
     {
         auto& result = (results.emplace_back(), results.back());
-        result.localname = LocalPath::fromPlatformEncodedRelative(child->getName());
+        result.localname = LocalPath::fromPlatformEncodedRelative(childMeta.name);
 
-        LocalPath newpath = LocalPath::fromURIPath((child->getURI()));
+        struct stat childStat;
+        bool hasStat = false;
 
-        std::optional<std::string> childPath = child->getPath();
-
-        if (!childPath.has_value() || stat(childPath->c_str(), &metadata) == -1)
+        // Use the filesystem path returned by the batch query if available.
+        // For external storage (ExternalStorageProvider) this is always non-empty.
+        // For other authorities it's empty and we fall back to SCAN_UNKNOWN below.
+        if (!childMeta.path.empty() && stat(childMeta.path.c_str(), &childStat) != -1)
         {
-            LOG_warn << "directoryScan: "
-                     << "Unable to stat(...) file: " << newpath << ". Error code was: " << errno;
+            hasStat = true;
+        }
 
-            // Entry's unknown if we can't determine otherwise.
+        if (!hasStat)
+        {
+            LOG_warn << "directoryScan: unable to stat child: " << childMeta.name
+                     << " (path=" << childMeta.path << ")";
             result.type = TYPE_UNKNOWN;
             continue;
         }
 
-        // result.fsid = (handle)entry->d_ino; (posix implementation)
-        result.fsid = static_cast<handle>(metadata.st_ino);
-        result.fingerprint.mtime = metadata.st_mtime;
+        result.fsid = static_cast<handle>(childStat.st_ino);
+        result.fingerprint.mtime = childStat.st_mtime;
         captimestamp(&result.fingerprint.mtime);
 
-        // Are we dealing with a directory?
-        if (S_ISDIR(metadata.st_mode))
+        if (S_ISDIR(childStat.st_mode))
         {
-            // Then no fingerprint is necessary.
             result.fingerprint.size = 0;
-
-            // Assume this directory isn't a mount point.
             result.type = FOLDERNODE;
-
-            // Directory's a mount point.
-            if (device != metadata.st_dev)
+            if (device != childStat.st_dev)
             {
-                // Mark directory as a mount so we can emit a stall.
                 result.type = TYPE_NESTED_MOUNT;
-
-                // Leave a trail for debuggers.
-                LOG_warn << "directoryScan: "
-                         << "Encountered a nested mount: " << newpath;
+                LOG_warn << "directoryScan: nested mount: " << childMeta.name;
             }
-
             continue;
         }
 
-        if (!S_ISREG(metadata.st_mode))
+        if (!S_ISREG(childStat.st_mode))
         {
-            LOG_warn << "directoryScan: "
-                     << "Encountered a special file: " << newpath
-                     << ". Mode flags were: " << (metadata.st_mode & S_IFMT);
-
-            result.isSymlink = S_ISLNK(metadata.st_mode);
+            result.isSymlink = S_ISLNK(childStat.st_mode);
             result.type = result.isSymlink ? TYPE_SYMLINK : TYPE_SPECIAL;
+            LOG_warn << "directoryScan: special/symlink file: " << childMeta.name;
             continue;
         }
 
-        // We're dealing with a regular file.
         result.type = FILENODE;
 
+        // Check if existing fingerprint can be reused (same inode, mtime, size).
         auto it = known.find(result.localname);
-
-        // Can we avoid recomputing this file's fingerprint?
         if (it != known.end() && reuse(result, it->second))
         {
             result.fingerprint = std::move(it->second.fingerprint);
             continue;
         }
 
+        // Fingerprint needed — use SAF-mediated AndroidFileAccess for parity with
+        // the previously-working code. The batch metadata path still gives us
+        // 1-IPC-per-directory for the listing; only the per-file open is via SAF.
+        // (The earlier PosixFileAccess::fopen() shortcut was removed because it
+        // produced fingerprint/scan instability that stalled sync.)
+        LocalPath childUriPath = LocalPath::fromURIPath(childMeta.uri);
         AndroidFileAccess fAccess(nullptr);
-        fAccess.updatelocalname(newpath, true);
-        bool validOpen = fAccess.fopen(newpath, OPEN_RDONLY, FSLogging::logOnError);
-
-        // Only fingerprint the file if we could actually open it.
-        if (!validOpen)
+        fAccess.updatelocalname(childUriPath, true);
+        if (!fAccess.fopen(childUriPath, OPEN_RDONLY, FSLogging::logOnError))
         {
-            LOG_warn << "directoryScan: "
-                     << "Unable to open file for fingerprinting: " << newpath
-                     << ". Error was: " << errno;
+            LOG_warn << "directoryScan: unable to open for fingerprinting: " << childMeta.name;
             continue;
         }
-
-        // Fingerprint the file.
         result.fingerprint.genfingerprint(&fAccess);
-
         ++nFingerprinted;
     }
 
