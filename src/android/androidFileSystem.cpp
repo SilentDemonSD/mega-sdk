@@ -2164,6 +2164,7 @@ ScanResult AndroidFileSystemAccess::directoryScan(const LocalPath& targetPath,
 
         // We're dealing with a regular file.
         result.type = FILENODE;
+        result.fingerprint.size = metadata.st_size;
 
         auto it = known.find(result.localname);
 
