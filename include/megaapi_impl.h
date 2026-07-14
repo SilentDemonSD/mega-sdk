@@ -571,7 +571,7 @@ namespace totp
 {
 constexpr std::optional<HashAlgorithm> getHashAlgorithm(const int alg)
 {
-    using td = mega::MegaNode::PasswordNodeData::TotpData;
+    using td = MegaNode::PasswordNodeData::TotpData;
     switch (alg)
     {
         case td::HASH_ALGO_SHA1:
@@ -587,7 +587,7 @@ constexpr std::optional<HashAlgorithm> getHashAlgorithm(const int alg)
 
 constexpr int getHashAlgorithmPublicId(const std::optional<HashAlgorithm> alg)
 {
-    using td = mega::MegaNode::PasswordNodeData::TotpData;
+    using td = MegaNode::PasswordNodeData::TotpData;
     if (!alg)
     {
         return td::TOTPNULLOPT;
@@ -4578,9 +4578,9 @@ class MegaApiImpl : public MegaApp
         std::atomic<bool> receivedScanningStateFlag{false};
         std::atomic<bool> receivedSyncingStateFlag{false};
 
-        MegaSync *getSyncByBackupId(mega::MegaHandle backupId);
-        MegaSync *getSyncByNode(MegaNode *node);
-        MegaSync *getSyncByPath(const char * localPath);
+        MegaSync* getSyncByBackupId(MegaHandle backupId);
+        MegaSync* getSyncByNode(MegaNode* node);
+        MegaSync* getSyncByPath(const char* localPath);
         void getMegaSyncStallList(MegaRequestListener* listener);
         void getMegaSyncStallMap(MegaRequestListener* listener);
         void clearStalledPath(MegaSyncStall*);
@@ -6639,9 +6639,9 @@ public:
     int freq() const override;
     int interval() const override;
     MegaTimeStamp until() const override;
-    const mega::MegaIntegerList* byWeekDay() const override;
-    const mega::MegaIntegerList* byMonthDay() const override;
-    const mega::MegaIntegerMap* byMonthWeekDay() const override;
+    const MegaIntegerList* byWeekDay() const override;
+    const MegaIntegerList* byMonthDay() const override;
+    const MegaIntegerMap* byMonthWeekDay() const override;
 
     MegaScheduledRulesPrivate* copy() const override { return new MegaScheduledRulesPrivate(this); }
     unique_ptr<ScheduledRules> getSdkScheduledRules() const;
@@ -6653,9 +6653,9 @@ private:
     unique_ptr<ScheduledRules> mScheduledRules;
     // temp memory must be held somewhere since there is a data transformation and ownership is not returned in the getters
     // (probably removed after checking MegaAPI redesign)
-    mutable std::unique_ptr<mega::MegaIntegerList> mTransformedByWeekDay;
-    mutable std::unique_ptr<mega::MegaIntegerList> mTransformedByMonthDay;
-    mutable std::unique_ptr<mega::MegaIntegerMap> mTransformedByMonthWeekDay;
+    mutable std::unique_ptr<MegaIntegerList> mTransformedByWeekDay;
+    mutable std::unique_ptr<MegaIntegerList> mTransformedByMonthDay;
+    mutable std::unique_ptr<MegaIntegerMap> mTransformedByMonthWeekDay;
 };
 
 class MegaScheduledMeetingPrivate: public MegaScheduledMeeting

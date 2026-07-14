@@ -6,8 +6,6 @@
 #include "sdk_test_utils.h"
 #include "SdkTestNodesSetUp.h"
 
-#include <gmock/gmock.h>
-
 #include <regex>
 
 using namespace sdk_test;

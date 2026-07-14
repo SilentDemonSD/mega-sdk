@@ -1,6 +1,5 @@
 #include "mega/common/scoped_query.h"
 
-#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <mega/common/database.h>
 #include <mega/common/subsystem_logger.h>

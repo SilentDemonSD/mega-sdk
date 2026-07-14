@@ -1411,7 +1411,7 @@ bool MegaApiImpl::isSyncing()
     return receivedSyncingStateFlag.load();
 }
 
-MegaSync *MegaApiImpl::getSyncByBackupId(mega::MegaHandle backupId)
+MegaSync* MegaApiImpl::getSyncByBackupId(MegaHandle backupId)
 {
     // syncs has its own thread safety
     SyncConfig config;
