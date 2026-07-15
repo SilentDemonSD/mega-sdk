@@ -966,7 +966,7 @@ int64_t initMacComputationFromNode(MegaClient& mc,
     std::lock_guard<std::recursive_mutex> g(mc.nodeTreeMutex);
 
     auto node = mc.nodeByHandle(cloudNodeHandle);
-    if (!node || node->type != FILENODE || node->nodekey().empty())
+    if (!node || node->type != FILENODE || !node->keyApplied())
     {
         LOG_debug << logPrefix << "Invalid cloud node";
         return INVALID_META_MAC;
@@ -1217,7 +1217,7 @@ CloneMacStatus initCloneCandidateMacComputation(MegaClient& mc, SyncUpload_inCli
     std::shared_ptr<Node> candidateNode;
     for (const auto& node: candidates)
     {
-        if (node && node->type == FILENODE && !node->nodekey().empty())
+        if (node && node->type == FILENODE && node->keyApplied())
         {
             candidateNode = node;
             break;
@@ -1333,7 +1333,7 @@ CloneMacStatus checkPendingCloneMac(MegaClient& mc, SyncUpload_inClient& upload)
     {
         std::lock_guard<std::recursive_mutex> g(mc.nodeTreeMutex);
         auto node = mc.nodeByHandle(macComp->cloneCandidateHandle);
-        const bool valid = node && node->type == FILENODE && !node->nodekey().empty() &&
+        const bool valid = node && node->type == FILENODE && node->keyApplied() &&
                            node->nodekey() == macComp->cloneCandidateNodeKey;
 
         if (!valid)

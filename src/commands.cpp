@@ -779,16 +779,20 @@ CommandGetFile::CommandGetFile(MegaClient* /*client*/,
     }
 
     assert(key && "no key provided!");
-    if (key && keySize != SymmCipher::KEYLENGTH)
+    mFileKeyType = FILENODE;
+    if (key && keySize == SymmCipher::KEYLENGTH)
     {
-        assert (keySize <= FILENODEKEYLENGTH);
-        memcpy(filekey, key, keySize);
+        memcpy(mFileKey, key, SymmCipher::KEYLENGTH);
+        mFileKeyType = 1;
+    }
+    else if (key && keySize == FILENODEKEYLENGTH)
+    {
+        memcpy(mFileKey, key, FILENODEKEYLENGTH);
         mFileKeyType = FILENODE;
     }
-    else if (key && keySize == SymmCipher::KEYLENGTH)
+    else if (key)
     {
-        memcpy(filekey, key, SymmCipher::KEYLENGTH);
-        mFileKeyType = 1;
+        MEGA_ASSERT(false, "CommandGetFile: refusing node key of invalid length " << keySize);
     }
 
     mCompletion = std::move(completion);
@@ -917,7 +921,8 @@ bool CommandGetFile::procresult(Result r, JSON& json)
                 }
 
                 // decrypt at and set filename
-                SymmCipher * cipherer = client->getRecycledTemporaryTransferCipher(filekey, mFileKeyType);
+                SymmCipher* cipherer =
+                    client->getRecycledTemporaryTransferCipher(mFileKey, mFileKeyType);
                 const char* eos = strchr(at, '"');
                 buf.reset(Node::decryptattr(cipherer,
                                             at,
@@ -4209,6 +4214,14 @@ CommandNodeKeyUpdate::CommandNodeKeyUpdate(MegaClient* client, handle_vector* v)
 
         if ((n = client->nodebyhandle(h)))
         {
+            // An unapplied key is still the raw wire-form string, and should be skipped.
+            if (!n->keyApplied())
+            {
+                LOG_err << "CommandNodeKeyUpdate: skipping node with unapplied key "
+                        << toNodeHandle(h);
+                continue;
+            }
+
             client->key.ecb_encrypt((byte*)n->nodekey().data(), nodekey, n->nodekey().size());
             assert(!n->hasZeroKey());
 

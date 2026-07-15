@@ -6577,7 +6577,7 @@ MegaFileGet::MegaFileGet(MegaClient *client, Node *n, const LocalPath& dstPath, 
     size = n->size;
     mtime = n->mtime;
 
-    if(n->nodekey().size()>=sizeof(filekey))
+    if (n->nodekey().size() == sizeof(filekey))
         memcpy(filekey,n->nodekey().data(),sizeof filekey);
 
     setLocalname(finalPath);
@@ -6621,7 +6621,7 @@ MegaFileGet::MegaFileGet(MegaClient *client, MegaNode *n, const LocalPath& dstPa
     size = n->getSize();
     mtime = n->getModificationTime();
 
-    if(n->getNodeKey()->size()>=sizeof(filekey))
+    if (n->getNodeKey()->size() == sizeof(filekey))
         memcpy(filekey,n->getNodeKey()->data(),sizeof filekey);
 
     setLocalname(finalPath);
@@ -20581,6 +20581,19 @@ unsigned MegaApiImpl::sendPendingTransfers(TransferQueue *queue, MegaRecursiveOp
                             break;
                         }
 
+                        // Refuse an invalid/unapplied key rather than
+                        // build a zero-key cipher or read the IV past a short key buffer.
+                        const std::string* nodeKey = notOwnedNode->getNodeKey();
+                        if (!nodeKey || nodeKey->size() != FILENODEKEYLENGTH)
+                        {
+                            LOG_err << "Streaming download: foreign node "
+                                    << toNodeHandle(notOwnedNode->getHandle())
+                                    << " has an invalid key (size "
+                                    << (nodeKey ? nodeKey->size() : 0) << ")";
+                            e = API_EKEY;
+                            break;
+                        }
+
                         m_off_t totalBytes = endPos - startPos + 1;
                         transferMap[nextTag]=transfer;
                         transfer->setTotalBytes(totalBytes);
@@ -21504,7 +21517,6 @@ void MegaApiImpl::moveNode(MegaNode* node, MegaNode* newParent, const char* newN
                     return e;
                 }
 
-                unsigned nc;
                 TreeProcCopy tc;
                 const bool fullInternalOperation = node && newParent && node->owner == client->me &&
                                                    client->me == newParent->owner;
@@ -21555,12 +21567,18 @@ void MegaApiImpl::moveNode(MegaNode* node, MegaNode* newParent, const char* newN
 
                 // determine number of nodes to be copied
                 client->proctree(node, &tc, !ovhandle.isUndef());
+                if (tc.unusableKey)
+                {
+                    // A node in the tree has an unapplied key,
+                    // fail the move rather than create a broken node.
+                    LOG_err << "move: a node in the tree has an unusable key";
+                    e = API_EKEY;
+                    return e;
+                }
                 tc.allocnodes();
-                nc = tc.nc;
 
-                // build new nodes array
                 client->proctree(node, &tc, !ovhandle.isUndef());
-                if (!nc)
+                if (tc.nn.empty())
                 {
                     e = API_EARGS;
                     return e;
@@ -21718,10 +21736,20 @@ error MegaApiImpl::performRequest_copy(MegaRequestPrivate* request)
                 MegaTreeProcCopy tc(client);
 
                 processMegaTree(megaNode, &tc);
+                if (tc.unusableKey)
+                {
+                    LOG_err << "Failed to import node: a node in the tree has an unusable key";
+                    return API_EKEY;
+                }
                 tc.allocnodes();
 
                 // build new nodes array
                 processMegaTree(megaNode, &tc);
+                if (tc.nn.empty())
+                {
+                    LOG_err << "Failed to import node: no copyable nodes in the tree";
+                    return API_EARGS;
+                }
 
                 tc.nn[0].parenthandle = UNDEF;
                 tc.nn[0].ovhandle = ovhandle;
@@ -21853,6 +21881,11 @@ error MegaApiImpl::copyTreeFromOwnedNode(shared_ptr<Node> node,
         node && target && node->owner == client->me && client->me == target->owner;
     tc.resetSensitive = !fullInternalOperation;
     client->proctree(node, &tc, false, !ovhandle.isUndef());
+    if (tc.unusableKey)
+    {
+        LOG_err << "Failed to copy owned node: a node in the tree has an unusable key";
+        return API_EKEY;
+    }
     tc.allocnodes();
 
     // If the sensitivity was reset, the file didn't exist
@@ -21937,6 +21970,13 @@ void MegaApiImpl::restoreVersion(MegaNode* version, MegaRequestListener* listene
             if (version->type != FILENODE || !version->parent || version->parent->type != FILENODE)
             {
                 return API_EARGS;
+            }
+
+            if (!version->keyApplied())
+            {
+                LOG_err << "restoreVersion: version " << toNodeHandle(version->nodehandle) << " ("
+                        << version->displaypath() << ") has an unapplied key, cannot restore";
+                return API_EKEY;
             }
 
             Node *current = version.get();
@@ -22137,6 +22177,14 @@ void MegaApiImpl::getDownloadUrl(MegaNode* node,
             if(!node) // works only for existing nodes, not the ones that need to be undeleted (see "gd" command)
             {
                 return API_EARGS;
+            }
+
+            // Refuse nodes whose key has not been applied. Such a node still holds
+            // the raw wire-form key ("<sharehandle>:<base64>"), longer than the
+            // fixed filekey buffer in CommandGetFile.
+            if (!node->keyApplied())
+            {
+                return API_EKEY;
             }
 
             client->queueCommand(new CommandGetFile(
@@ -31980,6 +32028,18 @@ void MegaTreeProcCopy::allocnodes()
 }
 bool MegaTreeProcCopy::processMegaNode(MegaNode *n)
 {
+    // MegaNode has no keyApplied(), so check the key length directly. A file node whose
+    // key was never applied cannot be copied.
+    if (n->getType() == MegaNode::TYPE_FILE &&
+        (!n->getNodeKey() || n->getNodeKey()->size() != FILENODEKEYLENGTH))
+    {
+        unusableKey = true;
+        LOG_err << "MegaTreeProcCopy: node " << toNodeHandle(n->getHandle()) << " ("
+                << (n->getName() ? n->getName() : "?")
+                << ") has an unapplied key, import will be aborted";
+        return true;
+    }
+
     if (allocated)
     {
         // prepare map of attributes
