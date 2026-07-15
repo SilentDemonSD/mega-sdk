@@ -2412,6 +2412,7 @@ ScanResult AndroidFileSystemAccess::directoryScan(const LocalPath& targetPath,
         }
 
         result.type = FILENODE;
+        result.fingerprint.size = metadata.st_size;
 
         // Check if existing fingerprint can be reused (same inode, mtime, size).
         auto it = known.find(result.localname);
