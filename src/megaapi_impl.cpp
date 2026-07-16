@@ -12615,19 +12615,36 @@ int MegaApiImpl::getAccess(const std::variant<MegaNode*, MegaHandle>& nodeOrNode
         return MegaShare::ACCESS_READ;
     }
 
-    if(node->type > FOLDERNODE)
-    {
-        return MegaShare::ACCESS_OWNER;
-    }
-
-    Node *n = node.get();
+    Node* n = node.get();
+    Node* root = n;
     accesslevel_t a = OWNER;
+    bool inInshare = false;
     while (n)
     {
-        if (n->inshare) { a = n->inshare->access; break; }
+        if (n->inshare)
+        {
+            a = n->inshare->access;
+            inInshare = true;
+            break;
+        }
+        root = n;
         n = n->parent.get();
     }
 
+    // Process nodes in Vault first.
+    // The Vault is read-only, except the Password Manager subtree.
+    if (!inInshare && root->type == VAULTNODE)
+    {
+        const NodeHandle pwmBase = client->getPasswordManagerBase();
+        if (pwmBase.isUndef() || !node->hasNHOrHasAncestorWithNH(pwmBase))
+        {
+            return MegaShare::ACCESS_READ;
+        }
+    }
+
+    // For a ROOTNODE or RUBBISHNODE the loop above leaves a == OWNER (no parent
+    // and no inshare), so the switch returns OWNER here.
+    // Then process accesslevel of regular nodes.
     switch(a)
     {
         case RDONLY: return MegaShare::ACCESS_READ;
