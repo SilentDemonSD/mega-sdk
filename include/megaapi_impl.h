@@ -2500,6 +2500,7 @@ public:
     int32_t getAccountLevel() const override;
     MegaStringList* getFeatures() const override;
     int64_t getExpirationTime() const override;
+    int64_t getStartTime() const override;
     int32_t getType() const override;
     char* getId() const override;
     bool isTrial() const override;

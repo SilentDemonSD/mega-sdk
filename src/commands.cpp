@@ -6339,6 +6339,11 @@ bool CommandGetUserQuota::readPlans(JSON* j)
                     plan.expiration = j->getint();
                     break;
 
+                case makeNameid("ts"):
+                    // The time the plan starts
+                    plan.startTime = j->getint();
+                    break;
+
                 case makeNameid("type"):
                     // Why the plan was granted: payment, achievement, etc.
                     // Not included for Bussiness/Pro Flexi

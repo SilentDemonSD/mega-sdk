@@ -20689,57 +20689,84 @@ TEST_F(SdkTest, GetActivePlansAndFeatures)
     LOG_info << "___TEST GetActivePlansAndFeaturess___";
     ASSERT_NO_FATAL_FAILURE(getAccountsForTest(1));
 
-    RequestTracker accDetailsTracker(megaApi[0].get());
-    megaApi[0]->getAccountDetails(&accDetailsTracker);
-    ASSERT_EQ(accDetailsTracker.waitForResult(), API_OK) << "Failed to get account details";
+    // The loop elevates the account to pro (iteration 1); capture the current level now so it is
+    // reverted when the test ends. getAccountsForTest only auto-restores accounts that started
+    // non-free, so an elevated free account must be reverted here.
+    ScopedDestructor accountRestorer = accountLevelRestorer(*megaApi[0]);
 
-    std::unique_ptr<MegaAccountDetails> accountDetails(
-        accDetailsTracker.request->getMegaAccountDetails());
-    ASSERT_TRUE(accountDetails) << "Missing account details";
-
-    int proLevel = MegaAccountDetails::ACCOUNT_TYPE_FREE;
-    set<string> featuresGranted;
-    for (int i = 0; i < accountDetails->getNumPlans(); ++i)
+    // Verify plans + active features against two states: the account's current (non-pro) state
+    // (iteration 0), then a pro state (iteration 1). Elevating is a best-effort way to surface an
+    // active plan to inspect; we do NOT assume plans exist only for pro accounts, so the checks
+    // are driven by whatever plans the response contains.
+    for (int iteration = 0; iteration < 2; ++iteration)
     {
-        std::unique_ptr<MegaAccountPlan> plan(accountDetails->getPlan(i));
-        std::unique_ptr<MegaStringList> features(plan->getFeatures());
-        for (int j = 0; j < features->size(); ++j)
+        if (iteration == 1)
         {
-            // Acumulate granted features
-            featuresGranted.emplace(features->get(j));
+            ASSERT_EQ(
+                setAccountLevel(*megaApi[0], MegaAccountDetails::ACCOUNT_TYPE_PROI, 1, nullptr),
+                API_OK)
+                << "Failed to elevate account to a pro plan";
         }
 
-        if (plan->isProPlan())
-        {
-            ASSERT_EQ(proLevel, MegaAccountDetails::ACCOUNT_TYPE_FREE)
-                << "More than one PRO plan has been received";
-            proLevel = plan->getAccountLevel();
-            ASSERT_GT(proLevel, MegaAccountDetails::ACCOUNT_TYPE_FREE)
-                << "PRO level is ACCOUNT_TYPE_FREE";
-            ASSERT_NE(proLevel, MegaAccountDetails::ACCOUNT_TYPE_FEATURE)
-                << "PRO plan is a feature plan";
-            ASSERT_EQ(proLevel, accountDetails->getProLevel())
-                << "PRO level of the plan does not match the PRO account level";
-        }
-        else // Feature plan
-        {
-            ASSERT_EQ(plan->getAccountLevel(), MegaAccountDetails::ACCOUNT_TYPE_FEATURE)
-                << "Feature plan has not a feature account level";
-            ASSERT_GT(features->size(), 0) << "Feature plan does not grant any feature";
-        }
-    }
+        RequestTracker accDetailsTracker(megaApi[0].get());
+        megaApi[0]->getAccountDetails(&accDetailsTracker);
+        ASSERT_EQ(accDetailsTracker.waitForResult(), API_OK) << "Failed to get account details";
+        std::unique_ptr<MegaAccountDetails> accountDetails(
+            accDetailsTracker.request->getMegaAccountDetails());
+        ASSERT_TRUE(accountDetails) << "Missing account details";
 
-    // Compare features contained in the plans with the features received for the account.
-    ASSERT_EQ(featuresGranted.size(), accountDetails->getNumActiveFeatures())
-        << "Features in active plans don't match the number of features of the account";
-    m_time_t currTime = m_time();
-    for (int i = 0; i < accountDetails->getNumActiveFeatures(); ++i)
-    {
-        std::unique_ptr<MegaAccountFeature> feature(accountDetails->getActiveFeature(i));
-        ASSERT_GE(feature->getExpiry(), currTime) << "Received an expired feature";
-        string featureId(std::unique_ptr<const char[]>(feature->getId()).get());
-        ASSERT_NE(featuresGranted.find(featureId), featuresGranted.end())
-            << "Feature " << featureId << " is not present in any plan";
+        int proLevel = MegaAccountDetails::ACCOUNT_TYPE_FREE;
+        set<string> featuresGranted;
+        for (int i = 0; i < accountDetails->getNumPlans(); ++i)
+        {
+            std::unique_ptr<MegaAccountPlan> plan(accountDetails->getPlan(i));
+
+            EXPECT_GT(plan->getStartTime(), 0) << "Active plan is missing a start time";
+            if (plan->getExpirationTime() > 0)
+            {
+                EXPECT_LT(plan->getStartTime(), plan->getExpirationTime())
+                    << "Plan start time is not before its expiration";
+            }
+
+            std::unique_ptr<MegaStringList> features(plan->getFeatures());
+            for (int j = 0; j < features->size(); ++j)
+            {
+                // Acumulate granted features
+                featuresGranted.emplace(features->get(j));
+            }
+
+            if (plan->isProPlan())
+            {
+                ASSERT_EQ(proLevel, MegaAccountDetails::ACCOUNT_TYPE_FREE)
+                    << "More than one PRO plan has been received";
+                proLevel = plan->getAccountLevel();
+                ASSERT_GT(proLevel, MegaAccountDetails::ACCOUNT_TYPE_FREE)
+                    << "PRO level is ACCOUNT_TYPE_FREE";
+                ASSERT_NE(proLevel, MegaAccountDetails::ACCOUNT_TYPE_FEATURE)
+                    << "PRO plan is a feature plan";
+                ASSERT_EQ(proLevel, accountDetails->getProLevel())
+                    << "PRO level of the plan does not match the PRO account level";
+            }
+            else // Feature plan
+            {
+                ASSERT_EQ(plan->getAccountLevel(), MegaAccountDetails::ACCOUNT_TYPE_FEATURE)
+                    << "Feature plan has not a feature account level";
+                ASSERT_GT(features->size(), 0) << "Feature plan does not grant any feature";
+            }
+        }
+
+        // Compare features contained in the plans with the features received for the account.
+        ASSERT_EQ(featuresGranted.size(), accountDetails->getNumActiveFeatures())
+            << "Features in active plans don't match the number of features of the account";
+        m_time_t currTime = m_time();
+        for (int i = 0; i < accountDetails->getNumActiveFeatures(); ++i)
+        {
+            std::unique_ptr<MegaAccountFeature> feature(accountDetails->getActiveFeature(i));
+            ASSERT_GE(feature->getExpiry(), currTime) << "Received an expired feature";
+            string featureId(std::unique_ptr<const char[]>(feature->getId()).get());
+            ASSERT_NE(featuresGranted.find(featureId), featuresGranted.end())
+                << "Feature " << featureId << " is not present in any plan";
+        }
     }
 }
 

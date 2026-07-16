@@ -63,6 +63,13 @@
 @property (readonly, nonatomic) int64_t expirationTime;
 
 /**
+ * @brief Get the start time for the plan
+ *
+ * @return The time the plan starts (in seconds since the Epoch)
+ */
+@property (readonly, nonatomic) int64_t startTime;
+
+/**
  * @brief Get the features granted by this plan
  *
  * @return Features granted by this plan.

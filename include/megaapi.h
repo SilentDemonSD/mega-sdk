@@ -26176,6 +26176,13 @@ public:
     virtual int64_t getExpirationTime() const = 0;
 
     /**
+     * @brief Get the start time for the plan
+     *
+     * @return The time the plan starts (in seconds since the Epoch)
+     */
+    virtual int64_t getStartTime() const = 0;
+
+    /**
      * @brief The type of plan. Why it was granted.
      *
      * Not available for Bussiness/Pro Flexi.
