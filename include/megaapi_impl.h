@@ -2651,6 +2651,17 @@ public:
     bool hasMobileOfferUat(int productIndex) const override;
     std::string getMobileOfferLabel(int productIndex) const override;
     int getMobileOfferDiscountPercentage(int productIndex) const override;
+    int64_t getMobileOfferExpiryTimestamp(int productIndex) const override;
+    uint32_t getMobileOfferFlags(int productIndex) const override;
+    int64_t getMobileOfferReshowInterval(int productIndex) const override;
+    bool hasMobileOfferIos(int productIndex) const override;
+    std::string getMobileOfferIosOfferId(int productIndex) const override;
+    std::string getMobileOfferIosKeyId(int productIndex) const override;
+    std::string getMobileOfferIosNonce(int productIndex) const override;
+    int64_t getMobileOfferIosTimestampMs(int productIndex) const override;
+    std::string getMobileOfferIosSignature(int productIndex) const override;
+    bool hasMobileOfferAndroid(int productIndex) const override;
+    std::string getMobileOfferAndroidOfferId(int productIndex) const override;
     bool hasDiscount(int productIndex) const override;
     const char* getDiscountCode(int productIndex) const override;
     const char* getDiscountName(int productIndex) const override;

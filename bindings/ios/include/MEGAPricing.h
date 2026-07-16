@@ -189,6 +189,115 @@ NS_ASSUME_NONNULL_BEGIN
  */
 - (int)mobileOfferDiscountPercentageAtProductIndex:(NSInteger)index;
 
+/**
+ * @brief Get the mobile offer expiry timestamp (mo.e)
+ *
+ * Seconds since the Epoch. If the product has no mobile offer or no expiry,
+ * this method returns 0.
+ *
+ * @param index Product index (from 0 to [MEGAPricing products])
+ * @return Offer expiry timestamp in seconds, or 0
+ */
+- (int64_t)mobileOfferExpiryTimestampAtProductIndex:(NSInteger)index;
+
+/**
+ * @brief Get the mobile offer feature flags (mo.f)
+ *
+ * Bitmask of feature flags for the client; the meaning of each bit is defined
+ * by the API. If the product has no mobile offer, this method returns 0.
+ *
+ * @param index Product index (from 0 to [MEGAPricing products])
+ * @return Flags bitmask, or 0
+ */
+- (uint32_t)mobileOfferFlagsAtProductIndex:(NSInteger)index;
+
+/**
+ * @brief Get the reshow timeout of the mobile offer (mo.r)
+ *
+ * Timeout in seconds before the offer may be shown again. If the product has
+ * no mobile offer or no reshow timeout, this method returns 0.
+ *
+ * @param index Product index (from 0 to [MEGAPricing products])
+ * @return Reshow timeout in seconds, or 0
+ */
+- (int64_t)mobileOfferReshowIntervalAtProductIndex:(NSInteger)index;
+
+/**
+ * @brief Check whether the mobile offer has an iOS section (mo.ios)
+ *
+ * @param index Product index (from 0 to [MEGAPricing products])
+ * @return True if the product's mobile offer has an iOS section
+ */
+- (BOOL)hasMobileOfferIosAtProductIndex:(NSInteger)index;
+
+/**
+ * @brief Get the App Store promotional offer id of the mobile offer (mo.ios.oid)
+ *
+ * If the product has no iOS mobile offer, this method returns an empty string.
+ *
+ * @param index Product index (from 0 to [MEGAPricing products])
+ * @return App Store promotional offer id
+ */
+- (nullable NSString *)mobileOfferIosOfferIdAtProductIndex:(NSInteger)index;
+
+/**
+ * @brief Get the key id of the mobile offer iOS signature (mo.ios.ki)
+ *
+ * If the product has no iOS mobile offer, this method returns an empty string.
+ *
+ * @param index Product index (from 0 to [MEGAPricing products])
+ * @return Key id
+ */
+- (nullable NSString *)mobileOfferIosKeyIdAtProductIndex:(NSInteger)index;
+
+/**
+ * @brief Get the nonce from the mobile offer iOS signature data (mo.ios.n)
+ *
+ * If the product has no iOS mobile offer, this method returns an empty string.
+ *
+ * @param index Product index (from 0 to [MEGAPricing products])
+ * @return Nonce
+ */
+- (nullable NSString *)mobileOfferIosNonceAtProductIndex:(NSInteger)index;
+
+/**
+ * @brief Get the timestamp of the mobile offer iOS signature, in milliseconds (mo.ios.tsm)
+ *
+ * If the product has no iOS mobile offer, this method returns 0.
+ *
+ * @param index Product index (from 0 to [MEGAPricing products])
+ * @return Signature timestamp in milliseconds, or 0
+ */
+- (int64_t)mobileOfferIosTimestampMsAtProductIndex:(NSInteger)index;
+
+/**
+ * @brief Get the server signature of the mobile offer iOS data (mo.ios.s)
+ *
+ * If the product has no iOS mobile offer, this method returns an empty string.
+ *
+ * @param index Product index (from 0 to [MEGAPricing products])
+ * @return Server signature
+ */
+- (nullable NSString *)mobileOfferIosSignatureAtProductIndex:(NSInteger)index;
+
+/**
+ * @brief Check whether the mobile offer has an Android section (mo.and)
+ *
+ * @param index Product index (from 0 to [MEGAPricing products])
+ * @return True if the product's mobile offer has an Android section
+ */
+- (BOOL)hasMobileOfferAndroidAtProductIndex:(NSInteger)index;
+
+/**
+ * @brief Get the Google Play offer id of the mobile offer (mo.and.oid)
+ *
+ * If the product has no Android mobile offer, this method returns an empty string.
+ *
+ * @param index Product index (from 0 to [MEGAPricing products])
+ * @return Google Play offer id
+ */
+- (nullable NSString *)mobileOfferAndroidOfferIdAtProductIndex:(NSInteger)index;
+
 NS_ASSUME_NONNULL_END
 
 @end

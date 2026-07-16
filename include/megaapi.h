@@ -27143,6 +27143,125 @@ public:
      * offer
      */
     virtual int getMobileOfferDiscountPercentage(int productIndex) const = 0;
+
+    /**
+     * @brief Get the mobile offer expiry timestamp (mo.e)
+     *
+     * Seconds since the Epoch. Clients use it to drive the offer countdown and to
+     * stop honouring the offer once it has passed.
+     *
+     * If the product has no mobile offer or no expiry, this method returns 0.
+     *
+     * @param productIndex Product index (from 0 to MegaPricing::getNumProducts)
+     * @return Offer expiry timestamp in seconds, or 0
+     */
+    virtual int64_t getMobileOfferExpiryTimestamp(int productIndex) const = 0;
+
+    /**
+     * @brief Get the mobile offer feature flags (mo.f)
+     *
+     * Bitmask of feature flags for the client; the meaning of each bit is defined
+     * by the API.
+     *
+     * If the product has no mobile offer, this method returns 0.
+     *
+     * @param productIndex Product index (from 0 to MegaPricing::getNumProducts)
+     * @return Flags bitmask, or 0
+     */
+    virtual uint32_t getMobileOfferFlags(int productIndex) const = 0;
+
+    /**
+     * @brief Get the reshow timeout of the mobile offer (mo.r)
+     *
+     * Timeout in seconds before the offer may be shown again.
+     *
+     * If the product has no mobile offer or no reshow interval, this method returns 0.
+     *
+     * @param productIndex Product index (from 0 to MegaPricing::getNumProducts)
+     * @return Reshow interval in seconds, or 0
+     */
+    virtual int64_t getMobileOfferReshowInterval(int productIndex) const = 0;
+
+    /**
+     * @brief Check whether the mobile offer carries an iOS StoreKit signature
+     *
+     * The iOS section (mo.ios) is only present for offers that target the App
+     * Store; it holds the data needed to redeem a promotional offer via StoreKit.
+     *
+     * @param productIndex Product index (from 0 to MegaPricing::getNumProducts)
+     * @return True if the product's mobile offer has an iOS section
+     */
+    virtual bool hasMobileOfferIos(int productIndex) const = 0;
+
+    /**
+     * @brief Get the App Store promotional offer id of the mobile offer (mo.ios.oid)
+     *
+     * If the product has no iOS mobile offer, this method returns an empty string.
+     *
+     * @param productIndex Product index (from 0 to MegaPricing::getNumProducts)
+     * @return App Store promotional offer id
+     */
+    virtual std::string getMobileOfferIosOfferId(int productIndex) const = 0;
+
+    /**
+     * @brief Get the id of the key used to sign the offer (mo.ios.ki)
+     *
+     * If the product has no iOS mobile offer, this method returns an empty string.
+     *
+     * @param productIndex Product index (from 0 to MegaPricing::getNumProducts)
+     * @return Key id
+     */
+    virtual std::string getMobileOfferIosKeyId(int productIndex) const = 0;
+
+    /**
+     * @brief Get the nonce from the iOS offer signature data (mo.ios.n)
+     *
+     * If the product has no iOS mobile offer, this method returns an empty string.
+     *
+     * @param productIndex Product index (from 0 to MegaPricing::getNumProducts)
+     * @return Nonce (UUID)
+     */
+    virtual std::string getMobileOfferIosNonce(int productIndex) const = 0;
+
+    /**
+     * @brief Get the signing timestamp, in milliseconds (mo.ios.tsm)
+     *
+     * If the product has no iOS mobile offer, this method returns 0.
+     *
+     * @param productIndex Product index (from 0 to MegaPricing::getNumProducts)
+     * @return Signing timestamp in milliseconds
+     */
+    virtual int64_t getMobileOfferIosTimestampMs(int productIndex) const = 0;
+
+    /**
+     * @brief Get the server signature authorising the offer (mo.ios.s)
+     *
+     * If the product has no iOS mobile offer, this method returns an empty string.
+     *
+     * @param productIndex Product index (from 0 to MegaPricing::getNumProducts)
+     * @return Server signature
+     */
+    virtual std::string getMobileOfferIosSignature(int productIndex) const = 0;
+
+    /**
+     * @brief Check whether the mobile offer carries a Google Play reference (mo.and)
+     *
+     * The Android section is only present for offers available on the Play Store.
+     *
+     * @param productIndex Product index (from 0 to MegaPricing::getNumProducts)
+     * @return True if the product's mobile offer has an Android section
+     */
+    virtual bool hasMobileOfferAndroid(int productIndex) const = 0;
+
+    /**
+     * @brief Get the Google Play offer id of the mobile offer (mo.and.oid)
+     *
+     * If the product has no Android mobile offer, this method returns an empty string.
+     *
+     * @param productIndex Product index (from 0 to MegaPricing::getNumProducts)
+     * @return Google Play offer id
+     */
+    virtual std::string getMobileOfferAndroidOfferId(int productIndex) const = 0;
 };
 
 /**

@@ -31108,6 +31108,133 @@ int mega::MegaPricingPrivate::getMobileOfferDiscountPercentage(int productIndex)
     return 0;
 }
 
+int64_t MegaPricingPrivate::getMobileOfferExpiryTimestamp(int productIndex) const
+{
+    if (auto index = static_cast<size_t>(productIndex);
+        index < products.size() && products[index].mobileOffer.has_value())
+    {
+        return products[index].mobileOffer->expiryTimestamp;
+    }
+
+    return 0;
+}
+
+uint32_t MegaPricingPrivate::getMobileOfferFlags(int productIndex) const
+{
+    if (auto index = static_cast<size_t>(productIndex);
+        index < products.size() && products[index].mobileOffer.has_value())
+    {
+        return products[index].mobileOffer->flags;
+    }
+
+    return 0;
+}
+
+int64_t MegaPricingPrivate::getMobileOfferReshowInterval(int productIndex) const
+{
+    if (auto index = static_cast<size_t>(productIndex);
+        index < products.size() && products[index].mobileOffer.has_value())
+    {
+        return products[index].mobileOffer->reshowInterval;
+    }
+
+    return 0;
+}
+
+bool MegaPricingPrivate::hasMobileOfferIos(int productIndex) const
+{
+    if (auto index = static_cast<size_t>(productIndex);
+        index < products.size() && products[index].mobileOffer.has_value())
+    {
+        return products[index].mobileOffer->ios.has_value();
+    }
+
+    return false;
+}
+
+std::string MegaPricingPrivate::getMobileOfferIosOfferId(int productIndex) const
+{
+    if (auto index = static_cast<size_t>(productIndex);
+        index < products.size() && products[index].mobileOffer.has_value() &&
+        products[index].mobileOffer->ios.has_value())
+    {
+        return products[index].mobileOffer->ios->offerId;
+    }
+
+    return {};
+}
+
+std::string MegaPricingPrivate::getMobileOfferIosKeyId(int productIndex) const
+{
+    if (auto index = static_cast<size_t>(productIndex);
+        index < products.size() && products[index].mobileOffer.has_value() &&
+        products[index].mobileOffer->ios.has_value())
+    {
+        return products[index].mobileOffer->ios->keyId;
+    }
+
+    return {};
+}
+
+std::string MegaPricingPrivate::getMobileOfferIosNonce(int productIndex) const
+{
+    if (auto index = static_cast<size_t>(productIndex);
+        index < products.size() && products[index].mobileOffer.has_value() &&
+        products[index].mobileOffer->ios.has_value())
+    {
+        return products[index].mobileOffer->ios->nonce;
+    }
+
+    return {};
+}
+
+int64_t MegaPricingPrivate::getMobileOfferIosTimestampMs(int productIndex) const
+{
+    if (auto index = static_cast<size_t>(productIndex);
+        index < products.size() && products[index].mobileOffer.has_value() &&
+        products[index].mobileOffer->ios.has_value())
+    {
+        return products[index].mobileOffer->ios->timestampMs;
+    }
+
+    return 0;
+}
+
+std::string MegaPricingPrivate::getMobileOfferIosSignature(int productIndex) const
+{
+    if (auto index = static_cast<size_t>(productIndex);
+        index < products.size() && products[index].mobileOffer.has_value() &&
+        products[index].mobileOffer->ios.has_value())
+    {
+        return products[index].mobileOffer->ios->signature;
+    }
+
+    return {};
+}
+
+bool MegaPricingPrivate::hasMobileOfferAndroid(int productIndex) const
+{
+    if (auto index = static_cast<size_t>(productIndex);
+        index < products.size() && products[index].mobileOffer.has_value())
+    {
+        return products[index].mobileOffer->android.has_value();
+    }
+
+    return false;
+}
+
+std::string MegaPricingPrivate::getMobileOfferAndroidOfferId(int productIndex) const
+{
+    if (auto index = static_cast<size_t>(productIndex);
+        index < products.size() && products[index].mobileOffer.has_value() &&
+        products[index].mobileOffer->android.has_value())
+    {
+        return products[index].mobileOffer->android->offerId;
+    }
+
+    return {};
+}
+
 const char *MegaPricingPrivate::getDescription(int productIndex)
 {
     if (productIndex >= 0 && static_cast<unsigned int>(productIndex) < products.size())
