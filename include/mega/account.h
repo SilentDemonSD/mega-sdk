@@ -98,6 +98,7 @@ struct MEGA_API AccountPlan
     int32_t level = ACCOUNT_TYPE_FREE; // Account level
     vector<string> features; // List of features the plan grants
     m_time_t expiration = mega_invalid_timestamp; // The time the plan expires
+    m_time_t startTime = mega_invalid_timestamp; // "ts" - the time the plan starts
     int32_t type = 0; // Why the plan was granted: payment, achievement, etc. Not included in
                       // Bussiness/Pro Flexi
     string subscriptionId; // The relating subscription ID if the plan relates to a subscription.

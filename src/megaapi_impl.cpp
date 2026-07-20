@@ -32002,6 +32002,11 @@ int64_t MegaAccountPlanPrivate::getExpirationTime() const
     return mPlan.expiration;
 }
 
+int64_t MegaAccountPlanPrivate::getStartTime() const
+{
+    return mPlan.startTime;
+}
+
 int32_t MegaAccountPlanPrivate::getType() const
 {
     return mPlan.type;

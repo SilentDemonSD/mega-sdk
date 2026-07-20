@@ -16,15 +16,17 @@
  * program.
  */
 
-#include <memory>
+#include "utils.h"
 
 #include <gtest/gtest.h>
-
+#include <mega/account.h>
 #include <mega/command.h>
 #include <mega/json.h>
 #include <mega/megaapp.h>
 #include <mega/megaclient.h>
 #include <mega/types.h>
+
+#include <memory>
 
 using namespace std;
 using namespace mega;
@@ -255,3 +257,33 @@ TEST(Commands, CommandQueryAds)
     command.procresult(r);
 }
 */
+
+TEST(Commands, CommandGetUserQuota_parsesPlanStartTime)
+{
+    // The uq `plans` array carries a per-plan start time in the `ts` field (plan
+    // activation), alongside `expires`. Verify readPlans captures it into AccountPlan.
+    MegaApp app;
+    auto client = mt::makeClient(app);
+
+    auto details = std::make_shared<AccountDetails>();
+
+    // storage/transfer/pro all false: this skips the storage sanity checks and the
+    // processPlans() account-status side effects, while readPlans still parses `plans`.
+    CommandGetUserQuota command(client.get(), details, false, false, false, 0);
+    command.client = client.get();
+
+    // The framework enters the reply object before calling procresult(CmdObject).
+    JSON json;
+    json.pos = R"({"plans":[{"al":1,"ts":1783500245,"expires":1815036245,"type":2,)"
+               R"("features":{"vpn":1,"pwm":1}}]})";
+    ASSERT_TRUE(json.enterobject());
+
+    command.procresult(Command::CmdObject, json);
+
+    ASSERT_EQ(1u, details->plans.size());
+    const AccountPlan& plan = details->plans[0];
+    EXPECT_EQ(1783500245, plan.startTime);
+    EXPECT_EQ(1815036245, plan.expiration);
+    EXPECT_EQ(1, plan.level);
+    EXPECT_EQ(2, plan.type);
+}
