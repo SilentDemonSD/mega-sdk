@@ -31,14 +31,22 @@ class FsNode;
 
 mega::handle nextFsId();
 
-std::shared_ptr<mega::MegaClient> makeClient(mega::MegaApp& app, mega::DbAccess* dbAccess  = nullptr);
+std::shared_ptr<mega::MegaClient> makeClient(mega::MegaApp& app,
+                                             mega::DbAccess* dbAccess = nullptr);
 
-mega::Node& makeNode(mega::MegaClient& client, mega::nodetype_t type, mega::NodeHandle handle, mega::Node* parent = nullptr);
+std::shared_ptr<mega::Node> makeNode(mega::MegaClient& client,
+                                     mega::nodetype_t type,
+                                     mega::NodeHandle handle,
+                                     mega::Node* parent = nullptr);
 
 void collectAllFsNodes(std::map<mega::LocalPath, const mt::FsNode*>& nodes, const mt::FsNode& node);
 
 std::uint16_t nextRandomInt();
 
 mega::byte nextRandomByte();
+
+// Build a public-key blob (modulus followed by exponent 0x11, each MPI-encoded) with the requested
+// modulus size in bytes. Used by tests that exercise AsymmCipher / RSA key handling.
+std::string makePubKeyBlob(size_t modulusBytes);
 
 } // mt

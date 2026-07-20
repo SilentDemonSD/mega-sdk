@@ -79,8 +79,10 @@ TEST(User, serialize_unserialize)
     std::string lastname = "oo";
     user.setAttribute(mega::ATTR_FIRSTNAME, firstname1, firstname2);
     user.setAttribute(mega::ATTR_LASTNAME, lastname, {});
-    std::string key(128, 1);
-    user.pubk.setkey(mega::AsymmCipher::PUBKEY, reinterpret_cast<const mega::byte*>(key.c_str()), static_cast<int>(key.size()));
+    const std::string key = mt::makePubKeyBlob(256);
+    user.pubk.setkey(mega::AsymmCipher::PUBKEY,
+                     reinterpret_cast<const mega::byte*>(key.data()),
+                     static_cast<int>(key.size()));
     ASSERT_TRUE(user.pubk.isvalid(mega::AsymmCipher::PUBKEY));
 
     std::string d;
@@ -105,8 +107,9 @@ TEST(User, unserialize_32bit)
     user.setAttribute(mega::ATTR_FIRSTNAME, firstname1, firstname2);
     user.setAttribute(mega::ATTR_LASTNAME, lastname, {});
     std::string key(128, 1);
-    user.pubk.setkey(mega::AsymmCipher::PUBKEY, reinterpret_cast<const mega::byte*>(key.c_str()), static_cast<int>(key.size()));
-    ASSERT_TRUE(user.pubk.isvalid(mega::AsymmCipher::PUBKEY));
+    user.pubk.setkey(mega::AsymmCipher::PUBKEY,
+                     reinterpret_cast<const mega::byte*>(key.data()),
+                     static_cast<int>(key.size()));
 
     // This is the result of serialization on 32bit Windows
     const std::array<char, 133> rawData = {

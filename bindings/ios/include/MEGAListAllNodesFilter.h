@@ -33,6 +33,17 @@ typedef NS_ENUM (NSInteger, MEGAListAllNodesFilterLocation) {
 };
 
 /**
+ * @brief Direction of the date-bucket timestamp anchor (see
+ * `timestampAnchorSectionOrder`). Identifies both the timestamp column and the
+ * traversal direction; only modification-time ordering is supported.
+ */
+typedef NS_ENUM (NSInteger, MEGAListAllNodesTimestampAnchorOrder) {
+    MEGAListAllNodesTimestampAnchorOrderNone = 0,             ///< Anchor disabled (default).
+    MEGAListAllNodesTimestampAnchorOrderModificationAsc = 1,  ///< Enforce the lower bound; walk forward.
+    MEGAListAllNodesTimestampAnchorOrderModificationDesc = 2  ///< Enforce the upper bound; walk backward.
+};
+
+/**
  * @brief Maximum number of handles accepted by `locationHandles` and
  * `excludeLocationHandles`. Lists exceeding this size cause
  * `listAllNodesByPage` to reject the request and return an empty list.
@@ -117,6 +128,37 @@ NS_ASSUME_NONNULL_BEGIN
  *   root, is set.
  */
 @property (nonatomic) MEGAListAllNodesFilterSensitivityOption sensitivityFilter;
+
+/**
+ * @brief Optional. Inclusive lower bound of the date-bucket anchor, UTC epoch
+ * seconds (pass MEGADateSection.startDate). Default 0.
+ *
+ * Only consulted when `timestampAnchorSectionOrder` is not
+ * MEGAListAllNodesTimestampAnchorOrderNone. Half-bounded: the ASC direction
+ * enforces this lower bound. Pagination continues into adjacent buckets, so to
+ * fetch ONLY this bucket the caller stops after MEGADateSection.count items.
+ * startDate == 0 with a non-zero endDate means "no lower bound" for an ASC anchor.
+ */
+@property (nonatomic) int64_t timestampAnchorStartDate;
+
+/**
+ * @brief Optional. Exclusive upper bound of the date-bucket anchor, UTC epoch
+ * seconds (pass MEGADateSection.endDate). Default 0.
+ *
+ * The DESC direction enforces this upper bound. The listing returns an empty
+ * list and logs a warning if startDate >= endDate while the anchor is active.
+ */
+@property (nonatomic) int64_t timestampAnchorEndDate;
+
+/**
+ * @brief Optional. Direction of the date-bucket anchor. Set to a non-None value
+ * to activate the anchor; MEGAListAllNodesTimestampAnchorOrderNone (default)
+ * disables it and leaves the start/end bounds ignored.
+ *
+ * Independent of the `orderType` passed to the listing call, which controls
+ * only the ORDER BY.
+ */
+@property (nonatomic) MEGAListAllNodesTimestampAnchorOrder timestampAnchorSectionOrder;
 
 - (instancetype)init;
 

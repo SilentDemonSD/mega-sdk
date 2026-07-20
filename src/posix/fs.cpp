@@ -1177,18 +1177,21 @@ bool PosixFileSystemAccess::renamelocal(const LocalPath& oldname, const LocalPat
     AdjustBasePathResult newnamestr = adjustBasePath(newname);
 
 #ifdef __MACH__
-    // On case-insensitive file systems, renaming a file to a name that differs
-    // only by case (e.g., "B" → "A" when "a" already exists) does not actually change the case of
-    // the target filename. Instead, the existing "a" is overwritten in content but its original
-    // casing is preserved.
-    //
-    // To ensure that the renamed file takes the exact desired casing ("A" in this case), we
-    // explicitly remove the existing target using unlink() before calling rename(). This guarantees
-    // that the resulting file name matches the requested casing exactly, regardless of file system
-    // case sensitivity.
+    // On case-insensitive file systems, remove a *different* existing target ("B" → "A" while "a"
+    // exists) before rename() so the result takes the exact requested casing. But skip the unlink
+    // for a case-only rename of the *same* file ("foo" → "Foo"): there oldname and newname refer to
+    // the same file, so unlink() would delete the source itself and rename() applies the new
+    // casing.
     if (override)
     {
-        unlinklocal(newname);
+        // A case-only rename differs only by case, so oldname and newname compare equal ignoring
+        // case; anything else is a genuinely different target that we should overwrite.
+        const bool caseOnlyRename = compareUtf(oldname, false, newname, false, true) == 0;
+
+        if (!caseOnlyRename)
+        {
+            unlinklocal(newname);
+        }
     }
 #endif
 

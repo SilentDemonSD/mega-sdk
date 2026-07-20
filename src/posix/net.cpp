@@ -935,7 +935,11 @@ void CurlHttpIO::send_request(CurlHttpContext* httpctx)
         curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, check_header);
         curl_easy_setopt(curl, CURLOPT_HEADERDATA, (void*)req);
         curl_easy_setopt(curl, CURLOPT_PRIVATE, (void*)req);
-        curl_easy_setopt(curl, CURLOPT_SSLVERSION, CURL_SSLVERSION_TLSv1);
+        // Require TLS 1.2 as a minimum, but leave the maximum unset so TLS 1.3 can be
+        // negotiated: on hardened Windows systems the Schannel cipher suite policy may
+        // only allow TLS 1.3 suites. Note we previously capped at TLS 1.2 since 2021,
+        // because some networks (eg Vodafone UK) dropped TLS 1.3 ClientHello.
+        curl_easy_setopt(curl, CURLOPT_SSLVERSION, CURL_SSLVERSION_TLSv1_2);
         curl_easy_setopt(curl, CURLOPT_NOSIGNAL, true);
         curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, HttpIO::CONNECTTIMEOUT / 10);
         curl_easy_setopt(curl, CURLOPT_TCP_KEEPALIVE, 1L);
@@ -945,9 +949,6 @@ void CurlHttpIO::send_request(CurlHttpContext* httpctx)
         curl_easy_setopt(curl, CURLOPT_SOCKOPTDATA, (void*)req);
         curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
         curl_easy_setopt(curl, CURLOPT_QUICK_EXIT, 1L);
-
-        // Some networks (eg vodafone UK) seem to block TLS 1.3 ClientHello.  1.2 is secure, and works:
-        curl_easy_setopt(curl, CURLOPT_SSLVERSION, CURL_SSLVERSION_TLSv1_2 | CURL_SSLVERSION_MAX_TLSv1_2);
 
         if (httpio->maxspeed[GET] && httpio->maxspeed[GET] <= 102400)
         {

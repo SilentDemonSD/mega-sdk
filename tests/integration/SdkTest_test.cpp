@@ -7965,16 +7965,21 @@ TEST_F(SdkTest, SdkTestCloudraidStreamingSoakTest)
 
     // actual upload
     MegaHandle uploadedNodeHandle = UNDEF;
-    ASSERT_EQ(MegaError::API_OK, doStartUpload(0, &uploadedNodeHandle, filename3.c_str(),
-                                                        rootnode,
-                                                        nullptr /*fileName*/,
-                                                        ::mega::MegaApi::INVALID_CUSTOM_MOD_TIME,
-                                                        nullptr /*appData*/,
-                                                        false   /*isSourceTemporary*/,
-                                                        false   /*startFirst*/,
-                                                        nullptr /*cancelToken*/)) << "Upload transfer failed";
+    ASSERT_EQ(MegaError::API_OK,
+              doStartUpload(0,
+                            &uploadedNodeHandle,
+                            filename3.c_str(),
+                            rootnode,
+                            nullptr /*fileName*/,
+                            ::mega::MegaApi::INVALID_CUSTOM_MOD_TIME,
+                            nullptr /*appData*/,
+                            false /*isSourceTemporary*/,
+                            false /*startFirst*/,
+                            nullptr /*cancelToken*/,
+                            moderateTimeout))
+        << "Upload transfer failed";
 
-    MegaNode *nonRaidNode = megaApi[0]->getNodeByHandle(uploadedNodeHandle);
+    MegaNode* nonRaidNode = megaApi[0]->getNodeByHandle(uploadedNodeHandle);
 
     int64_t filesize = getFilesize(filename2);
     std::ifstream compareDecryptedFile(filename2.c_str(), ios::binary);
@@ -16339,7 +16344,7 @@ void SdkTest::runVersionManagementSequence(std::function<void()> preDeleteInject
     string destinationPath = '/' + folder2 + '/' + UPFILE;
     for (int i = 0; i < allVersions->size(); ++i)
     {
-        unique_ptr<char> filePath(api->getNodePath(allVersions->get(i)));
+        unique_ptr<char[]> filePath(api->getNodePath(allVersions->get(i)));
         ASSERT_STREQ(destinationPath.c_str(), filePath.get()) << "Wrong file path (1) for version " << (i + 1);
         destinationPath += '/' + UPFILE;
     }
@@ -16349,7 +16354,7 @@ void SdkTest::runVersionManagementSequence(std::function<void()> preDeleteInject
     destinationPath = '/' + folder1 + '/' + folder2 + '/' + UPFILE;
     for (int i = 0; i < allVersions->size(); ++i)
     {
-        unique_ptr<char> filePath(api->getNodePath(allVersions->get(i)));
+        unique_ptr<char[]> filePath(api->getNodePath(allVersions->get(i)));
         ASSERT_STREQ(destinationPath.c_str(), filePath.get()) << "Wrong file path (2) for version " << (i + 1);
         destinationPath += '/' + UPFILE;
     }

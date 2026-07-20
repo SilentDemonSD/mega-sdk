@@ -1,6 +1,6 @@
 /**
- * @file MEGAListAllNodesFilter.mm
- * @brief Filter for MEGASdk listAllNodesByPage queries.
+ * @file MEGAGroupNodesByDateFilter.mm
+ * @brief Filter for [MEGASdk groupAllNodesByDateWithFilter:...] queries.
  *
  * (c) 2026- by Mega Limited, Auckland, New Zealand
  *
@@ -18,15 +18,11 @@
  * You should have received a copy of the license along with this
  * program.
  */
-#import "MEGAListAllNodesFilter.h"
-#import "megaapi.h"
-
-const NSUInteger MEGAListAllNodesFilterMaxLocationHandles =
-    static_cast<NSUInteger>(mega::MegaListAllNodesFilter::MAX_LOCATION_HANDLES);
+#import "MEGAGroupNodesByDateFilter.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
-@implementation MEGAListAllNodesFilter
+@implementation MEGAGroupNodesByDateFilter
 
 - (instancetype)init {
     self = [super init];
@@ -36,9 +32,7 @@ NS_ASSUME_NONNULL_BEGIN
         _excludeLocationHandles = nil;
         _location = MEGAListAllNodesFilterLocationCloudDriveAndVault;
         _sensitivityFilter = MEGAListAllNodesFilterSensitivityOptionDisabled;
-        _timestampAnchorStartDate = 0;
-        _timestampAnchorEndDate = 0;
-        _timestampAnchorSectionOrder = MEGAListAllNodesTimestampAnchorOrderNone;
+        _granularity = MEGAGroupNodesByDateGranularityMonth;
     }
     return self;
 }

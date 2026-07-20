@@ -63,6 +63,8 @@
 #import "MEGASearchPage.h"
 #import "MEGAListAllNodesFilter.h"
 #import "MEGASearchCursorOffset.h"
+#import "MEGAGroupNodesByDateFilter.h"
+#import "MEGADateSection.h"
 #import "PasswordNodeData.h"
 #import "MEGANotification.h"
 #import "MEGACancelSubscriptionReasonList.h"
@@ -8140,6 +8142,35 @@ typedef NS_ENUM(NSInteger, PasswordManagerNodeType) {
                                    maxElements:(NSUInteger)maxElements
                                         offset:(int64_t)offset
                                    cancelToken:(MEGACancelToken *)cancelToken;
+
+/**
+ * @brief Group all nodes matching a MEGAGroupNodesByDateFilter into date buckets,
+ * sorted by modification time.
+ *
+ * Same scope / sensitivity / file-version exclusion as listAllNodesByPage. Nodes
+ * with a modification time <= 0 are excluded so the section list does not contain
+ * a spurious "1970-01-01" bucket. Sections with zero items are omitted. Always
+ * returns the section list across the entire filter scope — this call has no
+ * pagination anchor.
+ *
+ * Sum the count of every returned section for the timeline's total length (the
+ * value the fast scroller uses for its track).
+ *
+ * Supported sort orders:
+ *   - MEGASortOrderTypeModificationAsc  (oldest first)
+ *   - MEGASortOrderTypeModificationDesc (newest first)
+ * Any other order value is rejected (returns an empty array and logs a warning).
+ *
+ * @param filter      Node-selection scope and bucket granularity. Must not be nil.
+ * @param orderType   Timeline sort order; controls section ordering.
+ * @param cancelToken Cancellation token; if cancelled mid-scan an empty array is returned.
+ *
+ * @return Array of MEGADateSection ordered per orderType, or an empty array on
+ *         rejection, cancellation, or when the filter matches no nodes.
+ */
+- (nullable NSArray<MEGADateSection *> *)groupAllNodesByDateWithFilter:(MEGAGroupNodesByDateFilter *)filter
+                                                             orderType:(MEGASortOrderType)orderType
+                                                           cancelToken:(MEGACancelToken *)cancelToken;
 
 /// Get a list of buckets, each bucket containing a list of recently added/modified nodes
 ///

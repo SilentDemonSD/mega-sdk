@@ -157,16 +157,19 @@ public class AndroidGfxProcessor extends MegaGfxProcessor {
     }
 
     public boolean readBitmap(String path) {
-
-        if (isVideoFile(path)) {
-            srcPath = path;
-            size = getImageDimensions(srcPath, orientation);
-            return (size.right != 0) && (size.bottom != 0);
-        } else {
-            srcPath = path;
-            orientation = getExifOrientation(path);
-            size = getImageDimensions(srcPath, orientation);
-            return (size.right != 0) && (size.bottom != 0);
+        try {
+            if (isVideoFile(path)) {
+                srcPath = path;
+                size = getImageDimensions(srcPath, orientation);
+                return (size.right != 0) && (size.bottom != 0);
+            } else {
+                srcPath = path;
+                orientation = getExifOrientation(path);
+                size = getImageDimensions(srcPath, orientation);
+                return (size.right != 0) && (size.bottom != 0);
+            }
+        } catch (Throwable e) {
+            return false;
         }
     }
 
@@ -288,7 +291,7 @@ public class AndroidGfxProcessor extends MegaGfxProcessor {
                 Bitmap tmp = BitmapFactory.decodeStream(inputStream, null, options);
                 tmp = fixExifOrientation(tmp, orientation);
                 return Bitmap.createScaledBitmap(tmp, w, h, true);
-            } catch (Exception e) {
+            } catch (Throwable e) {
             }
         }
 
@@ -397,16 +400,16 @@ public class AndroidGfxProcessor extends MegaGfxProcessor {
     }
 
     public int getBitmapDataSize(int w, int h, int px, int py, int rw, int rh, int hint) {
-        if (bitmap == null)
-            bitmap = getBitmap(srcPath, size, orientation, w, h);
-        else
-            bitmap = Bitmap.createScaledBitmap(bitmap, w, h, true);
-
-        bitmap = extractRect(bitmap, px, py, rw, rh);
-        if (bitmap == null)
-            return 0;
-
         try {
+            if (bitmap == null)
+                bitmap = getBitmap(srcPath, size, orientation, w, h);
+            else
+                bitmap = Bitmap.createScaledBitmap(bitmap, w, h, true);
+
+            bitmap = extractRect(bitmap, px, py, rw, rh);
+            if (bitmap == null)
+                return 0;
+
             Bitmap.CompressFormat targetFormat = Bitmap.CompressFormat.JPEG;
             int targetQuality = 85;
             if (hint == MegaGfxProcessor.GFX_HINT_FORMAT_PNG) {
@@ -423,7 +426,7 @@ public class AndroidGfxProcessor extends MegaGfxProcessor {
 
             bitmapData = stream.toByteArray();
             return bitmapData.length;
-        } catch (Exception e) {
+        } catch (Throwable e) {
         }
         return 0;
     }

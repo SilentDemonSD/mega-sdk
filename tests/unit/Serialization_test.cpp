@@ -272,50 +272,51 @@ void checkDeserializedNode(const mega::Node& dl, const mega::Node& ref, bool ign
 TEST(Serialization, Node_whenFolderIsEncrypted)
 {
     MockClient client;
-    auto& n = mt::makeNode(*client.cli, mega::FOLDERNODE, ::mega::NodeHandle().set6byte(42));
+    auto n = mt::makeNode(*client.cli, mega::FOLDERNODE, ::mega::NodeHandle().set6byte(42));
 
-    n.attrstring.reset(new std::string("attrstring"));
-    n.setKey("nodekeydata");
+    n->attrstring.reset(new std::string("attrstring"));
+    n->setKey("nodekeydata");
 
     std::string data;
-    ASSERT_TRUE(n.serialize(&data));
+    ASSERT_TRUE(n->serialize(&data));
 
     auto dn = client.cli->mNodeManager.getNodeFromBlob(&data);
     ASSERT_TRUE(dn);
 
-    checkDeserializedNode(*dn, n);
+    checkDeserializedNode(*dn, *n);
 }
 
 TEST(Serialization, Node_whenFileIsEncrypted)
 {
     MockClient client;
-    auto& n = mt::makeNode(*client.cli, mega::FILENODE, ::mega::NodeHandle().set6byte(42));
+    auto n = mt::makeNode(*client.cli, mega::FILENODE, ::mega::NodeHandle().set6byte(42));
 
-    n.attrstring.reset(new std::string("attrstring"));
-    n.setKey("nodekeydata");
-    n.size = 16;
+    n->attrstring.reset(new std::string("attrstring"));
+    n->setKey("nodekeydata");
+    n->size = 16;
 
     std::string data;
-    ASSERT_TRUE(n.serialize(&data));
+    ASSERT_TRUE(n->serialize(&data));
 
     auto dn = client.cli->mNodeManager.getNodeFromBlob(&data);
     ASSERT_TRUE(dn);
 
-    checkDeserializedNode(*dn, n);
+    checkDeserializedNode(*dn, *n);
 }
 
 TEST(Serialization, Node_whenTypeIsUnsupported)
 {
     MockClient client;
-    auto& n = mt::makeNode(*client.cli, mega::TYPE_UNKNOWN, ::mega::NodeHandle().set6byte(42));
+    auto n = mt::makeNode(*client.cli, mega::TYPE_UNKNOWN, ::mega::NodeHandle().set6byte(42));
     std::string data;
-    ASSERT_FALSE(n.serialize(&data));
+    ASSERT_FALSE(n->serialize(&data));
 }
 
-TEST(Serialization, Node_forFile_withoutParent_withoutShares_withoutAttrs_withoutFileAttrString_withoutPlink)
+TEST(Serialization,
+     Node_forFile_withoutParent_withoutShares_withoutAttrs_withoutFileAttrString_withoutPlink)
 {
     MockClient client;
-    std::unique_ptr<mega::Node> n{&mt::makeNode(*client.cli, mega::FILENODE, ::mega::NodeHandle().set6byte(42))};
+    auto n = mt::makeNode(*client.cli, mega::FILENODE, ::mega::NodeHandle().set6byte(42));
     n->size = 12;
     n->owner = 43;
     n->ctime = 44;
@@ -326,10 +327,11 @@ TEST(Serialization, Node_forFile_withoutParent_withoutShares_withoutAttrs_withou
     checkDeserializedNode(*dn, *n);
 }
 
-TEST(Serialization, Node_forFolder_withoutParent_withoutShares_withoutAttrs_withoutFileAttrString_withoutPlink)
+TEST(Serialization,
+     Node_forFolder_withoutParent_withoutShares_withoutAttrs_withoutFileAttrString_withoutPlink)
 {
     MockClient client;
-    std::unique_ptr<mega::Node> n{&mt::makeNode(*client.cli, mega::FOLDERNODE, ::mega::NodeHandle().set6byte(42))};
+    auto n = mt::makeNode(*client.cli, mega::FOLDERNODE, ::mega::NodeHandle().set6byte(42));
     n->size = -1;
     n->owner = 43;
     n->ctime = 44;
@@ -343,8 +345,9 @@ TEST(Serialization, Node_forFolder_withoutParent_withoutShares_withoutAttrs_with
 TEST(Serialization, Node_forFile_withoutShares_withoutAttrs_withoutFileAttrString_withoutPlink)
 {
     MockClient client;
-    auto& parent = mt::makeNode(*client.cli, mega::FOLDERNODE, ::mega::NodeHandle().set6byte(43));
-    std::unique_ptr<mega::Node> n{&mt::makeNode(*client.cli, mega::FILENODE, ::mega::NodeHandle().set6byte(42), &parent)};
+    auto parent = mt::makeNode(*client.cli, mega::FOLDERNODE, ::mega::NodeHandle().set6byte(43));
+    auto n =
+        mt::makeNode(*client.cli, mega::FILENODE, ::mega::NodeHandle().set6byte(42), parent.get());
     n->size = 12;
     n->owner = 88;
     n->ctime = 44;
@@ -358,8 +361,9 @@ TEST(Serialization, Node_forFile_withoutShares_withoutAttrs_withoutFileAttrStrin
 TEST(Serialization, Node_forFile_withoutShares_withoutFileAttrString_withoutPlink)
 {
     MockClient client;
-    auto& parent = mt::makeNode(*client.cli, mega::FOLDERNODE, ::mega::NodeHandle().set6byte(43));
-    std::unique_ptr<mega::Node> n{&mt::makeNode(*client.cli, mega::FILENODE, ::mega::NodeHandle().set6byte(42), &parent)};
+    auto parent = mt::makeNode(*client.cli, mega::FOLDERNODE, ::mega::NodeHandle().set6byte(43));
+    auto n =
+        mt::makeNode(*client.cli, mega::FILENODE, ::mega::NodeHandle().set6byte(42), parent.get());
     n->size = 12;
     n->owner = 88;
     n->ctime = 44;
@@ -377,8 +381,9 @@ TEST(Serialization, Node_forFile_withoutShares_withoutFileAttrString_withoutPlin
 TEST(Serialization, Node_forFile_withoutShares_withoutPlink)
 {
     MockClient client;
-    auto& parent = mt::makeNode(*client.cli, mega::FOLDERNODE, ::mega::NodeHandle().set6byte(43));
-    std::unique_ptr<mega::Node> n{&mt::makeNode(*client.cli, mega::FILENODE, ::mega::NodeHandle().set6byte(42), &parent)};
+    auto parent = mt::makeNode(*client.cli, mega::FOLDERNODE, ::mega::NodeHandle().set6byte(43));
+    auto n =
+        mt::makeNode(*client.cli, mega::FILENODE, ::mega::NodeHandle().set6byte(42), parent.get());
     n->size = 12;
     n->owner = 88;
     n->ctime = 44;
@@ -397,8 +402,9 @@ TEST(Serialization, Node_forFile_withoutShares_withoutPlink)
 TEST(Serialization, Node_forFile_withoutShares)
 {
     MockClient client;
-    auto& parent = mt::makeNode(*client.cli, mega::FOLDERNODE, ::mega::NodeHandle().set6byte(43));
-    std::unique_ptr<mega::Node> n{&mt::makeNode(*client.cli, mega::FILENODE, ::mega::NodeHandle().set6byte(42), &parent)};
+    auto parent = mt::makeNode(*client.cli, mega::FOLDERNODE, ::mega::NodeHandle().set6byte(43));
+    auto n =
+        mt::makeNode(*client.cli, mega::FILENODE, ::mega::NodeHandle().set6byte(42), parent.get());
     n->size = 12;
     n->owner = 88;
     n->ctime = 44;
@@ -418,8 +424,9 @@ TEST(Serialization, Node_forFile_withoutShares)
 TEST(Serialization, Node_forFile_withoutShares_withAuthKey)
 {
     MockClient client;
-    auto& parent = mt::makeNode(*client.cli, mega::FOLDERNODE, ::mega::NodeHandle().set6byte(43));
-    std::unique_ptr<mega::Node> n{&mt::makeNode(*client.cli, mega::FILENODE, ::mega::NodeHandle().set6byte(42), &parent)};
+    auto parent = mt::makeNode(*client.cli, mega::FOLDERNODE, ::mega::NodeHandle().set6byte(43));
+    auto n =
+        mt::makeNode(*client.cli, mega::FILENODE, ::mega::NodeHandle().set6byte(42), parent.get());
     n->size = 12;
     n->owner = 88;
     n->ctime = 44;
@@ -440,8 +447,9 @@ TEST(Serialization, Node_forFile_withoutShares_withAuthKey)
 TEST(Serialization, Node_forFile_withoutShares_32bit)
 {
     MockClient client;
-    auto& parent = mt::makeNode(*client.cli, mega::FOLDERNODE, ::mega::NodeHandle().set6byte(43));
-    std::unique_ptr<mega::Node> n{&mt::makeNode(*client.cli, mega::FILENODE, ::mega::NodeHandle().set6byte(42), &parent)};
+    auto parent = mt::makeNode(*client.cli, mega::FOLDERNODE, ::mega::NodeHandle().set6byte(43));
+    auto n =
+        mt::makeNode(*client.cli, mega::FILENODE, ::mega::NodeHandle().set6byte(42), parent.get());
     n->size = 12;
     n->owner = 88;
     n->ctime = 44;
@@ -475,8 +483,11 @@ TEST(Serialization, Node_forFile_withoutShares_32bit)
 TEST(Serialization, Node_forFolder_withoutShares_withoutAttrs_withoutFileAttrString_withoutPlink)
 {
     MockClient client;
-    auto& parent = mt::makeNode(*client.cli, mega::FOLDERNODE, ::mega::NodeHandle().set6byte(43));
-    std::unique_ptr<mega::Node> n{&mt::makeNode(*client.cli, mega::FOLDERNODE, ::mega::NodeHandle().set6byte(42), &parent)};
+    auto parent = mt::makeNode(*client.cli, mega::FOLDERNODE, ::mega::NodeHandle().set6byte(43));
+    auto n = mt::makeNode(*client.cli,
+                          mega::FOLDERNODE,
+                          ::mega::NodeHandle().set6byte(42),
+                          parent.get());
     n->size = -1;
     n->owner = 88;
     n->ctime = 44;
@@ -490,8 +501,11 @@ TEST(Serialization, Node_forFolder_withoutShares_withoutAttrs_withoutFileAttrStr
 TEST(Serialization, Node_forFolder_withoutShares_withoutFileAttrString_withoutPlink)
 {
     MockClient client;
-    auto& parent = mt::makeNode(*client.cli, mega::FOLDERNODE, ::mega::NodeHandle().set6byte(43));
-    std::unique_ptr<mega::Node> n{&mt::makeNode(*client.cli, mega::FOLDERNODE, ::mega::NodeHandle().set6byte(42), &parent)};
+    auto parent = mt::makeNode(*client.cli, mega::FOLDERNODE, ::mega::NodeHandle().set6byte(43));
+    auto n = mt::makeNode(*client.cli,
+                          mega::FOLDERNODE,
+                          ::mega::NodeHandle().set6byte(42),
+                          parent.get());
     n->size = -1;
     n->owner = 88;
     n->ctime = 44;
@@ -509,8 +523,11 @@ TEST(Serialization, Node_forFolder_withoutShares_withoutFileAttrString_withoutPl
 TEST(Serialization, Node_forFolder_withoutShares_withoutPlink)
 {
     MockClient client;
-    auto& parent = mt::makeNode(*client.cli, mega::FOLDERNODE, ::mega::NodeHandle().set6byte(43));
-    std::unique_ptr<mega::Node> n{&mt::makeNode(*client.cli, mega::FOLDERNODE, ::mega::NodeHandle().set6byte(42), &parent)};
+    auto parent = mt::makeNode(*client.cli, mega::FOLDERNODE, ::mega::NodeHandle().set6byte(43));
+    auto n = mt::makeNode(*client.cli,
+                          mega::FOLDERNODE,
+                          ::mega::NodeHandle().set6byte(42),
+                          parent.get());
     n->size = -1;
     n->owner = 88;
     n->ctime = 44;
@@ -529,8 +546,11 @@ TEST(Serialization, Node_forFolder_withoutShares_withoutPlink)
 TEST(Serialization, Node_forFolder_withoutShares)
 {
     MockClient client;
-    auto& parent = mt::makeNode(*client.cli, mega::FOLDERNODE, ::mega::NodeHandle().set6byte(43));
-    std::unique_ptr<mega::Node> n{&mt::makeNode(*client.cli, mega::FOLDERNODE, ::mega::NodeHandle().set6byte(42), &parent)};
+    auto parent = mt::makeNode(*client.cli, mega::FOLDERNODE, ::mega::NodeHandle().set6byte(43));
+    auto n = mt::makeNode(*client.cli,
+                          mega::FOLDERNODE,
+                          ::mega::NodeHandle().set6byte(42),
+                          parent.get());
     n->size = -1;
     n->owner = 88;
     n->ctime = 44;
@@ -551,8 +571,11 @@ TEST(Serialization, Node_forFolder_withoutShares)
 TEST(Serialization, Node_forFolder_withoutShares_32bit)
 {
     MockClient client;
-    auto& parent = mt::makeNode(*client.cli, mega::FOLDERNODE, ::mega::NodeHandle().set6byte(43));
-    std::unique_ptr<mega::Node> n{&mt::makeNode(*client.cli, mega::FOLDERNODE, ::mega::NodeHandle().set6byte(42), &parent)};
+    auto parent = mt::makeNode(*client.cli, mega::FOLDERNODE, ::mega::NodeHandle().set6byte(43));
+    auto n = mt::makeNode(*client.cli,
+                          mega::FOLDERNODE,
+                          ::mega::NodeHandle().set6byte(42),
+                          parent.get());
     n->size = -1;
     n->owner = 88;
     n->ctime = 44;

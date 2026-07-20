@@ -157,6 +157,8 @@ ECDH::ECDH (const ECDH& aux)
 {
     std::copy(aux.getPrivKey(), aux.getPrivKey() + ECDH::PRIVATE_KEY_LENGTH, mPrivKey);
     std::copy(aux.getPubKey(), aux.getPubKey() + ECDH::PUBLIC_KEY_LENGTH, mPubKey);
+
+    initializationOK = aux.initializationOK;
 }
 
 ECDH::ECDH(const string& privKey)
@@ -188,10 +190,15 @@ ECDH::~ECDH()
 ECDH::ECDH(const unsigned char *privk, const std::string &pubk)
 {
     assert(privk);
-    if (!privk) return;
+    if (!privk || pubk.size() != PUBLIC_KEY_LENGTH)
+    {
+        return;
+    }
 
     std::copy(privk, privk + PRIVATE_KEY_LENGTH, mPrivKey);
     std::copy(pubk.data(), pubk.data() + PUBLIC_KEY_LENGTH, mPubKey);
+
+    initializationOK = true;
 }
 
 int ECDH::doComputeSymmetricKey(const unsigned char* privk, const unsigned char* pubk, std::string& output) const
