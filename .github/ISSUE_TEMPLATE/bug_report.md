@@ -3,7 +3,7 @@ name: Bug report
 about: Create a report to help us improve
 title: ''
 labels: bug
-assignees: sergiohs84
+assignees: ortmann
 
 ---
 
@@ -24,9 +24,9 @@ A clear and concise description of what you expected to happen.
 If applicable, add screenshots to help explain your problem.
 
 **Environment:**
- - SDK Version: [e.g. v7.13.0]
- - OS: [e.g. Ubuntu 22.04.3 LTS]
- - Device: [e.g. iPhone10]
+ - SDK Version: [e.g. v10.13.0]
+ - OS: [e.g. Ubuntu 24.04.3 LTS]
+ - Device: [e.g. iPhone17]
 
 **Additional context**
 Add any other context about the problem here.
