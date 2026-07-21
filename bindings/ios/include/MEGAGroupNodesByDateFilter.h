@@ -95,6 +95,17 @@ NS_ASSUME_NONNULL_BEGIN
  */
 @property (nonatomic) MEGAGroupNodesByDateGranularity granularity;
 
+/**
+ * @brief Optional. UTC offset used to split the date buckets, in the exact
+ * form "±HH:MM" (e.g. @"+09:00", @"-05:30").
+ *
+ * When set, buckets follow the caller's local calendar instead of UTC. A
+ * malformed or out-of-range string makes groupAllNodesByDate return an empty
+ * list (and log a warning). Leave nil (default) for UTC. Valid range
+ * [-12:00, +14:00]; :30 and :45 zones are supported.
+ */
+@property (nonatomic, copy, nullable) NSString *utcOffset;
+
 - (instancetype)init;
 
 @end

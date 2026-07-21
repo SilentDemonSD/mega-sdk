@@ -7665,6 +7665,13 @@ int MegaGroupNodesByDateFilter::byGranularity() const
     return MegaGroupNodesByDateFilter::SECTION_GRANULARITY_MONTH;
 }
 
+void MegaGroupNodesByDateFilter::byUtcOffset(const char* /*utcOffset*/) {}
+
+const char* MegaGroupNodesByDateFilter::byUtcOffset() const
+{
+    return "";
+}
+
 MegaDateSection::MegaDateSection() {}
 
 MegaDateSection::~MegaDateSection() {}

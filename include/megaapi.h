@@ -11237,6 +11237,29 @@ public:
 
     /// Returns the configured granularity (SECTION_GRANULARITY_MONTH if unset).
     virtual int byGranularity() const;
+
+    /**
+     * @brief Optional. UTC offset used to split the date buckets, as a string
+     *        in the exact form "±HH:MM" (e.g. "+09:00", "-05:30").
+     *
+     * When set, buckets follow the caller's local calendar instead of UTC:
+     * getGroupId() is the local date, and getStartDate()/getEndDate() mark the
+     * local-midnight boundaries (still returned as UTC epoch seconds). Unset,
+     * "", or nullptr means UTC.
+     *
+     * Only the exact "±HH:MM" form within [-12:00, +14:00] is accepted; other
+     * ISO-8601 spellings ("Z", "+0900", "+09") and out-of-range values are
+     * rejected, making groupAllNodesByDate return an empty list (and log a
+     * warning), like an invalid granularity.
+     *
+     * The string is copied; the getter returns "" (never nullptr) when unset.
+     *
+     * @param utcOffset UTC offset "±HH:MM", or nullptr / "" for UTC.
+     */
+    virtual void byUtcOffset(const char* utcOffset);
+
+    /// Returns the configured UTC offset string, or "" if unset.
+    virtual const char* byUtcOffset() const;
 };
 
 /**
@@ -11273,6 +11296,9 @@ public:
      * section header / key. Display/key only; not round-tripped (see class
      * header to fetch a bucket).
      *
+     * When MegaGroupNodesByDateFilter::byUtcOffset is set, this is the LOCAL
+     * date in that offset; otherwise UTC.
+     *
      * @return The group id. Caller does NOT own; the pointer is valid for
      *         the lifetime of this MegaDateSection.
      */
@@ -11281,18 +11307,19 @@ public:
     /**
      * @brief Inclusive lower bound of this bucket, as UTC epoch seconds.
      *
-     * Always the canonical bucket start (midnight UTC of the day / first
-     * day of the month / first day of the year) — direction-independent,
-     * not the minimum mtime of nodes actually in the bucket.
+     * Always the canonical bucket start (midnight of the day / first day of the
+     * month / first day of the year) in the caller's local time — UTC when
+     * byUtcOffset is unset — expressed as UTC epoch seconds. Direction-independent.
      */
     virtual int64_t getStartDate() const;
 
     /**
      * @brief Exclusive upper bound of this bucket, as UTC epoch seconds.
      *
-     * Always the start of the next bucket at the same granularity
-     * (midnight UTC of the next day / first day of the next month / first
-     * day of the next year). Direction-independent.
+     * Always the start of the next bucket at the same granularity (midnight of
+     * the next day / first day of the next month / first day of the next year)
+     * in the caller's local time — UTC when byUtcOffset is unset — expressed as
+     * UTC epoch seconds. Direction-independent.
      */
     virtual int64_t getEndDate() const;
 

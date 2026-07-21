@@ -13635,6 +13635,35 @@ std::optional<ListAllNodesParams>
     return params;
 }
 
+std::optional<int64_t> parseUtcOffsetSeconds(const char* tz)
+{
+    if (!tz || tz[0] == '\0')
+        return 0; // unset → UTC
+
+    const std::string s{tz};
+    // Exact shape: sign HH ':' MM  → length 6, digits at 1,2,4,5, ':' at 3.
+    if (s.size() != 6 || (s[0] != '+' && s[0] != '-') || s[3] != ':')
+        return std::nullopt;
+    for (const size_t i: {1u, 2u, 4u, 5u})
+        if (s[i] < '0' || s[i] > '9')
+            return std::nullopt;
+
+    const int hours = (s[1] - '0') * 10 + (s[2] - '0');
+    const int minutes = (s[4] - '0') * 10 + (s[5] - '0');
+    if (minutes > 59)
+        return std::nullopt;
+
+    int64_t total = static_cast<int64_t>(hours) * 3600 + static_cast<int64_t>(minutes) * 60;
+    if (s[0] == '-')
+        total = -total;
+
+    // Real-world offsets only: UTC-12:00 .. UTC+14:00.
+    if (total < -12 * 3600 || total > 14 * 3600)
+        return std::nullopt;
+
+    return total;
+}
+
 std::optional<DateSectionParams>
     MegaApiImpl::buildDateSectionParams(const MegaGroupNodesByDateFilter* filter, int order) const
 {
@@ -13660,8 +13689,16 @@ std::optional<DateSectionParams>
         return std::nullopt;
     }
 
+    const auto tzOffset = parseUtcOffsetSeconds(filter->byUtcOffset());
+    if (!tzOffset)
+    {
+        LOG_warn << "groupAllNodesByDate: invalid UTC offset \"" << filter->byUtcOffset() << "\"";
+        return std::nullopt;
+    }
+
     params.order = order;
     params.granularity = static_cast<DateSectionGranularity>(granularity);
+    params.tzOffsetSeconds = *tzOffset;
     return params;
 }
 

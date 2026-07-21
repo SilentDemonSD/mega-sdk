@@ -3806,8 +3806,19 @@ public:
         return mGranularity;
     }
 
+    void byUtcOffset(const char* utcOffset) override
+    {
+        mUtcOffset = utcOffset ? utcOffset : "";
+    }
+
+    const char* byUtcOffset() const override
+    {
+        return mUtcOffset.c_str();
+    }
+
 private:
     int mGranularity = MegaGroupNodesByDateFilter::SECTION_GRANULARITY_MONTH;
+    std::string mUtcOffset; // empty == UTC
 };
 
 class MegaListAllNodesFilterPrivate: public NodeScopeFilterImpl<MegaListAllNodesFilter>
@@ -7313,6 +7324,11 @@ public:
 }; // MegaFileServiceStorageInfoPrivate
 
 std::unique_ptr<FileSystemAccess> createFSA();
+
+// Parse a UTC offset in the exact form "±HH:MM" to signed seconds.
+// nullptr / "" → 0 (UTC). Returns nullopt for malformed input, MM > 59, or a
+// total outside [-12:00, +14:00].
+std::optional<int64_t> parseUtcOffsetSeconds(const char* tz);
 }
 
 // Specializations of std::hash for custom Sync types
