@@ -2981,6 +2981,103 @@ bool CommandEnumerateQuotaItems::procresult(Result r, JSON& json)
                             case makeNameid("p"):
                                 temporalMobileOffer.discountPercentage = json.getint32();
                                 break;
+                            case makeNameid("e"):
+                                temporalMobileOffer.expiryTimestamp = json.getint();
+                                break;
+                            case makeNameid("f"):
+                                temporalMobileOffer.flags = json.getuint32();
+                                break;
+                            case makeNameid("r"):
+                                temporalMobileOffer.reshowInterval = json.getint();
+                                break;
+                            case makeNameid("ios"):
+                            {
+                                if (!json.enterobject())
+                                {
+                                    LOG_err << "Failed to parse Enumerate-quota-items response,"
+                                            << " entering mobile offer `ios` object";
+                                    client->app->enumeratequotaitems_result(API_EINTERNAL);
+                                    return false;
+                                }
+
+                                MobileOfferIos iosOffer;
+                                bool readingIos{true};
+                                while (readingIos)
+                                {
+                                    switch (json.getnameid())
+                                    {
+                                        case makeNameid("oid"):
+                                            json.storeobject(&iosOffer.offerId);
+                                            break;
+                                        case makeNameid("ki"):
+                                            json.storeobject(&iosOffer.keyId);
+                                            break;
+                                        case makeNameid("n"):
+                                            json.storeobject(&iosOffer.nonce);
+                                            break;
+                                        case makeNameid("tsm"):
+                                            iosOffer.timestampMs = json.getint();
+                                            break;
+                                        case makeNameid("s"):
+                                            json.storeobject(&iosOffer.signature);
+                                            break;
+                                        case EOO:
+                                            readingIos = false;
+                                            temporalMobileOffer.ios = std::move(iosOffer);
+                                            break;
+                                        default:
+                                            if (!json.storeobject())
+                                            {
+                                                LOG_err << "Failed to parse mobile offer `ios` "
+                                                           "sub objects";
+                                                client->app->enumeratequotaitems_result(
+                                                    API_EINTERNAL);
+                                                return false;
+                                            }
+                                            break;
+                                    }
+                                }
+                                json.leaveobject(); // mobile offer `ios` object
+                                break;
+                            }
+                            case makeNameid("and"):
+                            {
+                                if (!json.enterobject())
+                                {
+                                    LOG_err << "Failed to parse Enumerate-quota-items response,"
+                                            << " entering mobile offer `and` object";
+                                    client->app->enumeratequotaitems_result(API_EINTERNAL);
+                                    return false;
+                                }
+
+                                MobileOfferAndroid androidOffer;
+                                bool readingAnd{true};
+                                while (readingAnd)
+                                {
+                                    switch (json.getnameid())
+                                    {
+                                        case makeNameid("oid"):
+                                            json.storeobject(&androidOffer.offerId);
+                                            break;
+                                        case EOO:
+                                            readingAnd = false;
+                                            temporalMobileOffer.android = std::move(androidOffer);
+                                            break;
+                                        default:
+                                            if (!json.storeobject())
+                                            {
+                                                LOG_err << "Failed to parse mobile offer `and` "
+                                                           "sub objects";
+                                                client->app->enumeratequotaitems_result(
+                                                    API_EINTERNAL);
+                                                return false;
+                                            }
+                                            break;
+                                    }
+                                }
+                                json.leaveobject(); // mobile offer `and` object
+                                break;
+                            }
                             case EOO:
                                 readingMo = false;
                                 mobileOffer = std::move(temporalMobileOffer);

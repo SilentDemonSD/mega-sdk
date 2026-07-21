@@ -10957,6 +10957,23 @@ void DemoApp::enumeratequotaitems_result(const Product& product)
             cout << "\t\tUat: " << product.mobileOffer->uat << "\n";
             cout << "\t\tLabel: " << product.mobileOffer->label << "\n";
             cout << "\t\tDiscount percentage: " << product.mobileOffer->discountPercentage << "\n";
+            cout << "\t\tExpiry timestamp: " << product.mobileOffer->expiryTimestamp << "\n";
+            cout << "\t\tFlags: 0x" << hex << product.mobileOffer->flags << dec << "\n";
+            cout << "\t\tReshow interval: " << product.mobileOffer->reshowInterval << "\n";
+            if (product.mobileOffer->ios)
+            {
+                cout << "\t\tiOS offer\n";
+                cout << "\t\t\tOffer id: " << product.mobileOffer->ios->offerId << "\n";
+                cout << "\t\t\tKey id: " << product.mobileOffer->ios->keyId << "\n";
+                cout << "\t\t\tNonce: " << product.mobileOffer->ios->nonce << "\n";
+                cout << "\t\t\tTimestamp (ms): " << product.mobileOffer->ios->timestampMs << "\n";
+                cout << "\t\t\tSignature: " << product.mobileOffer->ios->signature << "\n";
+            }
+            if (product.mobileOffer->android)
+            {
+                cout << "\t\tAndroid offer\n";
+                cout << "\t\t\tOffer id: " << product.mobileOffer->android->offerId << "\n";
+            }
         }
     }
     else // Business plan (type == 1)

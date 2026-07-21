@@ -223,12 +223,31 @@ struct MEGA_API CurrencyData
     std::string localCurrencyName;      // ie. NZD
 };
 
+struct MEGA_API MobileOfferIos
+{
+    std::string offerId; // "oid" - App Store promotional offer id
+    std::string keyId; // "ki" - id of the key used to sign the offer
+    std::string nonce; // "n" - nonce
+    int64_t timestampMs{0}; // "tsm" - signing timestamp, in milliseconds
+    std::string signature; // "s" - server signature authorising the promotional offer
+};
+
+struct MEGA_API MobileOfferAndroid
+{
+    std::string offerId; // "oid" - Google Play offer id
+};
+
 struct MEGA_API MobileOffer
 {
     std::string id; // The ID for the offer
     bool uat{false}; // If true, the mobile offer title should be displayed
     std::string label; // Localized campaign label to be displayed to the customer
     int discountPercentage{0}; // Discount percentage to be displayed to the customer
+    int64_t expiryTimestamp{0}; // "e" - offer expiry, seconds since the Epoch (0 if none)
+    uint32_t flags{0}; // "f" - client feature-flag bitmask (bit meanings defined by the API)
+    int64_t reshowInterval{0}; // "r" - reshow timeout, seconds (0 if none)
+    std::optional<MobileOfferIos> ios; // iOS StoreKit promotional-offer signature (mo.ios)
+    std::optional<MobileOfferAndroid> android; // Google Play offer reference (mo.and)
 };
 
 struct MEGA_API InstantDiscounts

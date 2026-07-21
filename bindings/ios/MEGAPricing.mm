@@ -117,4 +117,48 @@ using namespace mega;
     return self.pricing ? self.pricing->getMobileOfferDiscountPercentage((int)index) : 0;
 }
 
+- (int64_t)mobileOfferExpiryTimestampAtProductIndex:(NSInteger)index {
+    return self.pricing ? self.pricing->getMobileOfferExpiryTimestamp((int)index) : 0;
+}
+
+- (uint32_t)mobileOfferFlagsAtProductIndex:(NSInteger)index {
+    return self.pricing ? self.pricing->getMobileOfferFlags((int)index) : 0;
+}
+
+- (int64_t)mobileOfferReshowIntervalAtProductIndex:(NSInteger)index {
+    return self.pricing ? self.pricing->getMobileOfferReshowInterval((int)index) : 0;
+}
+
+- (BOOL)hasMobileOfferIosAtProductIndex:(NSInteger)index {
+    return self.pricing ? self.pricing->hasMobileOfferIos((int)index) : NO;
+}
+
+- (NSString *)mobileOfferIosOfferIdAtProductIndex:(NSInteger)index {
+    return self.pricing ? [[NSString alloc] initWithUTF8String:self.pricing->getMobileOfferIosOfferId((int)index).c_str()] : nil;
+}
+
+- (NSString *)mobileOfferIosKeyIdAtProductIndex:(NSInteger)index {
+    return self.pricing ? [[NSString alloc] initWithUTF8String:self.pricing->getMobileOfferIosKeyId((int)index).c_str()] : nil;
+}
+
+- (NSString *)mobileOfferIosNonceAtProductIndex:(NSInteger)index {
+    return self.pricing ? [[NSString alloc] initWithUTF8String:self.pricing->getMobileOfferIosNonce((int)index).c_str()] : nil;
+}
+
+- (int64_t)mobileOfferIosTimestampMsAtProductIndex:(NSInteger)index {
+    return self.pricing ? self.pricing->getMobileOfferIosTimestampMs((int)index) : 0;
+}
+
+- (NSString *)mobileOfferIosSignatureAtProductIndex:(NSInteger)index {
+    return self.pricing ? [[NSString alloc] initWithUTF8String:self.pricing->getMobileOfferIosSignature((int)index).c_str()] : nil;
+}
+
+- (BOOL)hasMobileOfferAndroidAtProductIndex:(NSInteger)index {
+    return self.pricing ? self.pricing->hasMobileOfferAndroid((int)index) : NO;
+}
+
+- (NSString *)mobileOfferAndroidOfferIdAtProductIndex:(NSInteger)index {
+    return self.pricing ? [[NSString alloc] initWithUTF8String:self.pricing->getMobileOfferAndroidOfferId((int)index).c_str()] : nil;
+}
+
 @end
