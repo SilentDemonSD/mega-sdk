@@ -6524,6 +6524,7 @@ public:
         EVENT_NETWORK_ACTIVITY = 22,
         EVENT_TRANSFERS_RESUMED = 23,
         EVENT_LAST_PURGE = 24,
+        EVENT_STREAM_OVERQUOTA = 25,
     };
 
     enum
@@ -6674,6 +6675,16 @@ public:
      *   PURGE_REASON_INACTIVE when warning history is available, otherwise empty.
      *   To suppress across sessions and devices, call setLastPurgeAcknowledged(ts) on dismiss.
      *
+     * - EVENT_STREAM_OVERQUOTA (25):
+     *   A streaming read (MegaApi::startStreaming or the local HTTP streaming server) could not
+     *   proceed because the account is over its transfer quota. Streaming reads are not backed by
+     *   a MegaTransfer, so they cannot report this through a normal transfer listener.
+     *   Use getNumber() for the number of seconds left in the overquota state.
+     *   The blocked read is dropped rather than retried: the streaming client decides when to try
+     *   again, and each new attempt raises this event again. Consecutive events are throttled,
+     *   because media players tend to reconnect every few seconds while blocked.
+     *   MegaApi::getBandwidthOverquotaDelay() reports the remaining time at any point.
+     *
      * @return Event type, from the MegaEvent::EventType enum.
      */
     virtual int getType() const;
@@ -6758,6 +6769,9 @@ public:
      *     - 2: Public RSA key
      *     - 3: Signature of chat key
      *     - 4: Signature of RSA key
+     *
+     * - EVENT_STREAM_OVERQUOTA:
+     *   Provides the number of seconds left in the transfer overquota state.
      *
      * @return Number relative to this event.
      */
@@ -8589,6 +8603,8 @@ public:
      *
      * This method creates and returns a MegaHandleList containing all the keys
      * currently present in the internal map of stalls.
+     *
+     * You take the ownership of the returned value.
      *
      * @return A MegaHandleList containing all keys(BackupId's) from the stalls map.
      */
@@ -11235,6 +11251,29 @@ public:
 
     /// Returns the configured granularity (SECTION_GRANULARITY_MONTH if unset).
     virtual int byGranularity() const;
+
+    /**
+     * @brief Optional. UTC offset used to split the date buckets, as a string
+     *        in the exact form "±HH:MM" (e.g. "+09:00", "-05:30").
+     *
+     * When set, buckets follow the caller's local calendar instead of UTC:
+     * getGroupId() is the local date, and getStartDate()/getEndDate() mark the
+     * local-midnight boundaries (still returned as UTC epoch seconds). Unset,
+     * "", or nullptr means UTC.
+     *
+     * Only the exact "±HH:MM" form within [-12:00, +14:00] is accepted; other
+     * ISO-8601 spellings ("Z", "+0900", "+09") and out-of-range values are
+     * rejected, making groupAllNodesByDate return an empty list (and log a
+     * warning), like an invalid granularity.
+     *
+     * The string is copied; the getter returns "" (never nullptr) when unset.
+     *
+     * @param utcOffset UTC offset "±HH:MM", or nullptr / "" for UTC.
+     */
+    virtual void byUtcOffset(const char* utcOffset);
+
+    /// Returns the configured UTC offset string, or "" if unset.
+    virtual const char* byUtcOffset() const;
 };
 
 /**
@@ -11271,6 +11310,9 @@ public:
      * section header / key. Display/key only; not round-tripped (see class
      * header to fetch a bucket).
      *
+     * When MegaGroupNodesByDateFilter::byUtcOffset is set, this is the LOCAL
+     * date in that offset; otherwise UTC.
+     *
      * @return The group id. Caller does NOT own; the pointer is valid for
      *         the lifetime of this MegaDateSection.
      */
@@ -11279,18 +11321,19 @@ public:
     /**
      * @brief Inclusive lower bound of this bucket, as UTC epoch seconds.
      *
-     * Always the canonical bucket start (midnight UTC of the day / first
-     * day of the month / first day of the year) — direction-independent,
-     * not the minimum mtime of nodes actually in the bucket.
+     * Always the canonical bucket start (midnight of the day / first day of the
+     * month / first day of the year) in the caller's local time — UTC when
+     * byUtcOffset is unset — expressed as UTC epoch seconds. Direction-independent.
      */
     virtual int64_t getStartDate() const;
 
     /**
      * @brief Exclusive upper bound of this bucket, as UTC epoch seconds.
      *
-     * Always the start of the next bucket at the same granularity
-     * (midnight UTC of the next day / first day of the next month / first
-     * day of the next year). Direction-independent.
+     * Always the start of the next bucket at the same granularity (midnight of
+     * the next day / first day of the next month / first day of the next year)
+     * in the caller's local time — UTC when byUtcOffset is unset — expressed as
+     * UTC epoch seconds. Direction-independent.
      */
     virtual int64_t getEndDate() const;
 
@@ -26174,6 +26217,13 @@ public:
     virtual int64_t getExpirationTime() const = 0;
 
     /**
+     * @brief Get the start time for the plan
+     *
+     * @return The time the plan starts (in seconds since the Epoch)
+     */
+    virtual int64_t getStartTime() const = 0;
+
+    /**
      * @brief The type of plan. Why it was granted.
      *
      * Not available for Bussiness/Pro Flexi.
@@ -27134,6 +27184,125 @@ public:
      * offer
      */
     virtual int getMobileOfferDiscountPercentage(int productIndex) const = 0;
+
+    /**
+     * @brief Get the mobile offer expiry timestamp (mo.e)
+     *
+     * Seconds since the Epoch. Clients use it to drive the offer countdown and to
+     * stop honouring the offer once it has passed.
+     *
+     * If the product has no mobile offer or no expiry, this method returns 0.
+     *
+     * @param productIndex Product index (from 0 to MegaPricing::getNumProducts)
+     * @return Offer expiry timestamp in seconds, or 0
+     */
+    virtual int64_t getMobileOfferExpiryTimestamp(int productIndex) const = 0;
+
+    /**
+     * @brief Get the mobile offer feature flags (mo.f)
+     *
+     * Bitmask of feature flags for the client; the meaning of each bit is defined
+     * by the API.
+     *
+     * If the product has no mobile offer, this method returns 0.
+     *
+     * @param productIndex Product index (from 0 to MegaPricing::getNumProducts)
+     * @return Flags bitmask, or 0
+     */
+    virtual uint32_t getMobileOfferFlags(int productIndex) const = 0;
+
+    /**
+     * @brief Get the reshow timeout of the mobile offer (mo.r)
+     *
+     * Timeout in seconds before the offer may be shown again.
+     *
+     * If the product has no mobile offer or no reshow interval, this method returns 0.
+     *
+     * @param productIndex Product index (from 0 to MegaPricing::getNumProducts)
+     * @return Reshow interval in seconds, or 0
+     */
+    virtual int64_t getMobileOfferReshowInterval(int productIndex) const = 0;
+
+    /**
+     * @brief Check whether the mobile offer carries an iOS StoreKit signature
+     *
+     * The iOS section (mo.ios) is only present for offers that target the App
+     * Store; it holds the data needed to redeem a promotional offer via StoreKit.
+     *
+     * @param productIndex Product index (from 0 to MegaPricing::getNumProducts)
+     * @return True if the product's mobile offer has an iOS section
+     */
+    virtual bool hasMobileOfferIos(int productIndex) const = 0;
+
+    /**
+     * @brief Get the App Store promotional offer id of the mobile offer (mo.ios.oid)
+     *
+     * If the product has no iOS mobile offer, this method returns an empty string.
+     *
+     * @param productIndex Product index (from 0 to MegaPricing::getNumProducts)
+     * @return App Store promotional offer id
+     */
+    virtual std::string getMobileOfferIosOfferId(int productIndex) const = 0;
+
+    /**
+     * @brief Get the id of the key used to sign the offer (mo.ios.ki)
+     *
+     * If the product has no iOS mobile offer, this method returns an empty string.
+     *
+     * @param productIndex Product index (from 0 to MegaPricing::getNumProducts)
+     * @return Key id
+     */
+    virtual std::string getMobileOfferIosKeyId(int productIndex) const = 0;
+
+    /**
+     * @brief Get the nonce from the iOS offer signature data (mo.ios.n)
+     *
+     * If the product has no iOS mobile offer, this method returns an empty string.
+     *
+     * @param productIndex Product index (from 0 to MegaPricing::getNumProducts)
+     * @return Nonce (UUID)
+     */
+    virtual std::string getMobileOfferIosNonce(int productIndex) const = 0;
+
+    /**
+     * @brief Get the signing timestamp, in milliseconds (mo.ios.tsm)
+     *
+     * If the product has no iOS mobile offer, this method returns 0.
+     *
+     * @param productIndex Product index (from 0 to MegaPricing::getNumProducts)
+     * @return Signing timestamp in milliseconds
+     */
+    virtual int64_t getMobileOfferIosTimestampMs(int productIndex) const = 0;
+
+    /**
+     * @brief Get the server signature authorising the offer (mo.ios.s)
+     *
+     * If the product has no iOS mobile offer, this method returns an empty string.
+     *
+     * @param productIndex Product index (from 0 to MegaPricing::getNumProducts)
+     * @return Server signature
+     */
+    virtual std::string getMobileOfferIosSignature(int productIndex) const = 0;
+
+    /**
+     * @brief Check whether the mobile offer carries a Google Play reference (mo.and)
+     *
+     * The Android section is only present for offers available on the Play Store.
+     *
+     * @param productIndex Product index (from 0 to MegaPricing::getNumProducts)
+     * @return True if the product's mobile offer has an Android section
+     */
+    virtual bool hasMobileOfferAndroid(int productIndex) const = 0;
+
+    /**
+     * @brief Get the Google Play offer id of the mobile offer (mo.and.oid)
+     *
+     * If the product has no Android mobile offer, this method returns an empty string.
+     *
+     * @param productIndex Product index (from 0 to MegaPricing::getNumProducts)
+     * @return Google Play offer id
+     */
+    virtual std::string getMobileOfferAndroidOfferId(int productIndex) const = 0;
 };
 
 /**

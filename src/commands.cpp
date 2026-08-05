@@ -779,16 +779,20 @@ CommandGetFile::CommandGetFile(MegaClient* /*client*/,
     }
 
     assert(key && "no key provided!");
-    if (key && keySize != SymmCipher::KEYLENGTH)
+    mFileKeyType = FILENODE;
+    if (key && keySize == SymmCipher::KEYLENGTH)
     {
-        assert (keySize <= FILENODEKEYLENGTH);
-        memcpy(filekey, key, keySize);
+        memcpy(mFileKey, key, SymmCipher::KEYLENGTH);
+        mFileKeyType = 1;
+    }
+    else if (key && keySize == FILENODEKEYLENGTH)
+    {
+        memcpy(mFileKey, key, FILENODEKEYLENGTH);
         mFileKeyType = FILENODE;
     }
-    else if (key && keySize == SymmCipher::KEYLENGTH)
+    else if (key)
     {
-        memcpy(filekey, key, SymmCipher::KEYLENGTH);
-        mFileKeyType = 1;
+        MEGA_ASSERT(false, "CommandGetFile: refusing node key of invalid length " << keySize);
     }
 
     mCompletion = std::move(completion);
@@ -917,7 +921,8 @@ bool CommandGetFile::procresult(Result r, JSON& json)
                 }
 
                 // decrypt at and set filename
-                SymmCipher * cipherer = client->getRecycledTemporaryTransferCipher(filekey, mFileKeyType);
+                SymmCipher* cipherer =
+                    client->getRecycledTemporaryTransferCipher(mFileKey, mFileKeyType);
                 const char* eos = strchr(at, '"');
                 buf.reset(Node::decryptattr(cipherer,
                                             at,
@@ -2976,6 +2981,103 @@ bool CommandEnumerateQuotaItems::procresult(Result r, JSON& json)
                             case makeNameid("p"):
                                 temporalMobileOffer.discountPercentage = json.getint32();
                                 break;
+                            case makeNameid("e"):
+                                temporalMobileOffer.expiryTimestamp = json.getint();
+                                break;
+                            case makeNameid("f"):
+                                temporalMobileOffer.flags = json.getuint32();
+                                break;
+                            case makeNameid("r"):
+                                temporalMobileOffer.reshowInterval = json.getint();
+                                break;
+                            case makeNameid("ios"):
+                            {
+                                if (!json.enterobject())
+                                {
+                                    LOG_err << "Failed to parse Enumerate-quota-items response,"
+                                            << " entering mobile offer `ios` object";
+                                    client->app->enumeratequotaitems_result(API_EINTERNAL);
+                                    return false;
+                                }
+
+                                MobileOfferIos iosOffer;
+                                bool readingIos{true};
+                                while (readingIos)
+                                {
+                                    switch (json.getnameid())
+                                    {
+                                        case makeNameid("oid"):
+                                            json.storeobject(&iosOffer.offerId);
+                                            break;
+                                        case makeNameid("ki"):
+                                            json.storeobject(&iosOffer.keyId);
+                                            break;
+                                        case makeNameid("n"):
+                                            json.storeobject(&iosOffer.nonce);
+                                            break;
+                                        case makeNameid("tsm"):
+                                            iosOffer.timestampMs = json.getint();
+                                            break;
+                                        case makeNameid("s"):
+                                            json.storeobject(&iosOffer.signature);
+                                            break;
+                                        case EOO:
+                                            readingIos = false;
+                                            temporalMobileOffer.ios = std::move(iosOffer);
+                                            break;
+                                        default:
+                                            if (!json.storeobject())
+                                            {
+                                                LOG_err << "Failed to parse mobile offer `ios` "
+                                                           "sub objects";
+                                                client->app->enumeratequotaitems_result(
+                                                    API_EINTERNAL);
+                                                return false;
+                                            }
+                                            break;
+                                    }
+                                }
+                                json.leaveobject(); // mobile offer `ios` object
+                                break;
+                            }
+                            case makeNameid("and"):
+                            {
+                                if (!json.enterobject())
+                                {
+                                    LOG_err << "Failed to parse Enumerate-quota-items response,"
+                                            << " entering mobile offer `and` object";
+                                    client->app->enumeratequotaitems_result(API_EINTERNAL);
+                                    return false;
+                                }
+
+                                MobileOfferAndroid androidOffer;
+                                bool readingAnd{true};
+                                while (readingAnd)
+                                {
+                                    switch (json.getnameid())
+                                    {
+                                        case makeNameid("oid"):
+                                            json.storeobject(&androidOffer.offerId);
+                                            break;
+                                        case EOO:
+                                            readingAnd = false;
+                                            temporalMobileOffer.android = std::move(androidOffer);
+                                            break;
+                                        default:
+                                            if (!json.storeobject())
+                                            {
+                                                LOG_err << "Failed to parse mobile offer `and` "
+                                                           "sub objects";
+                                                client->app->enumeratequotaitems_result(
+                                                    API_EINTERNAL);
+                                                return false;
+                                            }
+                                            break;
+                                    }
+                                }
+                                json.leaveobject(); // mobile offer `and` object
+                                break;
+                            }
                             case EOO:
                                 readingMo = false;
                                 mobileOffer = std::move(temporalMobileOffer);
@@ -4209,6 +4311,14 @@ CommandNodeKeyUpdate::CommandNodeKeyUpdate(MegaClient* client, handle_vector* v)
 
         if ((n = client->nodebyhandle(h)))
         {
+            // An unapplied key is still the raw wire-form string, and should be skipped.
+            if (!n->keyApplied())
+            {
+                LOG_err << "CommandNodeKeyUpdate: skipping node with unapplied key "
+                        << toNodeHandle(h);
+                continue;
+            }
+
             client->key.ecb_encrypt((byte*)n->nodekey().data(), nodekey, n->nodekey().size());
             assert(!n->hasZeroKey());
 
@@ -6324,6 +6434,11 @@ bool CommandGetUserQuota::readPlans(JSON* j)
                 case makeNameid("expires"):
                     // The time the plan expires
                     plan.expiration = j->getint();
+                    break;
+
+                case makeNameid("ts"):
+                    // The time the plan starts
+                    plan.startTime = j->getint();
                     break;
 
                 case makeNameid("type"):

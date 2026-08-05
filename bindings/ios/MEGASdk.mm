@@ -4202,6 +4202,10 @@ using namespace mega;
 
     megaFilter->byGranularity(static_cast<int>(filter.granularity));
 
+    if (filter.utcOffset != nil) {
+        megaFilter->byUtcOffset(filter.utcOffset.UTF8String);
+    }
+
     return megaFilter;
 }
 

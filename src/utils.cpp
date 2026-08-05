@@ -2686,6 +2686,12 @@ MacComparisonResult CompareLocalFileMetaMacWithNodeKey(FileAccess* fa,
                                                        std::optional<std::string> pathStr)
 {
     MacComparisonResult result;
+    if (nodeKey.size() != FILENODEKEYLENGTH)
+    {
+        LOG_err << "CompareLocalFileMetaMacWithNodeKey: invalid node key length " << nodeKey.size();
+        result.errorCode = API_EKEY;
+        return result;
+    }
     SymmCipher cipher;
     const char* iva = &nodeKey[SymmCipher::KEYLENGTH];
     int64_t remoteIv = MemAccess::get<int64_t>(iva);
@@ -2711,6 +2717,11 @@ std::pair<int64_t, int64_t> genLocalAndRemoteMetaMac(FileAccess* fa,
                                                      int type,
                                                      std::optional<std::string> pathStr)
 {
+    if (nodeKey.size() != FILENODEKEYLENGTH)
+    {
+        LOG_err << "genLocalAndRemoteMetaMac: invalid node key length " << nodeKey.size();
+        return {INVALID_META_MAC, INVALID_META_MAC};
+    }
     SymmCipher cipher;
     const char* iva = &nodeKey[SymmCipher::KEYLENGTH];
     int64_t remoteIv = MemAccess::get<int64_t>(iva);
@@ -2780,7 +2791,7 @@ node_comparison_result CompareNodeWithProvidedMacAndFpExcludingMtime(const Node*
                                                                      const FileFingerprint& fp,
                                                                      const int64_t precalcMetamac)
 {
-    if (!node || node->type != FILENODE || node->nodekey().empty())
+    if (!node || node->type != FILENODE || !node->keyApplied())
     {
         return NODE_COMP_EARGS;
     }
@@ -2821,7 +2832,7 @@ std::pair<node_comparison_result, int64_t>
                                                   const FileFingerprint& fp,
                                                   const Node* node)
 {
-    if (!node || node->type != FILENODE || node->nodekey().empty())
+    if (!node || node->type != FILENODE || !node->keyApplied())
     {
         return {NODE_COMP_EARGS, INVALID_META_MAC};
     }

@@ -19,6 +19,12 @@
 extern jclass fileWrapper;
 extern jclass integerClass;
 extern jclass arrayListClass;
+/// Cached global reference to ChildMetadata — set at JNI_OnLoad, safe for background threads.
+extern jclass childMetadataClass;
+/// Cached java/util/List class and method IDs — set at JNI_OnLoad, safe for background threads.
+extern jclass listClass;
+extern jmethodID listSizeMethod;
+extern jmethodID listGetMethod;
 extern JavaVM* MEGAjvm;
 
 namespace mega
@@ -46,7 +52,39 @@ public:
     bool exists() const;
     int getFileDescriptor(bool write);
     std::string getName();
-    std::vector<std::shared_ptr<AndroidFileWrapper>> getChildren();
+    // Returns std::nullopt on JNI/Java failure (caller cannot distinguish "empty
+    // folder" from "enumeration failed" otherwise). On success returns the full
+    // child list — never a partial view: any mid-iteration error fails the whole
+    // call. Callers that act destructively on the result MUST treat std::nullopt
+    // as "do not proceed" (see copy/rmdirlocal/emptydirlocal).
+    std::optional<std::vector<std::shared_ptr<AndroidFileWrapper>>> getChildren();
+
+    /**
+     * Metadata for a single child returned by getChildrenWithMetadata().
+     * Field names and types must match the Kotlin ChildMetadata data class exactly
+     * because they are read via JNI GetFieldID by name.
+     */
+    struct ChildMetadata
+    {
+        std::string uri;
+        std::string name;
+        bool isFolder;
+        long long size;
+        long long lastModified;
+        std::string path; ///< empty string when path resolution is not available
+    };
+
+    /**
+     * Returns batch metadata for all direct children of this folder using a single
+     * JNI call to FileWrapper.getChildrenWithMetadata() on the Java side.
+     *
+     * The Java side issues one ContentResolver.query() (1 SAF IPC) instead of
+     * N separate fromUri() + getPath() calls, reducing IPC from O(N) to O(1).
+     *
+     * Returns std::nullopt on JNI/Java failure so the caller (directoryScan) can
+     * return SCAN_INACCESSIBLE.
+     */
+    std::optional<std::vector<ChildMetadata>> getChildrenWithMetadata();
     // Check if tree exists
     std::shared_ptr<AndroidFileWrapper> pathExists(const std::vector<std::string>& subPaths);
 
@@ -67,6 +105,9 @@ public:
     bool deleteEmptyFolder();
     // Rename an element. It is kept at same folder
     bool rename(const std::string& parentPath, const std::string& newName, bool overwrite);
+    // SAF moveDocument (API 24+), same tree only. Used by cross-parent renamelocal;
+    // returns false if unsupported or on failure (caller falls back to copy+delete).
+    bool move(const std::string& sourceParentUri, const std::string& targetParentUri);
 
     // Returns true if it's a folder
     bool isFolder();
@@ -78,10 +119,20 @@ public:
     std::optional<std::string> getPath();
     bool isURI();
 
+    // Refresh mURI from the backing Java FileWrapper after move/rename.
+    bool updateURIFromFileWrapper();
+
     static std::shared_ptr<AndroidFileWrapper> getAndroidFileWrapper(const std::string& path);
     static std::shared_ptr<AndroidFileWrapper> getAndroidFileWrapper(const LocalPath& localPath,
                                                                      bool create,
                                                                      bool lastIsFolder);
+
+    static void setLocalPathURI(const std::string& path, const std::string& uri);
+    static std::optional<std::string> getLocalPathURI(const std::string& path);
+    static void removeLocalPathURI(const std::string& path);
+
+    // Create .nomedia if missing. Returns true when the marker exists afterward.
+    static bool ensureDotNoMediaFile(const LocalPath& directory, FileSystemAccess& fsAccess);
 
 private:
     class JavaObject
@@ -134,6 +185,9 @@ private:
     static constexpr char RENAME[] = "rename";
     static constexpr char RENAME_OVERRIDE[] = "renameOverwrite";
     static constexpr char CREATE_NESTED_PATH[] = "createNestedPath";
+    static constexpr char MOVE[] = "moveDocument";
+    static constexpr char GET_URI[] = "getUri";
+    static constexpr char GET_CHILDREN_META_DATA[] = "getChildrenWithMetadata";
 
     void setUriData(const URIData& uriData);
     std::optional<URIData> getURIData(const std::string& uri) const;
@@ -142,13 +196,13 @@ private:
     static LRUCache<std::string, std::string> localPathURICache;
     static std::mutex URIDataCacheLock;
     static std::mutex localPathURICacheLock;
-    static void setLocalPathURI(const std::string& path, const std::string& uri);
-    static std::optional<std::string> getLocalPathURI(const std::string& path);
     static std::shared_ptr<AndroidFileWrapper>
         getAndroidFileWrapperFromURI(const LocalPath& localPath, bool create, bool lastIsFolder);
 
     static std::shared_ptr<AndroidFileWrapper>
         getAndroidFileWrapperFromPath(const LocalPath& localPath, bool create, bool lastIsFolder);
+
+    static void removeUriDataFromCache(const std::string& uri);
 };
 
 /**
@@ -252,7 +306,7 @@ public:
 
 private:
     std::shared_ptr<AndroidFileWrapper> mFileWrapper;
-    std::vector<std::shared_ptr<AndroidFileWrapper>> mChildren;
+    std::vector<AndroidFileWrapper::ChildMetadata> mChildren;
     size_t mIndex{0};
 
     std::unique_ptr<PosixDirAccess> mGlobbing;

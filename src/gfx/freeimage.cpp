@@ -115,15 +115,6 @@ FIBITMAPPtr rescale(FIBITMAP* dib, int width, int height)
     };
 }
 
-using FITAGPtr = std::unique_ptr<FITAG, decltype(&FreeImage_DeleteTag)>;
-
-FITAGPtr getTagClone(FREE_IMAGE_MDMODEL model, FIBITMAP* dib, const char* key)
-{
-    FITAG* searchedTag = nullptr;
-    FreeImage_GetMetadata(model, dib, key, &searchedTag);
-    return ::mega::makeUniqueFrom(FreeImage_CloneTag(searchedTag), &FreeImage_DeleteTag);
-}
-
 FITAG* getTag(FREE_IMAGE_MDMODEL model, FIBITMAP* dib, const char* key)
 {
     FITAG* searchedTag = nullptr;

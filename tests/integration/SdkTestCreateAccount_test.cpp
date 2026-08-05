@@ -8,8 +8,6 @@
 #include "sdk_test_utils.h"
 #include "SdkTest_test.h"
 
-#include <gmock/gmock.h>
-
 using namespace sdk_test;
 
 /**

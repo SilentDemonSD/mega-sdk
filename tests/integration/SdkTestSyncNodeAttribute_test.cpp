@@ -11,8 +11,6 @@
 #include "sdk_test_utils.h"
 #include "SdkTestSyncNodesOperations.h"
 
-#include <gmock/gmock.h>
-
 using namespace sdk_test;
 using namespace testing;
 

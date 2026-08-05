@@ -184,6 +184,7 @@ public:
     vector<NewNode> nn;
     unsigned nc = 0;
     bool allocated = false;
+    bool unusableKey = false; // set if a file node in the tree has an unapplied key
 
     MegaTreeProcCopy(MegaClient *client);
     bool processMegaNode(MegaNode* node) override;
@@ -349,6 +350,11 @@ protected:
         // Otherwise this is the record we will send to create this folder
         NewNode newnode;
 
+        // true once this folder's newnode has been moved into a putnodes batch.
+        // Guards against moving it a second time which would dereference a null
+        // attrstring and crash.
+        bool newnodeSent = false;
+
         // files to upload to this folder
         struct FileRecord {
             LocalPath lp;
@@ -369,6 +375,13 @@ protected:
     };
     Tree mUploadTree;
 
+    // Maps each folder's temporary upload id (newnode.nodehandle) to its Tree node, so the
+    // putnodes completion callback can map a failed result entry back to its folder for error
+    // logging. Only the folder name (leaf) is logged: these are rare failure cases where the
+    // name is enough to help analysis, whereas keeping each folder's full path would cost more
+    // memory for little benefit.
+    std::map<handle, Tree*> mUploadIdToTree;
+
     /* Scan entire tree recursively, and retrieve folder structure and files to be uploaded.
      * A putnodes command can only add subtrees under same target, so in case we need to add
      * subtrees under different targets, this method will generate a subtree for each one.
@@ -380,7 +393,14 @@ protected:
     // Gathers up enough (but not too many) newnode records that are all descendants of a single folder
     // and can be created in a single operation.
     // Called from the main thread just before we send the next set of folder creation commands.
-    enum batchResult { batchResult_cancelled, batchResult_requestSent, batchResult_batchesComplete, batchResult_stillRecursing };
+    enum batchResult
+    {
+        batchResult_cancelled,
+        batchResult_requestSent,
+        batchResult_batchesComplete,
+        batchResult_stillRecursing,
+        batchResult_failed
+    };
     batchResult createNextFolderBatch(Tree& tree, vector<NewNode>& newnodes, uint32_t filecount, bool isBatchRootLevel);
 
     // Iterate through all pending files of each uploaded folder, and start all upload transfers
@@ -571,7 +591,7 @@ namespace totp
 {
 constexpr std::optional<HashAlgorithm> getHashAlgorithm(const int alg)
 {
-    using td = mega::MegaNode::PasswordNodeData::TotpData;
+    using td = MegaNode::PasswordNodeData::TotpData;
     switch (alg)
     {
         case td::HASH_ALGO_SHA1:
@@ -587,7 +607,7 @@ constexpr std::optional<HashAlgorithm> getHashAlgorithm(const int alg)
 
 constexpr int getHashAlgorithmPublicId(const std::optional<HashAlgorithm> alg)
 {
-    using td = mega::MegaNode::PasswordNodeData::TotpData;
+    using td = MegaNode::PasswordNodeData::TotpData;
     if (!alg)
     {
         return td::TOTPNULLOPT;
@@ -2499,6 +2519,7 @@ public:
     int32_t getAccountLevel() const override;
     MegaStringList* getFeatures() const override;
     int64_t getExpirationTime() const override;
+    int64_t getStartTime() const override;
     int32_t getType() const override;
     char* getId() const override;
     bool isTrial() const override;
@@ -2630,6 +2651,17 @@ public:
     bool hasMobileOfferUat(int productIndex) const override;
     std::string getMobileOfferLabel(int productIndex) const override;
     int getMobileOfferDiscountPercentage(int productIndex) const override;
+    int64_t getMobileOfferExpiryTimestamp(int productIndex) const override;
+    uint32_t getMobileOfferFlags(int productIndex) const override;
+    int64_t getMobileOfferReshowInterval(int productIndex) const override;
+    bool hasMobileOfferIos(int productIndex) const override;
+    std::string getMobileOfferIosOfferId(int productIndex) const override;
+    std::string getMobileOfferIosKeyId(int productIndex) const override;
+    std::string getMobileOfferIosNonce(int productIndex) const override;
+    int64_t getMobileOfferIosTimestampMs(int productIndex) const override;
+    std::string getMobileOfferIosSignature(int productIndex) const override;
+    bool hasMobileOfferAndroid(int productIndex) const override;
+    std::string getMobileOfferAndroidOfferId(int productIndex) const override;
     bool hasDiscount(int productIndex) const override;
     const char* getDiscountCode(int productIndex) const override;
     const char* getDiscountName(int productIndex) const override;
@@ -3133,7 +3165,7 @@ public:
     MegaApiImpl* api;
     string url;
     chunkmac_map chunkmacs;
-    byte filekey[FILENODEKEYLENGTH];
+    byte filekey[FILENODEKEYLENGTH] = {};
     MediaProperties mediaproperties;
 
     double latitude = MegaNode::INVALID_COORDINATE;
@@ -3774,8 +3806,19 @@ public:
         return mGranularity;
     }
 
+    void byUtcOffset(const char* utcOffset) override
+    {
+        mUtcOffset = utcOffset ? utcOffset : "";
+    }
+
+    const char* byUtcOffset() const override
+    {
+        return mUtcOffset.c_str();
+    }
+
 private:
     int mGranularity = MegaGroupNodesByDateFilter::SECTION_GRANULARITY_MONTH;
+    std::string mUtcOffset; // empty == UTC
 };
 
 class MegaListAllNodesFilterPrivate: public NodeScopeFilterImpl<MegaListAllNodesFilter>
@@ -4578,9 +4621,9 @@ class MegaApiImpl : public MegaApp
         std::atomic<bool> receivedScanningStateFlag{false};
         std::atomic<bool> receivedSyncingStateFlag{false};
 
-        MegaSync *getSyncByBackupId(mega::MegaHandle backupId);
-        MegaSync *getSyncByNode(MegaNode *node);
-        MegaSync *getSyncByPath(const char * localPath);
+        MegaSync* getSyncByBackupId(MegaHandle backupId);
+        MegaSync* getSyncByNode(MegaNode* node);
+        MegaSync* getSyncByPath(const char* localPath);
         void getMegaSyncStallList(MegaRequestListener* listener);
         void getMegaSyncStallMap(MegaRequestListener* listener);
         void clearStalledPath(MegaSyncStall*);
@@ -5589,6 +5632,9 @@ public:
 
         // notify about a storage event
         void notify_storage(int) override;
+
+        // notify about a streaming bandwidth overquota event
+        void notify_stream_overquota(dstime) override;
 
         // notify about account confirmation
         void notify_confirmation(const char*) override;
@@ -6639,9 +6685,9 @@ public:
     int freq() const override;
     int interval() const override;
     MegaTimeStamp until() const override;
-    const mega::MegaIntegerList* byWeekDay() const override;
-    const mega::MegaIntegerList* byMonthDay() const override;
-    const mega::MegaIntegerMap* byMonthWeekDay() const override;
+    const MegaIntegerList* byWeekDay() const override;
+    const MegaIntegerList* byMonthDay() const override;
+    const MegaIntegerMap* byMonthWeekDay() const override;
 
     MegaScheduledRulesPrivate* copy() const override { return new MegaScheduledRulesPrivate(this); }
     unique_ptr<ScheduledRules> getSdkScheduledRules() const;
@@ -6653,9 +6699,9 @@ private:
     unique_ptr<ScheduledRules> mScheduledRules;
     // temp memory must be held somewhere since there is a data transformation and ownership is not returned in the getters
     // (probably removed after checking MegaAPI redesign)
-    mutable std::unique_ptr<mega::MegaIntegerList> mTransformedByWeekDay;
-    mutable std::unique_ptr<mega::MegaIntegerList> mTransformedByMonthDay;
-    mutable std::unique_ptr<mega::MegaIntegerMap> mTransformedByMonthWeekDay;
+    mutable std::unique_ptr<MegaIntegerList> mTransformedByWeekDay;
+    mutable std::unique_ptr<MegaIntegerList> mTransformedByMonthDay;
+    mutable std::unique_ptr<MegaIntegerMap> mTransformedByMonthWeekDay;
 };
 
 class MegaScheduledMeetingPrivate: public MegaScheduledMeeting
@@ -7281,6 +7327,11 @@ public:
 }; // MegaFileServiceStorageInfoPrivate
 
 std::unique_ptr<FileSystemAccess> createFSA();
+
+// Parse a UTC offset in the exact form "±HH:MM" to signed seconds.
+// nullptr / "" → 0 (UTC). Returns nullopt for malformed input, MM > 59, or a
+// total outside [-12:00, +14:00].
+std::optional<int64_t> parseUtcOffsetSeconds(const char* tz);
 }
 
 // Specializations of std::hash for custom Sync types

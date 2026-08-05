@@ -1411,7 +1411,7 @@ bool MegaApiImpl::isSyncing()
     return receivedSyncingStateFlag.load();
 }
 
-MegaSync *MegaApiImpl::getSyncByBackupId(mega::MegaHandle backupId)
+MegaSync* MegaApiImpl::getSyncByBackupId(MegaHandle backupId)
 {
     // syncs has its own thread safety
     SyncConfig config;
@@ -6577,7 +6577,7 @@ MegaFileGet::MegaFileGet(MegaClient *client, Node *n, const LocalPath& dstPath, 
     size = n->size;
     mtime = n->mtime;
 
-    if(n->nodekey().size()>=sizeof(filekey))
+    if (n->nodekey().size() == sizeof(filekey))
         memcpy(filekey,n->nodekey().data(),sizeof filekey);
 
     setLocalname(finalPath);
@@ -6621,7 +6621,7 @@ MegaFileGet::MegaFileGet(MegaClient *client, MegaNode *n, const LocalPath& dstPa
     size = n->getSize();
     mtime = n->getModificationTime();
 
-    if(n->getNodeKey()->size()>=sizeof(filekey))
+    if (n->getNodeKey()->size() == sizeof(filekey))
         memcpy(filekey,n->getNodeKey()->data(),sizeof filekey);
 
     setLocalname(finalPath);
@@ -12615,19 +12615,36 @@ int MegaApiImpl::getAccess(const std::variant<MegaNode*, MegaHandle>& nodeOrNode
         return MegaShare::ACCESS_READ;
     }
 
-    if(node->type > FOLDERNODE)
-    {
-        return MegaShare::ACCESS_OWNER;
-    }
-
-    Node *n = node.get();
+    Node* n = node.get();
+    Node* root = n;
     accesslevel_t a = OWNER;
+    bool inInshare = false;
     while (n)
     {
-        if (n->inshare) { a = n->inshare->access; break; }
+        if (n->inshare)
+        {
+            a = n->inshare->access;
+            inInshare = true;
+            break;
+        }
+        root = n;
         n = n->parent.get();
     }
 
+    // Process nodes in Vault first.
+    // The Vault is read-only, except the Password Manager subtree.
+    if (!inInshare && root->type == VAULTNODE)
+    {
+        const NodeHandle pwmBase = client->getPasswordManagerBase();
+        if (pwmBase.isUndef() || !node->hasNHOrHasAncestorWithNH(pwmBase))
+        {
+            return MegaShare::ACCESS_READ;
+        }
+    }
+
+    // For a ROOTNODE or RUBBISHNODE the loop above leaves a == OWNER (no parent
+    // and no inshare), so the switch returns OWNER here.
+    // Then process accesslevel of regular nodes.
     switch(a)
     {
         case RDONLY: return MegaShare::ACCESS_READ;
@@ -13618,6 +13635,35 @@ std::optional<ListAllNodesParams>
     return params;
 }
 
+std::optional<int64_t> parseUtcOffsetSeconds(const char* tz)
+{
+    if (!tz || tz[0] == '\0')
+        return 0; // unset → UTC
+
+    const std::string s{tz};
+    // Exact shape: sign HH ':' MM  → length 6, digits at 1,2,4,5, ':' at 3.
+    if (s.size() != 6 || (s[0] != '+' && s[0] != '-') || s[3] != ':')
+        return std::nullopt;
+    for (const size_t i: {1u, 2u, 4u, 5u})
+        if (s[i] < '0' || s[i] > '9')
+            return std::nullopt;
+
+    const int hours = (s[1] - '0') * 10 + (s[2] - '0');
+    const int minutes = (s[4] - '0') * 10 + (s[5] - '0');
+    if (minutes > 59)
+        return std::nullopt;
+
+    int64_t total = static_cast<int64_t>(hours) * 3600 + static_cast<int64_t>(minutes) * 60;
+    if (s[0] == '-')
+        total = -total;
+
+    // Real-world offsets only: UTC-12:00 .. UTC+14:00.
+    if (total < -12 * 3600 || total > 14 * 3600)
+        return std::nullopt;
+
+    return total;
+}
+
 std::optional<DateSectionParams>
     MegaApiImpl::buildDateSectionParams(const MegaGroupNodesByDateFilter* filter, int order) const
 {
@@ -13643,8 +13689,16 @@ std::optional<DateSectionParams>
         return std::nullopt;
     }
 
+    const auto tzOffset = parseUtcOffsetSeconds(filter->byUtcOffset());
+    if (!tzOffset)
+    {
+        LOG_warn << "groupAllNodesByDate: invalid UTC offset \"" << filter->byUtcOffset() << "\"";
+        return std::nullopt;
+    }
+
     params.order = order;
     params.granularity = static_cast<DateSectionGranularity>(granularity);
+    params.tzOffsetSeconds = *tzOffset;
     return params;
 }
 
@@ -15987,6 +16041,13 @@ void MegaApiImpl::notify_storage(int storageEvent)
 {
     MegaEventPrivate *event = new MegaEventPrivate(MegaEvent::EVENT_STORAGE);
     event->setNumber(storageEvent);
+    fireOnEvent(event);
+}
+
+void MegaApiImpl::notify_stream_overquota(dstime timeleft)
+{
+    MegaEventPrivate* event = new MegaEventPrivate(MegaEvent::EVENT_STREAM_OVERQUOTA);
+    event->setNumber(timeleft / 10);
     fireOnEvent(event);
 }
 
@@ -20581,6 +20642,19 @@ unsigned MegaApiImpl::sendPendingTransfers(TransferQueue *queue, MegaRecursiveOp
                             break;
                         }
 
+                        // Refuse an invalid/unapplied key rather than
+                        // build a zero-key cipher or read the IV past a short key buffer.
+                        const std::string* nodeKey = notOwnedNode->getNodeKey();
+                        if (!nodeKey || nodeKey->size() != FILENODEKEYLENGTH)
+                        {
+                            LOG_err << "Streaming download: foreign node "
+                                    << toNodeHandle(notOwnedNode->getHandle())
+                                    << " has an invalid key (size "
+                                    << (nodeKey ? nodeKey->size() : 0) << ")";
+                            e = API_EKEY;
+                            break;
+                        }
+
                         m_off_t totalBytes = endPos - startPos + 1;
                         transferMap[nextTag]=transfer;
                         transfer->setTotalBytes(totalBytes);
@@ -21504,7 +21578,6 @@ void MegaApiImpl::moveNode(MegaNode* node, MegaNode* newParent, const char* newN
                     return e;
                 }
 
-                unsigned nc;
                 TreeProcCopy tc;
                 const bool fullInternalOperation = node && newParent && node->owner == client->me &&
                                                    client->me == newParent->owner;
@@ -21555,12 +21628,18 @@ void MegaApiImpl::moveNode(MegaNode* node, MegaNode* newParent, const char* newN
 
                 // determine number of nodes to be copied
                 client->proctree(node, &tc, !ovhandle.isUndef());
+                if (tc.unusableKey)
+                {
+                    // A node in the tree has an unapplied key,
+                    // fail the move rather than create a broken node.
+                    LOG_err << "move: a node in the tree has an unusable key";
+                    e = API_EKEY;
+                    return e;
+                }
                 tc.allocnodes();
-                nc = tc.nc;
 
-                // build new nodes array
                 client->proctree(node, &tc, !ovhandle.isUndef());
-                if (!nc)
+                if (tc.nn.empty())
                 {
                     e = API_EARGS;
                     return e;
@@ -21718,10 +21797,20 @@ error MegaApiImpl::performRequest_copy(MegaRequestPrivate* request)
                 MegaTreeProcCopy tc(client);
 
                 processMegaTree(megaNode, &tc);
+                if (tc.unusableKey)
+                {
+                    LOG_err << "Failed to import node: a node in the tree has an unusable key";
+                    return API_EKEY;
+                }
                 tc.allocnodes();
 
                 // build new nodes array
                 processMegaTree(megaNode, &tc);
+                if (tc.nn.empty())
+                {
+                    LOG_err << "Failed to import node: no copyable nodes in the tree";
+                    return API_EARGS;
+                }
 
                 tc.nn[0].parenthandle = UNDEF;
                 tc.nn[0].ovhandle = ovhandle;
@@ -21853,6 +21942,11 @@ error MegaApiImpl::copyTreeFromOwnedNode(shared_ptr<Node> node,
         node && target && node->owner == client->me && client->me == target->owner;
     tc.resetSensitive = !fullInternalOperation;
     client->proctree(node, &tc, false, !ovhandle.isUndef());
+    if (tc.unusableKey)
+    {
+        LOG_err << "Failed to copy owned node: a node in the tree has an unusable key";
+        return API_EKEY;
+    }
     tc.allocnodes();
 
     // If the sensitivity was reset, the file didn't exist
@@ -21937,6 +22031,13 @@ void MegaApiImpl::restoreVersion(MegaNode* version, MegaRequestListener* listene
             if (version->type != FILENODE || !version->parent || version->parent->type != FILENODE)
             {
                 return API_EARGS;
+            }
+
+            if (!version->keyApplied())
+            {
+                LOG_err << "restoreVersion: version " << toNodeHandle(version->nodehandle) << " ("
+                        << version->displaypath() << ") has an unapplied key, cannot restore";
+                return API_EKEY;
             }
 
             Node *current = version.get();
@@ -22137,6 +22238,14 @@ void MegaApiImpl::getDownloadUrl(MegaNode* node,
             if(!node) // works only for existing nodes, not the ones that need to be undeleted (see "gd" command)
             {
                 return API_EARGS;
+            }
+
+            // Refuse nodes whose key has not been applied. Such a node still holds
+            // the raw wire-form key ("<sharehandle>:<base64>"), longer than the
+            // fixed filekey buffer in CommandGetFile.
+            if (!node->keyApplied())
+            {
+                return API_EKEY;
             }
 
             client->queueCommand(new CommandGetFile(
@@ -31043,6 +31152,133 @@ int mega::MegaPricingPrivate::getMobileOfferDiscountPercentage(int productIndex)
     return 0;
 }
 
+int64_t MegaPricingPrivate::getMobileOfferExpiryTimestamp(int productIndex) const
+{
+    if (auto index = static_cast<size_t>(productIndex);
+        index < products.size() && products[index].mobileOffer.has_value())
+    {
+        return products[index].mobileOffer->expiryTimestamp;
+    }
+
+    return 0;
+}
+
+uint32_t MegaPricingPrivate::getMobileOfferFlags(int productIndex) const
+{
+    if (auto index = static_cast<size_t>(productIndex);
+        index < products.size() && products[index].mobileOffer.has_value())
+    {
+        return products[index].mobileOffer->flags;
+    }
+
+    return 0;
+}
+
+int64_t MegaPricingPrivate::getMobileOfferReshowInterval(int productIndex) const
+{
+    if (auto index = static_cast<size_t>(productIndex);
+        index < products.size() && products[index].mobileOffer.has_value())
+    {
+        return products[index].mobileOffer->reshowInterval;
+    }
+
+    return 0;
+}
+
+bool MegaPricingPrivate::hasMobileOfferIos(int productIndex) const
+{
+    if (auto index = static_cast<size_t>(productIndex);
+        index < products.size() && products[index].mobileOffer.has_value())
+    {
+        return products[index].mobileOffer->ios.has_value();
+    }
+
+    return false;
+}
+
+std::string MegaPricingPrivate::getMobileOfferIosOfferId(int productIndex) const
+{
+    if (auto index = static_cast<size_t>(productIndex);
+        index < products.size() && products[index].mobileOffer.has_value() &&
+        products[index].mobileOffer->ios.has_value())
+    {
+        return products[index].mobileOffer->ios->offerId;
+    }
+
+    return {};
+}
+
+std::string MegaPricingPrivate::getMobileOfferIosKeyId(int productIndex) const
+{
+    if (auto index = static_cast<size_t>(productIndex);
+        index < products.size() && products[index].mobileOffer.has_value() &&
+        products[index].mobileOffer->ios.has_value())
+    {
+        return products[index].mobileOffer->ios->keyId;
+    }
+
+    return {};
+}
+
+std::string MegaPricingPrivate::getMobileOfferIosNonce(int productIndex) const
+{
+    if (auto index = static_cast<size_t>(productIndex);
+        index < products.size() && products[index].mobileOffer.has_value() &&
+        products[index].mobileOffer->ios.has_value())
+    {
+        return products[index].mobileOffer->ios->nonce;
+    }
+
+    return {};
+}
+
+int64_t MegaPricingPrivate::getMobileOfferIosTimestampMs(int productIndex) const
+{
+    if (auto index = static_cast<size_t>(productIndex);
+        index < products.size() && products[index].mobileOffer.has_value() &&
+        products[index].mobileOffer->ios.has_value())
+    {
+        return products[index].mobileOffer->ios->timestampMs;
+    }
+
+    return 0;
+}
+
+std::string MegaPricingPrivate::getMobileOfferIosSignature(int productIndex) const
+{
+    if (auto index = static_cast<size_t>(productIndex);
+        index < products.size() && products[index].mobileOffer.has_value() &&
+        products[index].mobileOffer->ios.has_value())
+    {
+        return products[index].mobileOffer->ios->signature;
+    }
+
+    return {};
+}
+
+bool MegaPricingPrivate::hasMobileOfferAndroid(int productIndex) const
+{
+    if (auto index = static_cast<size_t>(productIndex);
+        index < products.size() && products[index].mobileOffer.has_value())
+    {
+        return products[index].mobileOffer->android.has_value();
+    }
+
+    return false;
+}
+
+std::string MegaPricingPrivate::getMobileOfferAndroidOfferId(int productIndex) const
+{
+    if (auto index = static_cast<size_t>(productIndex);
+        index < products.size() && products[index].mobileOffer.has_value() &&
+        products[index].mobileOffer->android.has_value())
+    {
+        return products[index].mobileOffer->android->offerId;
+    }
+
+    return {};
+}
+
 const char *MegaPricingPrivate::getDescription(int productIndex)
 {
     if (productIndex >= 0 && static_cast<unsigned int>(productIndex) < products.size())
@@ -31937,6 +32173,11 @@ int64_t MegaAccountPlanPrivate::getExpirationTime() const
     return mPlan.expiration;
 }
 
+int64_t MegaAccountPlanPrivate::getStartTime() const
+{
+    return mPlan.startTime;
+}
+
 int32_t MegaAccountPlanPrivate::getType() const
 {
     return mPlan.type;
@@ -31980,6 +32221,18 @@ void MegaTreeProcCopy::allocnodes()
 }
 bool MegaTreeProcCopy::processMegaNode(MegaNode *n)
 {
+    // MegaNode has no keyApplied(), so check the key length directly. A file node whose
+    // key was never applied cannot be copied.
+    if (n->getType() == MegaNode::TYPE_FILE &&
+        (!n->getNodeKey() || n->getNodeKey()->size() != FILENODEKEYLENGTH))
+    {
+        unusableKey = true;
+        LOG_err << "MegaTreeProcCopy: node " << toNodeHandle(n->getHandle()) << " ("
+                << (n->getName() ? n->getName() : "?")
+                << ") has an unapplied key, import will be aborted";
+        return true;
+    }
+
     if (allocated)
     {
         // prepare map of attributes
@@ -32074,6 +32327,7 @@ void MegaFolderUploadController::start(MegaNode*)
         megaapiThreadClient()->putnodes_prepareOneFolder(&newTreeNode->newnode, leaf, false);
         newTreeNode->newnode.nodehandle = nextUploadId();
         newTreeNode->newnode.parenthandle = UNDEF;
+        mUploadIdToTree[newTreeNode->newnode.nodehandle] = newTreeNode.get();
     }
     // else => if there's another node (TYPE_FOLDER) with the same name, in the destination path, the content of both folders will be merged
 
@@ -32134,9 +32388,8 @@ void MegaFolderUploadController::start(MegaNode*)
 #endif
             createNextFolderBatch(mUploadTree, newnodes, filecount, true);
 
-            assert(r == batchResult_cancelled ||
-                   r == batchResult_requestSent ||
-                   r == batchResult_batchesComplete);
+            assert(r == batchResult_cancelled || r == batchResult_requestSent ||
+                   r == batchResult_batchesComplete || r == batchResult_failed);
         }));
 
         // Queue that function.
@@ -32294,6 +32547,7 @@ MegaFolderUploadController::scanFolder_result MegaFolderUploadController::scanFo
             // set nodeHandle
             newTreeNode->newnode.nodehandle = nextUploadId();
             newTreeNode->newnode.parenthandle = tree.newnode.nodehandle;
+            mUploadIdToTree[newTreeNode->newnode.nodehandle] = newTreeNode.get();
 
             scanFolder_result sr = scanFolder(*newTreeNode, childPath, foldercount, filecount);
             if (sr != scanFolder_succeeded)
@@ -32364,6 +32618,21 @@ MegaFolderUploadController::batchResult MegaFolderUploadController::createNextFo
                                                           MegaNode::TYPE_FOLDER));
         }
 
+        // test-only: let a test simulate this already-sent folder vanishing
+        DEBUG_TEST_HOOK_FOLDER_UPLOAD_SIMULATE_MISSING(t->folderName, t->megaNode, t->newnodeSent);
+
+        if (!t->megaNode && t->newnodeSent)
+        {
+            // We already created this folder in a previous batch, but it can no longer be
+            // resolved (not by name, nor in the not-yet-committed set). It was most likely
+            // removed by another session. Its newnode has already been moved out, so we must
+            // not send it again (dereference a nullptr), fail the whole upload instead.
+            LOG_err << "Folder upload: folder '" << t->folderName
+                    << "' was created earlier but is missing now";
+            complete(API_ENOENT);
+            return batchResult_failed;
+        }
+
         // if node doesn't exist yet and we haven't exceeded the limit per batch
         if (!t->megaNode && newnodes.size() < MAXNODESUPLOAD)
         {
@@ -32374,6 +32643,7 @@ MegaFolderUploadController::batchResult MegaFolderUploadController::createNextFo
                 assert(tree.megaNode);
                 t->newnode.parenthandle = UNDEF;
             }
+            t->newnodeSent = true;
             newnodes.push_back(std::move(t->newnode));
         }
 
@@ -32424,36 +32694,55 @@ MegaFolderUploadController::batchResult MegaFolderUploadController::createNextFo
             {}, // customerIpPort
             [this, weak_this, filecount](const Error& e,
                                          targettype_t,
-                                         vector<NewNode>&,
+                                         vector<NewNode>& nn,
                                          bool,
                                          int /*tag*/,
                                          const map<string, string>& /*fileHandles*/)
             {
-                // double check our object still exists on request completion
-                if (!weak_this.lock())
+                // Hold a strong reference for the whole callback so the controller (and thus
+                // mUploadTree / mUploadIdToTree accessed below) cannot be destroyed mid-callback.
+                auto self = weak_this.lock();
+                if (!self)
                     return;
-                assert(weak_this.lock().get() == this);
+                assert(self.get() == this);
                 assert(mMainThreadId == std::this_thread::get_id());
 
-                // lambda function that will be executed as completion function in putnodes procresult
+                // command-level failure (also covers the all-nodes-failed case)
                 if (e)
                 {
                     complete(e);
+                    return;
                 }
-                else
+
+                // test-only: let a test inject per-node putnodes errors (see testhooks.h)
+                DEBUG_TEST_HOOK_FOLDER_UPLOAD_PUTNODES_RESULT(nn);
+
+                // The overall result can be API_OK even when individual nodes failed, so
+                // inspect the per-node errors. Any failure aborts the whole upload (a failed
+                // folder invalidates its subtree), report the specific error and folder.
+                for (const auto& newNode: nn)
                 {
-                    // start the next batch, if there are any left (or start transfers, if we are ready)
-                    vector<NewNode> newnodes;
+                    if (newNode.mError != API_OK)
+                    {
+                        auto it = mUploadIdToTree.find(newNode.nodehandle);
+                        LOG_err << "Folder upload failed [" << newNode.mError << "] for folder '"
+                                << (it != mUploadIdToTree.end() ? it->second->folderName :
+                                                                  std::string("<unknown>"))
+                                << "'";
+                        complete(newNode.mError);
+                        return;
+                    }
+                }
+
+                // start the next batch, if there are any left (or start transfers, if we are ready)
+                vector<NewNode> newnodes;
 #ifndef NDEBUG
-                    batchResult r =
+                batchResult r =
 #endif
                     createNextFolderBatch(mUploadTree, newnodes, filecount, true);
 
-                    assert(r == batchResult_cancelled ||
-                           r == batchResult_requestSent ||
-                           r == batchResult_batchesComplete);
-
-                }
+                assert(r == batchResult_cancelled || r == batchResult_requestSent ||
+                       r == batchResult_batchesComplete || r == batchResult_failed);
             },
             localPitag);
 
@@ -41264,6 +41553,8 @@ const char *MegaEventPrivate::getEventString(int type)
             return "TRANSFERS_RESUMED";
         case MegaEvent::EVENT_LAST_PURGE:
             return "LAST_PURGE";
+        case MegaEvent::EVENT_STREAM_OVERQUOTA:
+            return "STREAM_OVERQUOTA";
     }
 
     return "UNKNOWN";

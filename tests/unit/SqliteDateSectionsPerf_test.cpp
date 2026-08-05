@@ -1035,6 +1035,85 @@ TEST_F(DISABLED_Offset_CursorDepthCurve, CursorDepthCurve)
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+//  Phase 6: UTC-offset latency (offset must not shift the query plan)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// The tz offset is a BOUND parameter, so the SQL text — hence the plan and the
+// prepared-statement cache — is identical across offsets and latency should be
+// flat. This sweep guards against a future change embedding it as a literal,
+// which would fragment the cache and make these cells diverge.
+
+struct TzSweepParam
+{
+    int64_t tzOffsetSeconds;
+    const char* label;
+    DateSectionGranularity granularity;
+};
+
+class SqliteNodesPerfTzSweepTest:
+    public SqliteDateSectionsPerfFixture,
+    public ::testing::WithParamInterface<TzSweepParam>
+{};
+
+TEST_P(SqliteNodesPerfTzSweepTest, DISABLED_Perf)
+{
+    auto* table = nodesTable();
+    ASSERT_NE(table, nullptr);
+
+    const auto& tp = GetParam();
+
+    DateSectionParams sp;
+    sp.mimeType = MIME_TYPE_ALL_VISUAL_MEDIA;
+    sp.order = OrderByClause::MTIME_DESC;
+    sp.granularity = tp.granularity;
+    sp.tzOffsetSeconds = tp.tzOffsetSeconds;
+
+    const std::vector<NodeHandle> roots{mRootHandle};
+
+    // Warm prepare; the timed loop measures execution only.
+    {
+        std::vector<DateSection> warm;
+        CancelToken ct;
+        table->groupAllNodesByDate(sp, roots, warm, ct);
+    }
+
+    size_t sectionCount = 0;
+    const long long us = measureUs(COMPLEX_ITERS,
+                                   [&]
+                                   {
+                                       std::vector<DateSection> sections;
+                                       CancelToken ct;
+                                       table->groupAllNodesByDate(sp, roots, sections, ct);
+                                       sectionCount = sections.size();
+                                   });
+
+    GTEST_LOG_(INFO) << "groupAllNodesByDate tz-sweep [tz=" << tp.label
+                     << ", gran=" << granName(tp.granularity) << ", sections=" << sectionCount
+                     << "]: " << COMPLEX_ITERS << " iters, avg " << us / COMPLEX_ITERS
+                     << " us/iter";
+}
+
+// clang-format off
+// Full 4 offsets × 3 granularities = 12 cells.
+static const TzSweepParam kTzSweepParams[] = {
+    {0LL,                "UTC",    DateSectionGranularity::Day},
+    {9 * 3600LL,         "+09:00", DateSectionGranularity::Day},
+    {-(5 * 3600 + 1800), "-05:30", DateSectionGranularity::Day},
+    {14 * 3600LL,        "+14:00", DateSectionGranularity::Day},
+    {0LL,                "UTC",    DateSectionGranularity::Month},
+    {9 * 3600LL,         "+09:00", DateSectionGranularity::Month},
+    {-(5 * 3600 + 1800), "-05:30", DateSectionGranularity::Month},
+    {14 * 3600LL,        "+14:00", DateSectionGranularity::Month},
+    {0LL,                "UTC",    DateSectionGranularity::Year},
+    {9 * 3600LL,         "+09:00", DateSectionGranularity::Year},
+    {-(5 * 3600 + 1800), "-05:30", DateSectionGranularity::Year},
+    {14 * 3600LL,        "+14:00", DateSectionGranularity::Year},
+};
+// clang-format on
+
+INSTANTIATE_TEST_SUITE_P(All, SqliteNodesPerfTzSweepTest, ::testing::ValuesIn(kTzSweepParams));
+
 } // anonymous namespace
 
 #endif // USE_SQLITE

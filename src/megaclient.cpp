@@ -1695,6 +1695,22 @@ void MegaClient::acknowledgeuseralerts()
     useralerts.acknowledgeAll();
 }
 
+void MegaClient::notifyStreamOverquota(dstime timeleft)
+{
+    // Minimum delay between two consecutive streaming overquota events. A blocked media player
+    // reconnects every few seconds, and every attempt reaches this point.
+    static constexpr dstime MIN_NOTIFY_INTERVAL_DS = 20; // 2 seconds
+
+    if (mLastStreamOverquotaNotifyDs &&
+        Waiter::ds - mLastStreamOverquotaNotifyDs < MIN_NOTIFY_INTERVAL_DS)
+    {
+        return;
+    }
+
+    mLastStreamOverquotaNotifyDs = Waiter::ds;
+    app->notify_stream_overquota(timeleft);
+}
+
 void MegaClient::activateoverquota(dstime timeleft, bool isPaywall)
 {
     if (timeleft)
@@ -2242,6 +2258,7 @@ void MegaClient::exec()
     if (overquotauntil && overquotauntil < Waiter::ds)
     {
         overquotauntil = 0;
+        mLastStreamOverquotaNotifyDs = 0;
     }
 
     if (httpio->inetisback())
@@ -3967,6 +3984,7 @@ bool MegaClient::abortbackoff(bool includexfers)
     if (includexfers)
     {
         overquotauntil = 0;
+        mLastStreamOverquotaNotifyDs = 0;
         if (ststatus != STORAGE_PAYWALL)    // in ODQ Paywall, ULs/DLs are not allowed
         {
             // in ODQ Red, only ULs are disallowed
@@ -4334,8 +4352,12 @@ void MegaClient::dispatchTransfers()
                             }
                             else if (n->type == FILENODE)
                             {
-                                keyData = (const byte*)n->nodekey().data();
                                 nexttransfer->size = n->size;
+                                // Only use the node key once it has been applied.
+                                if (n->keyApplied())
+                                {
+                                    keyData = (const byte*)n->nodekey().data();
+                                }
                             }
                         }
                         else
@@ -5116,6 +5138,7 @@ void MegaClient::locallogout(bool removecaches, [[maybe_unused]] bool keepSyncsC
     fetchnodestag = 0;
     ststatus = STORAGE_UNKNOWN;
     overquotauntil = 0;
+    mLastStreamOverquotaNotifyDs = 0;
     mOverquotaDeadlineTs = 0;
     mOverquotaWarningTs.clear();
     mBizGracePeriodTs = 0;
@@ -9731,24 +9754,24 @@ void MegaClient::putnodes_prepareCopy(std::vector<NewNode>& nn,
                                       const bool isPublic)
 {
     assert(nc > 0);
-    NewNode* t = &nn[--nc];
+    NewNode& t = nn.at(--nc);
 
     // copy node
-    t->source = isPublic ? NEW_PUBLIC : NEW_NODE;
-    t->type = type;
-    t->nodehandle = nodehandle;
-    t->parenthandle = parenthandle;
+    t.source = isPublic ? NEW_PUBLIC : NEW_NODE;
+    t.type = type;
+    t.nodehandle = nodehandle;
+    t.parenthandle = parenthandle;
 
     // copy key (if file) or generate new key (if folder)
     if (type == FILENODE)
     {
-        t->nodekey = nodekey;
+        t.nodekey = nodekey;
     }
     else
     {
         byte buf[FOLDERNODEKEYLENGTH];
         rng.genblock(buf, sizeof buf);
-        t->nodekey.assign((char*)buf, FOLDERNODEKEYLENGTH);
+        t.nodekey.assign((char*)buf, FOLDERNODEKEYLENGTH);
     }
 
     AttrMap tattrs;
@@ -9766,12 +9789,12 @@ void MegaClient::putnodes_prepareCopy(std::vector<NewNode>& nn,
     }
 
     string attrstring;
-    t->attrstring.reset(new string);
+    t.attrstring.reset(new string);
     tattrs.getjson(&attrstring);
 
     SymmCipher cipher;
-    cipher.setkey((const byte*)t->nodekey.data(), type);
-    makeattr(&cipher, t->attrstring, attrstring.c_str());
+    cipher.setkey((const byte*)t.nodekey.data(), type);
+    makeattr(&cipher, t.attrstring, attrstring.c_str());
 }
 
 error MegaClient::updateNodeMtime(std::shared_ptr<Node> node,
@@ -17500,13 +17523,14 @@ void MegaClient::purgenodesusersabortsc(bool keepOwnUser)
 // request direct read by node pointer
 void MegaClient::pread(Node* node, m_off_t offset, m_off_t count, DirectRead::Callback&& callback)
 {
-    queueread(node->nodehandle,
-              false,
-              node->nodecipher(),
-              MemAccess::get<int64_t>((const char*)node->nodekey().data() + SymmCipher::KEYLENGTH),
-              offset,
-              count,
-              std::move(callback));
+    // For an unapplied key pass a null cipher so queueread fails
+    // the read cleanly instead of reading past a short key.
+    SymmCipher* cipher = node->keyApplied() ? node->nodecipher() : nullptr;
+    int64_t iv =
+        cipher ?
+            MemAccess::get<int64_t>((const char*)node->nodekey().data() + SymmCipher::KEYLENGTH) :
+            0;
+    queueread(node->nodehandle, false, cipher, iv, offset, count, std::move(callback));
 }
 
 void MegaClient::pread(handle handle,
@@ -17534,13 +17558,12 @@ void MegaClient::pread(handle handle,
 
 void MegaClient::pread(Node* node, m_off_t offset, m_off_t count, void* appData)
 {
-    queueread(node->nodehandle,
-              false,
-              node->nodecipher(),
-              MemAccess::get<int64_t>((const char*)node->nodekey().data() + SymmCipher::KEYLENGTH),
-              offset,
-              count,
-              appData);
+    SymmCipher* cipher = node->keyApplied() ? node->nodecipher() : nullptr;
+    int64_t iv =
+        cipher ?
+            MemAccess::get<int64_t>((const char*)node->nodekey().data() + SymmCipher::KEYLENGTH) :
+            0;
+    queueread(node->nodehandle, false, cipher, iv, offset, count, appData);
 }
 
 // request direct read by exported handle / key
@@ -17637,6 +17660,40 @@ void MegaClient::queueread(handle handle,
               chatAuth);
 }
 
+// Fail a direct read that cannot be dispatched because the account is over its bandwidth quota.
+// Both dr and drn may be deleted here, so neither they nor drn's hdrns iterator can be used
+// by the caller afterwards.
+static void failOverquotaRead(DirectReadNode* drn, DirectRead* dr, dstime timeleft)
+{
+    // Both come straight from a new expression, so neither can be null.
+    MEGA_ASSERT(drn && dr, "failOverquotaRead called with a null DirectReadNode or DirectRead");
+
+    // Take the read out of the dispatch queue before reporting the failure. DirectRead's
+    // constructor queues it straight away when the node already has temp URLs, and
+    // execdirectreads() does not look at the overquota deadline, so it would hand the read a slot
+    // and hit the storage server regardless.
+    dr->abort();
+
+    if (EVER(dr->onFailure(API_EOVERQUOTA, 0, timeleft)))
+    {
+        // the reader wants to be retried: don't do so before the end of the overquota state
+        drn->schedule(timeleft);
+        return;
+    }
+
+    // The reader gave up, so drop its read rather than parking it until the overquota state ends
+    // (which may be hours away). A later read will queue a new one and be told about the overquota
+    // again, so nothing is lost by letting this one go.
+    delete dr;
+
+    if (drn->reads.empty())
+    {
+        LOG_debug << "Removing DirectReadNode. No reads left after bandwidth overquota"
+                  << " [this = " << drn << "]";
+        delete drn;
+    }
+}
+
 void MegaClient::queueread(handle handle,
                            bool isPublicHandle,
                            SymmCipher* cipher,
@@ -17649,6 +17706,19 @@ void MegaClient::queueread(handle handle,
                            const char* chatAuth)
 {
     assert(callback);
+
+    // A null cipher means there is no usable key for this read (e.g. the node key
+    // was not applied). Fail the read here, before DirectReadNode dereferences the
+    // cipher.
+    if (!cipher)
+    {
+        DirectRead::CallbackParam param{std::in_place_type<DirectRead::Failure>,
+                                        Error(API_EKEY),
+                                        0,
+                                        0};
+        callback(param);
+        return;
+    }
 
     handledrn_map::iterator it;
 
@@ -17675,8 +17745,10 @@ void MegaClient::queueread(handle handle,
         if (overquotauntil && overquotauntil > Waiter::ds)
         {
             dstime timeleft = dstime(overquotauntil - Waiter::ds);
-            directRead->onFailure(API_EOVERQUOTA, 0, timeleft);
-            it->second->schedule(timeleft);
+            // The overquota state was already known, so this read never reaches the storage server
+            // and DirectReadNode::retry() will not run: notify the app from here instead.
+            notifyStreamOverquota(timeleft);
+            failOverquotaRead(it->second, directRead, timeleft);
         }
         else
         {
@@ -17689,8 +17761,8 @@ void MegaClient::queueread(handle handle,
         if (overquotauntil && overquotauntil > Waiter::ds)
         {
             dstime timeleft = dstime(overquotauntil - Waiter::ds);
-            directRead->onFailure(API_EOVERQUOTA, 0, timeleft);
-            it->second->schedule(timeleft);
+            notifyStreamOverquota(timeleft);
+            failOverquotaRead(it->second, directRead, timeleft);
         }
     }
 }
@@ -18555,8 +18627,26 @@ void MegaClient::execmovetosyncdebris(Node* requestedNode, std::function<void(No
                     LOG_debug << "Copy and delete to cloud Syncdebris: " << n->displaypath() << " in " << debrisTarget->displaypath() << " Nhandle: " << LOG_NODEHANDLE(n->nodehandle);
                     TreeProcCopy tc;
                     proctree(n, &tc, false, false);
+                    if (tc.unusableKey)
+                    {
+                        LOG_err << "SyncDebris: node " << toNodeHandle(n->nodehandle) << " ("
+                                << n->displaypath()
+                                << ") has an unusable key, skipping copy-to-debris";
+                        if (rec.completion)
+                            rec.completion(rec.nodeHandle, API_EKEY);
+                        continue;
+                    }
                     tc.allocnodes();
                     proctree(n, &tc, false, false);
+                    if (tc.nn.empty())
+                    {
+                        LOG_err << "SyncDebris: node " << toNodeHandle(n->nodehandle) << " ("
+                                << n->displaypath()
+                                << ") produced no copyable nodes, skipping copy-to-debris";
+                        if (rec.completion)
+                            rec.completion(rec.nodeHandle, API_EARGS);
+                        continue;
+                    }
                     tc.nn[0].parenthandle = UNDEF;
                     putnodes(debrisTarget->nodeHandle(),
                              NoVersioning,
@@ -19289,10 +19379,25 @@ error MegaClient::transferRemoteCopy(File* file,
                                      std::optional<std::string> inboxTarget)
 {
     assert(file);
+    if (!sameNode)
+    {
+        LOG_err << "transferRemoteCopy: null source node, cannot copy";
+        return API_EARGS;
+    }
     TreeProcCopy tc;
     proctree(sameNode, &tc, false, true);
+    if (tc.unusableKey)
+    {
+        LOG_err << "transferRemoteCopy: source node has an unusable key, cannot copy";
+        return API_EKEY;
+    }
     tc.allocnodes();
     proctree(sameNode, &tc, false, true);
+    if (tc.nn.empty())
+    {
+        LOG_err << "transferRemoteCopy: source node produced no copyable nodes, cannot copy";
+        return API_EARGS;
+    }
     tc.nn[0].parenthandle = UNDEF;
 
     SymmCipher nodeKey;

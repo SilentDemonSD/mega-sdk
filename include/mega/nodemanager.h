@@ -373,12 +373,13 @@ struct ListAllNodesParams: ListAllFilterParams
 };
 
 /// Parameters for NodeManager::groupAllNodesByDate. Same filter/root logic as
-/// ListAllNodesParams (shared base); only adds `granularity`. Callers must set a
+/// ListAllNodesParams (shared base); adds `granularity` and `tzOffsetSeconds`. Callers must set a
 /// timestamp `order`; the DB entry point rejects an unsupported one (incl. the
 /// inherited default 0).
 struct DateSectionParams: ListAllFilterParams
 {
     DateSectionGranularity granularity = DateSectionGranularity::Month;
+    int64_t tzOffsetSeconds = 0; ///< localTime = UTC + tzOffsetSeconds; 0 == UTC
 };
 
 /// One date bucket from NodeManager::groupAllNodesByDate. mStartDate (inclusive
@@ -828,6 +829,9 @@ private:
     sharedNode_vector getNodesByOrigFingerprint_internal(const std::string& fingerprint, Node *parent);
     std::shared_ptr<Node> getNodeByFingerprint_internal(FileFingerprint &fingerprint);
     std::shared_ptr<Node> childNodeByNameType_internal(const Node *parent, const std::string& name, nodetype_t nodeType);
+    std::shared_ptr<Node> childNodeByNameTypeInNotifyQueue(const Node* parent,
+                                                           const std::string& name,
+                                                           nodetype_t nodeType) const;
     sharedNode_vector getRootNodes_internal();
 
     std::vector<NodeHandle> getFavouritesNodeHandles_internal(NodeHandle node, uint32_t count);

@@ -29,6 +29,7 @@
 #include "mega/testhooks.h"
 #include "mega/tlv.h"
 #include "mega/user_attribute.h"
+#include "megaapi.h"
 #include "test.h"
 
 #define DEFAULTWAIT std::chrono::seconds(20)
@@ -8066,49 +8067,6 @@ TEST_F(SyncTest, BasicSync_moveAndDeleteLocalFile)
     ASSERT_TRUE(clientA1->confirmModel_mainthread(model.findnode("f"), backupId1));
 }
 #endif
-
-namespace {
-
-string makefa(const string& name, int fakecrc, int mtime)
-{
-    AttrMap attrs;
-    attrs.map['n'] = name;
-
-    FileFingerprint ff;
-    ff.crc[0] = ff.crc[1] = ff.crc[2] = ff.crc[3] = fakecrc;
-    ff.mtime = mtime;
-    ff.serializefingerprint(&attrs.map['c']);
-
-    string attrjson;
-    attrs.getjson(&attrjson);
-    return attrjson;
-}
-
-Node* makenode(MegaClient& mc, NodeHandle parent, ::mega::nodetype_t type, m_off_t size, handle owner, const string& attrs, ::mega::byte* key)
-{
-    static handle handlegenerator = 10;
-    auto newnode = new Node(mc, NodeHandle().set6byte(++handlegenerator), parent, type, size, owner, nullptr, 1);
-
-    newnode->setkey(key);
-    newnode->attrstring.reset(new string);
-
-    SymmCipher sc;
-    sc.setkey(key, type);
-    mc.makeattr(&sc, newnode->attrstring, attrs.c_str());
-
-    int attrlen = int(newnode->attrstring->size());
-    string base64attrstring;
-    base64attrstring.resize(static_cast<size_t>(attrlen * 4 / 3 + 4));
-    base64attrstring.resize(Base64::btoa((::mega::byte*)newnode->attrstring->data(),
-                                         newnode->attrstring->size(),
-                                         (char*)base64attrstring.data()));
-
-    *newnode->attrstring = base64attrstring;
-
-    return newnode;
-}
-
-} // anonymous
 
 TEST_F(SyncTest, PutnodesForMultipleFolders)
 {

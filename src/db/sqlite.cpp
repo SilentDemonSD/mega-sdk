@@ -3360,13 +3360,14 @@ bool validateListAllHandles(const std::vector<NodeHandle>& handles,
 
 // ── Date-section helpers (groupAllNodesByDate) ───────────────────────────────
 //
-// Inner-SELECT gid expression: gid := strftime(<fmt>, <secondsExpr>, 'unixepoch').
+// Inner-SELECT gid expression: gid := strftime(<fmt>, (<secondsExpr>) + ?tz, 'unixepoch').
 // strftime takes the unix-time value + 'unixepoch' modifier directly (no nested
 // datetime() needed). Granularity picks the strftime format; secondsExpr comes
 // from the descriptor so a future column stored in milliseconds can wrap as
 // "(col / 1000)" without changing this builder.
 std::string buildDateSectionGidExpr(const TimestampColumnDescriptor& col,
-                                    DateSectionGranularity granularity)
+                                    DateSectionGranularity granularity,
+                                    int tzParamIndex)
 {
     const char* fmt = nullptr;
     switch (granularity)
@@ -3385,7 +3386,11 @@ std::string buildDateSectionGidExpr(const TimestampColumnDescriptor& col,
             fmt = "'%Y-%m'";
             break;
     }
-    return "strftime(" + std::string(fmt) + ", " + col.secondsColumnExpr + ", 'unixepoch')";
+    // (col + ?tz) shifts the timestamp into the caller's local wall-clock time
+    // before strftime splits the calendar date. ?tz is bound to offset seconds
+    // (0 == UTC), so the SQL text is offset-independent (cache-stable).
+    return "strftime(" + std::string(fmt) + ", (" + col.secondsColumnExpr + ") + ?" +
+           std::to_string(tzParamIndex) + ", 'unixepoch')";
 }
 
 // Outer-SELECT bound expressions: gid is concatenated with a fixed datetime
@@ -3399,7 +3404,8 @@ struct DateSectionBoundExprs
     std::string endExpr; ///< bucket upper bound (exclusive), as int64
 };
 
-DateSectionBoundExprs buildDateSectionBoundExprs(DateSectionGranularity granularity)
+DateSectionBoundExprs buildDateSectionBoundExprs(DateSectionGranularity granularity,
+                                                 int tzParamIndex)
 {
     const char* concatTail = nullptr;
     const char* modifier = nullptr;
@@ -3424,10 +3430,22 @@ DateSectionBoundExprs buildDateSectionBoundExprs(DateSectionGranularity granular
             break;
     }
     const std::string base = std::string("gid || ") + concatTail;
+    // gid is now a LOCAL date string; strftime('%s', ...) reads it as-if-UTC, so
+    // subtract ?tz to recover the true UTC epoch of the local-midnight boundary.
+    const std::string tz = " - ?" + std::to_string(tzParamIndex);
     return {
-        "CAST(strftime('%s', " + base + ") AS INTEGER)",
-        "CAST(strftime('%s', " + base + ", " + modifier + ") AS INTEGER)",
+        "CAST(strftime('%s', " + base + ") AS INTEGER)" + tz,
+        "CAST(strftime('%s', " + base + ", " + modifier + ") AS INTEGER)" + tz,
     };
+}
+
+// Single source of truth for the tz-offset bound-parameter slot (immediately
+// after the exclude-handle run): the SQL builders and the binder both derive the
+// index here, so the query's `?N` and the value bind can't drift into silent
+// mis-binding.
+int dateSectionTzSlot(int excludeHandleParam, size_t numExcludes)
+{
+    return excludeHandleParam + static_cast<int>(numExcludes);
 }
 
 // Per-route inner SELECT — same WHERE shape as buildListAllRouteSelect plus
@@ -3438,7 +3456,8 @@ std::string buildDateSectionInnerSelect(const std::string& mimeFilterClause,
                                         DateSectionGranularity granularity,
                                         const SubtreeScopeSql& scope)
 {
-    const std::string gidExpr = buildDateSectionGidExpr(col, granularity);
+    const int tzParamIndex = dateSectionTzSlot(scope.excludeHandleParam, scope.numExcludes);
+    const std::string gidExpr = buildDateSectionGidExpr(col, granularity, tzParamIndex);
 
     std::vector<std::string> conditions;
     conditions.push_back(mimeFilterClause);
@@ -3472,7 +3491,8 @@ std::string buildDateSectionRouteSelect(const std::string& mimeFilterClause,
 
     const std::string innerSelect =
         buildDateSectionInnerSelect(mimeFilterClause, *col, granularity, scope);
-    const auto bounds = buildDateSectionBoundExprs(granularity);
+    const int tzParamIndex = dateSectionTzSlot(scope.excludeHandleParam, scope.numExcludes);
+    const auto bounds = buildDateSectionBoundExprs(granularity, tzParamIndex);
 
     return "WITH grouped AS ( \n" + innerSelect +
            " \n"
@@ -3548,7 +3568,8 @@ size_t computeListAllCacheId(MimeType_t mimeType,
 
 // Cache key for mStmtDateSections — same shape as computeListAllCacheId but
 // with a base-3 granularity digit instead of hasCursor + anchorDir (the
-// section query has no cursor and no timestamp-anchor filter). Declared in
+// section query has no cursor and no timestamp-anchor filter). The tz offset is
+// a bound value, not part of the SQL text, so it needs no key digit. Declared in
 // include/mega/db/sqlite.h for the same test-reach reason as above.
 size_t computeDateSectionsCacheId(MimeType_t mimeType,
                                   int order,
@@ -3868,11 +3889,11 @@ bool SqliteAccountState::listAllNodesByPage(
 // buildDateSectionRouteSelect if it changes):
 //
 // ORDER_MODIFICATION_DESC, Month granularity, simple mime, 1 root, no excludes,
-// excludeSensitive=false. Slot layout: ?1=mimeFilter, ?2=filesRoots[0]. No LIMIT,
-// no cursor, no anchor — the section query always spans the whole scope.
+// excludeSensitive=false. Slot layout: ?1=mimeFilter, ?2=filesRoots[0], ?3=tzOffsetSeconds.
+// No LIMIT, no cursor, no anchor — the section query always spans the whole scope.
 //
 //   WITH grouped AS (
-//     SELECT strftime('%Y-%m', mtime, 'unixepoch') AS gid,
+//     SELECT strftime('%Y-%m', (mtime) + ?3, 'unixepoch') AS gid,
 //            COUNT(*) AS cnt
 //     FROM nodes AS n
 //     WHERE mimetypeVirtual = ?1
@@ -3891,16 +3912,17 @@ bool SqliteAccountState::listAllNodesByPage(
 //     GROUP BY gid
 //   )
 //   SELECT gid,
-//          CAST(strftime('%s', gid || '-01 00:00:00') AS INTEGER) AS bucket_start,
-//          CAST(strftime('%s', gid || '-01 00:00:00', '+1 month') AS INTEGER) AS bucket_end,
+//          CAST(strftime('%s', gid || '-01 00:00:00') AS INTEGER) - ?3 AS bucket_start,
+//          CAST(strftime('%s', gid || '-01 00:00:00', '+1 month') AS INTEGER) - ?3 AS bucket_end,
 //          cnt
 //   FROM grouped
 //   ORDER BY gid DESC
 //
 // Day/Year swap the strftime format and the bucket concat-tail/modifier (see
 // buildDateSectionGidExpr / buildDateSectionBoundExprs); a grouped mime replaces
-// `mimetypeVirtual = ?1` with a literal IN-list and drops the ?1 slot;
-// excludeSensitive / excludes add sensSeen / excSeen columns to the up-walk CTE.
+// `mimetypeVirtual = ?1` with a literal IN-list and drops the ?1 slot (tz then
+// shifts to ?2); excludeSensitive / excludes add sensSeen / excSeen columns to
+// the up-walk CTE and shift the tz slot further right.
 bool SqliteAccountState::groupAllNodesByDate(const DateSectionParams& params,
                                              const std::vector<NodeHandle>& filesRoots,
                                              std::vector<DateSection>& out,
@@ -3949,7 +3971,8 @@ bool SqliteAccountState::groupAllNodesByDate(const DateSectionParams& params,
     sqlite3_stmt* stmt = (stmtIt != mStmtDateSections.end()) ? stmtIt->second : nullptr;
 
     // Slot layout: optional mimeFilter (?1 when set), numRoots contiguous filesRoot
-    // slots, numExcludes contiguous exclude-handle slots. No pageSize, no cursor.
+    // slots, numExcludes contiguous exclude-handle slots, then one tz-offset slot.
+    // No pageSize, no cursor.
     const int mimeFilterParam = 1;
     const int filesRootParam = mimeFilterParam + (mimeFilterNeedsParam ? 1 : 0);
     const int excludeHandleParam = filesRootParam + static_cast<int>(numRoots);
@@ -4005,6 +4028,16 @@ bool SqliteAccountState::groupAllNodesByDate(const DateSectionParams& params,
                   static_cast<sqlite3_int64>(params.excludeHandles[i].as8byte()),
                   sqlite3_bind_int64);
     }
+
+    // tz offset occupies the slot immediately after the exclude-handle run
+    // (same source of truth as the SQL builders). Bound even when 0 (UTC) so
+    // the SQL text — and thus the prepared-statement cache key — is offset-independent.
+    const int tzOffsetParam = dateSectionTzSlot(excludeHandleParam, numExcludes);
+    bindValue(sqlResult,
+              stmt,
+              tzOffsetParam,
+              static_cast<sqlite3_int64>(params.tzOffsetSeconds),
+              sqlite3_bind_int64);
 
     if (sqlResult == SQLITE_OK)
     {

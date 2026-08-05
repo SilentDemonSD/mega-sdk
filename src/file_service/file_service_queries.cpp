@@ -196,7 +196,8 @@ FileServiceQueries::FileServiceQueries(Database& database):
                                " where id = :id";
 
     mSetFileRemoved = "update files "
-                      "   set name = null "
+                      "   set handle = null "
+                      "     , name = null "
                       "     , parent_handle = null "
                       "     , removed = 1 "
                       " where id = :id";

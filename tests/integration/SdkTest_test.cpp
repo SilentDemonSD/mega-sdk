@@ -31,6 +31,7 @@
 #include "mega/testhooks.h"
 #include "mega/types.h"
 #include "megaapi.h"
+#include "megaapi_impl.h"
 #include "megautils.h"
 #include "mock_listeners.h"
 #include "sdk_test_utils.h"
@@ -230,6 +231,7 @@ namespace
     //      2. A test job can run tests in parallel
     // Use current process ID so names are unique between different jobs (processes)
     // Use a static incremental counter so names are unique in the same job (process)
+#ifdef ENABLE_ISOLATED_GFX
     std::string newEndpointName()
     {
         static std::atomic_int counter{0};
@@ -242,12 +244,13 @@ namespace
 
     std::string executableName(const std::string& name)
     {
-    #ifdef WIN32
+#ifdef WIN32
         return name + ".exe";
-    #else
+#else
         return name;
-    #endif
+#endif
     }
+#endif
 
     MegaApiTestPointer newMegaApi(const char* appKey,
                                   const char* basePath,
@@ -7704,6 +7707,215 @@ TEST_F(SdkTest, SdkTestOverquotaNonCloudraid)
 }
 #endif
 
+#ifdef DEBUG
+// A streaming listener that keeps consuming data, so the stream is not aborted
+// by the default onTransferData handling before/after an injected overquota.
+struct StreamTracker: public TransferTracker
+{
+    using TransferTracker::TransferTracker;
+
+    std::atomic<int> tag{0};
+
+    void onTransferStart(MegaApi* api, MegaTransfer* transfer) override
+    {
+        if (transfer)
+        {
+            tag = transfer->getTag();
+        }
+        TransferTracker::onTransferStart(api, transfer);
+    }
+
+    bool onTransferData(MegaApi*, MegaTransfer*, char*, size_t) override
+    {
+        return true;
+    }
+};
+
+// Cancel a streaming transfer and wait for it to reach its terminal state, so no live transfer is
+// left behind when the test returns. Cancelling goes through MegaClient::preadabort(), which fails
+// the pending direct read with API_EINCOMPLETE and destroys its DirectReadNode.
+static void cancelStreamAndWait(MegaApi* api, StreamTracker& tracker)
+{
+    ASSERT_GT(tracker.tag.load(), 0) << "The streaming transfer never started";
+    api->cancelTransferByTag(tracker.tag);
+    ASSERT_EQ(API_EINCOMPLETE, tracker.waitForResult(60))
+        << "The streaming transfer did not reach its terminal state";
+}
+#endif
+
+/**
+ * @brief TEST_F SdkTestStreamingOverquotaEvent
+ *
+ * Induces a simulated bandwidth overquota (HTTP 509) during a streaming read and confirms the SDK
+ * delivers the dedicated global event MegaEvent::EVENT_STREAM_OVERQUOTA to the app.
+ */
+#ifdef DEBUG
+TEST_F(SdkTest, SdkTestStreamingOverquotaEvent)
+{
+    LOG_info << "___TEST SdkTestStreamingOverquotaEvent";
+    ASSERT_NO_FATAL_FAILURE(getAccountsForTest(1));
+    ASSERT_TRUE(DebugTestHook::resetForTests()) << "SDK test hooks are not enabled in release mode";
+
+    // Upload a file we can stream back.
+    std::unique_ptr<MegaNode> rootnode{megaApi[0]->getRootNode()};
+    deleteFile(UPFILE);
+    ASSERT_TRUE(createFile(UPFILE, true)) << "Couldn't create " << UPFILE;
+    MegaHandle uploadedNodeHandle = UNDEF;
+    ASSERT_EQ(MegaError::API_OK,
+              doStartUpload(0,
+                            &uploadedNodeHandle,
+                            UPFILE.c_str(),
+                            rootnode.get(),
+                            nullptr /*fileName*/,
+                            ::mega::MegaApi::INVALID_CUSTOM_MOD_TIME,
+                            nullptr /*appData*/,
+                            false /*isSourceTemporary*/,
+                            false /*startFirst*/,
+                            nullptr /*cancelToken*/))
+        << "Upload transfer failed";
+    std::unique_ptr<MegaNode> n1{megaApi[0]->getNodeByHandle(uploadedNodeHandle)};
+    ASSERT_NE(n1.get(), ((::mega::MegaNode*)NULL));
+
+    // Make the first streaming chunk request come back as bandwidth overquota (509, 30s left).
+    DebugTestHook::isRaid = false;
+    DebugTestHook::isRaidKnown = false;
+    DebugTestHook::countdownToOverquota = 0;
+#ifdef MEGASDK_DEBUG_TEST_HOOKS_ENABLED
+    globalMegaTestHooks.onHttpReqPost = DebugTestHook::onHttpReqPost509;
+    globalMegaTestHooks.onSetIsRaid = DebugTestHook::onSetIsRaid;
+#endif
+
+    mApi[0].resetlastEvent();
+    megaApi[0]->setStreamingMinimumRate(0);
+    StreamTracker tracker(megaApi[0].get());
+    megaApi[0]->startStreaming(n1.get(), 0 /*startPos*/, n1->getSize() /*size*/, &tracker);
+
+    // The overquota must reach the app through the dedicated global event.
+    second_timer t;
+    while (t.elapsed() < 60 && !mApi[0].lastEventsContain(MegaEvent::EVENT_STREAM_OVERQUOTA))
+    {
+        WaitMillisec(500);
+    }
+    ASSERT_TRUE(mApi[0].lastEventsContain(MegaEvent::EVENT_STREAM_OVERQUOTA))
+        << "EVENT_STREAM_OVERQUOTA was not delivered to the app during a streaming overquota";
+
+    // Stop injecting, and cancel the stream instead of waiting out the injected overquota state:
+    // the read is parked until it expires, and leaving it running past the end of the test would
+    // leave a live transfer behind.
+    ASSERT_TRUE(DebugTestHook::resetForTests());
+    ASSERT_NO_FATAL_FAILURE(cancelStreamAndWait(megaApi[0].get(), tracker));
+}
+#endif
+
+/**
+ * @brief TEST_F SdkTestStreamingOverquotaEventAlreadyOverquota
+ *
+ * A streaming read started while the account is *already* known to be over its transfer quota is
+ * rejected by MegaClient::queueread() before any request reaches a storage server, so it never
+ * observes an HTTP 509 of its own and DirectReadNode::retry() never runs. The SDK must still
+ * deliver MegaEvent::EVENT_STREAM_OVERQUOTA to the app.
+ *
+ * This is the sequence the app hits in practice: a regular download exhausts the transfer quota
+ * first, and only afterwards the user starts playing a video.
+ */
+#ifdef DEBUG
+TEST_F(SdkTest, SdkTestStreamingOverquotaEventAlreadyOverquota)
+{
+    LOG_info << "___TEST SdkTestStreamingOverquotaEventAlreadyOverquota";
+    ASSERT_NO_FATAL_FAILURE(getAccountsForTest(1));
+    ASSERT_TRUE(DebugTestHook::resetForTests()) << "SDK test hooks are not enabled in release mode";
+
+    // Upload a file we can download and then stream back.
+    std::unique_ptr<MegaNode> rootnode{megaApi[0]->getRootNode()};
+    deleteFile(UPFILE);
+    ASSERT_TRUE(createFile(UPFILE, true)) << "Couldn't create " << UPFILE;
+    MegaHandle uploadedNodeHandle = UNDEF;
+    ASSERT_EQ(MegaError::API_OK,
+              doStartUpload(0,
+                            &uploadedNodeHandle,
+                            UPFILE.c_str(),
+                            rootnode.get(),
+                            nullptr /*fileName*/,
+                            ::mega::MegaApi::INVALID_CUSTOM_MOD_TIME,
+                            nullptr /*appData*/,
+                            false /*isSourceTemporary*/,
+                            false /*startFirst*/,
+                            nullptr /*cancelToken*/))
+        << "Upload transfer failed";
+    std::unique_ptr<MegaNode> n1{megaApi[0]->getNodeByHandle(uploadedNodeHandle)};
+    ASSERT_NE(n1.get(), ((::mega::MegaNode*)NULL));
+
+    // Enter the overquota state through a regular download: its first chunk request comes back as
+    // bandwidth overquota (509, 30s left). This is reported to the app as a transfer temporary
+    // error, and leaves the client-wide overquota deadline set.
+    DebugTestHook::isRaid = false;
+    DebugTestHook::isRaidKnown = false;
+    DebugTestHook::countdownToOverquota = 0;
+#ifdef MEGASDK_DEBUG_TEST_HOOKS_ENABLED
+    globalMegaTestHooks.onHttpReqPost = DebugTestHook::onHttpReqPost509;
+    globalMegaTestHooks.onSetIsRaid = DebugTestHook::onSetIsRaid;
+#endif
+
+    const string downloadPath = DOTSLASH + DOWNFILE;
+    deleteFile(downloadPath);
+    TransferTracker seedTracker(megaApi[0].get());
+    megaApi[0]->startDownload(n1.get(),
+                              downloadPath.c_str(),
+                              nullptr /*customName*/,
+                              nullptr /*appData*/,
+                              false /*startFirst*/,
+                              nullptr /*cancelToken*/,
+                              MegaTransfer::COLLISION_CHECK_FINGERPRINT /*collisionCheck*/,
+                              MegaTransfer::COLLISION_RESOLUTION_NEW_WITH_N /*collisionResolution*/,
+                              false /*undelete*/,
+                              &seedTracker);
+
+    second_timer overquotaTimer;
+    while (overquotaTimer.elapsed() < 60 && megaApi[0]->getBandwidthOverquotaDelay() == 0)
+    {
+        WaitMillisec(500);
+    }
+    ASSERT_GT(megaApi[0]->getBandwidthOverquotaDelay(), 0)
+        << "The regular download did not put the account into the overquota state";
+
+    // Stop injecting errors. From here on a streaming request would be served normally, so the
+    // event can only come from the overquota state the SDK already knows about, which is what this
+    // test is about. Leaving the hook in place would just retest the path already covered by
+    // SdkTestStreamingOverquotaEvent, where the streaming read hits a 509 of its own.
+    ASSERT_TRUE(DebugTestHook::resetForTests());
+
+    mApi[0].resetlastEvent();
+    megaApi[0]->setStreamingMinimumRate(0);
+    StreamTracker tracker(megaApi[0].get());
+
+    // The simulated overquota only lasts 30 seconds. If getting here took longer, the stream would
+    // be dispatched normally and no event is due, so say that rather than reporting a missing
+    // event.
+    ASSERT_GT(megaApi[0]->getBandwidthOverquotaDelay(), 0)
+        << "The overquota state expired before the streaming read could be started";
+
+    megaApi[0]->startStreaming(n1.get(), 0 /*startPos*/, n1->getSize() /*size*/, &tracker);
+
+    second_timer t;
+    while (t.elapsed() < 60 && !mApi[0].lastEventsContain(MegaEvent::EVENT_STREAM_OVERQUOTA))
+    {
+        WaitMillisec(500);
+    }
+    ASSERT_TRUE(mApi[0].lastEventsContain(MegaEvent::EVENT_STREAM_OVERQUOTA))
+        << "EVENT_STREAM_OVERQUOTA was not delivered for a stream started while already overquota";
+
+    // Both transfers are parked until the injected overquota state expires. Cancel them instead of
+    // waiting it out: the seeded download is persisted to the transfer cache, so leaving it behind
+    // could see it resumed by a later test when sessions are reused (--RESUMESESSIONS).
+    ASSERT_NO_FATAL_FAILURE(cancelStreamAndWait(megaApi[0].get(), tracker));
+
+    ASSERT_EQ(API_OK, synchronousCancelTransfers(0, MegaTransfer::TYPE_DOWNLOAD));
+    ASSERT_EQ(API_EINCOMPLETE, seedTracker.waitForResult(60))
+        << "The seeded download did not reach its terminal state";
+
+    deleteFile(downloadPath);
+}
+#endif
 
 /**
 * @brief TEST_F SdkTestOverquotaNonCloudraid
@@ -20686,57 +20898,84 @@ TEST_F(SdkTest, GetActivePlansAndFeatures)
     LOG_info << "___TEST GetActivePlansAndFeaturess___";
     ASSERT_NO_FATAL_FAILURE(getAccountsForTest(1));
 
-    RequestTracker accDetailsTracker(megaApi[0].get());
-    megaApi[0]->getAccountDetails(&accDetailsTracker);
-    ASSERT_EQ(accDetailsTracker.waitForResult(), API_OK) << "Failed to get account details";
+    // The loop elevates the account to pro (iteration 1); capture the current level now so it is
+    // reverted when the test ends. getAccountsForTest only auto-restores accounts that started
+    // non-free, so an elevated free account must be reverted here.
+    ScopedDestructor accountRestorer = accountLevelRestorer(*megaApi[0]);
 
-    std::unique_ptr<MegaAccountDetails> accountDetails(
-        accDetailsTracker.request->getMegaAccountDetails());
-    ASSERT_TRUE(accountDetails) << "Missing account details";
-
-    int proLevel = MegaAccountDetails::ACCOUNT_TYPE_FREE;
-    set<string> featuresGranted;
-    for (int i = 0; i < accountDetails->getNumPlans(); ++i)
+    // Verify plans + active features against two states: the account's current (non-pro) state
+    // (iteration 0), then a pro state (iteration 1). Elevating is a best-effort way to surface an
+    // active plan to inspect; we do NOT assume plans exist only for pro accounts, so the checks
+    // are driven by whatever plans the response contains.
+    for (int iteration = 0; iteration < 2; ++iteration)
     {
-        std::unique_ptr<MegaAccountPlan> plan(accountDetails->getPlan(i));
-        std::unique_ptr<MegaStringList> features(plan->getFeatures());
-        for (int j = 0; j < features->size(); ++j)
+        if (iteration == 1)
         {
-            // Acumulate granted features
-            featuresGranted.emplace(features->get(j));
+            ASSERT_EQ(
+                setAccountLevel(*megaApi[0], MegaAccountDetails::ACCOUNT_TYPE_PROI, 1, nullptr),
+                API_OK)
+                << "Failed to elevate account to a pro plan";
         }
 
-        if (plan->isProPlan())
-        {
-            ASSERT_EQ(proLevel, MegaAccountDetails::ACCOUNT_TYPE_FREE)
-                << "More than one PRO plan has been received";
-            proLevel = plan->getAccountLevel();
-            ASSERT_GT(proLevel, MegaAccountDetails::ACCOUNT_TYPE_FREE)
-                << "PRO level is ACCOUNT_TYPE_FREE";
-            ASSERT_NE(proLevel, MegaAccountDetails::ACCOUNT_TYPE_FEATURE)
-                << "PRO plan is a feature plan";
-            ASSERT_EQ(proLevel, accountDetails->getProLevel())
-                << "PRO level of the plan does not match the PRO account level";
-        }
-        else // Feature plan
-        {
-            ASSERT_EQ(plan->getAccountLevel(), MegaAccountDetails::ACCOUNT_TYPE_FEATURE)
-                << "Feature plan has not a feature account level";
-            ASSERT_GT(features->size(), 0) << "Feature plan does not grant any feature";
-        }
-    }
+        RequestTracker accDetailsTracker(megaApi[0].get());
+        megaApi[0]->getAccountDetails(&accDetailsTracker);
+        ASSERT_EQ(accDetailsTracker.waitForResult(), API_OK) << "Failed to get account details";
+        std::unique_ptr<MegaAccountDetails> accountDetails(
+            accDetailsTracker.request->getMegaAccountDetails());
+        ASSERT_TRUE(accountDetails) << "Missing account details";
 
-    // Compare features contained in the plans with the features received for the account.
-    ASSERT_EQ(featuresGranted.size(), accountDetails->getNumActiveFeatures())
-        << "Features in active plans don't match the number of features of the account";
-    m_time_t currTime = m_time();
-    for (int i = 0; i < accountDetails->getNumActiveFeatures(); ++i)
-    {
-        std::unique_ptr<MegaAccountFeature> feature(accountDetails->getActiveFeature(i));
-        ASSERT_GE(feature->getExpiry(), currTime) << "Received an expired feature";
-        string featureId(std::unique_ptr<const char[]>(feature->getId()).get());
-        ASSERT_NE(featuresGranted.find(featureId), featuresGranted.end())
-            << "Feature " << featureId << " is not present in any plan";
+        int proLevel = MegaAccountDetails::ACCOUNT_TYPE_FREE;
+        set<string> featuresGranted;
+        for (int i = 0; i < accountDetails->getNumPlans(); ++i)
+        {
+            std::unique_ptr<MegaAccountPlan> plan(accountDetails->getPlan(i));
+
+            EXPECT_GT(plan->getStartTime(), 0) << "Active plan is missing a start time";
+            if (plan->getExpirationTime() > 0)
+            {
+                EXPECT_LT(plan->getStartTime(), plan->getExpirationTime())
+                    << "Plan start time is not before its expiration";
+            }
+
+            std::unique_ptr<MegaStringList> features(plan->getFeatures());
+            for (int j = 0; j < features->size(); ++j)
+            {
+                // Acumulate granted features
+                featuresGranted.emplace(features->get(j));
+            }
+
+            if (plan->isProPlan())
+            {
+                ASSERT_EQ(proLevel, MegaAccountDetails::ACCOUNT_TYPE_FREE)
+                    << "More than one PRO plan has been received";
+                proLevel = plan->getAccountLevel();
+                ASSERT_GT(proLevel, MegaAccountDetails::ACCOUNT_TYPE_FREE)
+                    << "PRO level is ACCOUNT_TYPE_FREE";
+                ASSERT_NE(proLevel, MegaAccountDetails::ACCOUNT_TYPE_FEATURE)
+                    << "PRO plan is a feature plan";
+                ASSERT_EQ(proLevel, accountDetails->getProLevel())
+                    << "PRO level of the plan does not match the PRO account level";
+            }
+            else // Feature plan
+            {
+                ASSERT_EQ(plan->getAccountLevel(), MegaAccountDetails::ACCOUNT_TYPE_FEATURE)
+                    << "Feature plan has not a feature account level";
+                ASSERT_GT(features->size(), 0) << "Feature plan does not grant any feature";
+            }
+        }
+
+        // Compare features contained in the plans with the features received for the account.
+        ASSERT_EQ(featuresGranted.size(), accountDetails->getNumActiveFeatures())
+            << "Features in active plans don't match the number of features of the account";
+        m_time_t currTime = m_time();
+        for (int i = 0; i < accountDetails->getNumActiveFeatures(); ++i)
+        {
+            std::unique_ptr<MegaAccountFeature> feature(accountDetails->getActiveFeature(i));
+            ASSERT_GE(feature->getExpiry(), currTime) << "Received an expired feature";
+            string featureId(std::unique_ptr<const char[]>(feature->getId()).get());
+            ASSERT_NE(featuresGranted.find(featureId), featuresGranted.end())
+                << "Feature " << featureId << " is not present in any plan";
+        }
     }
 }
 

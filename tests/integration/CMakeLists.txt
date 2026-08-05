@@ -62,6 +62,8 @@ target_sources(test_integration
     sdk_test_share_nested.cpp
     SdkTestMassiveActionPackets_test.cpp
     sdk_test_shares.cpp
+    SdkTestStreamingNodeKey_test.cpp
+    sdk_test_vault_access.cpp
 
     passwordManager/SdkTestPasswordManager.cpp
     passwordManager/SdkTestPasswordManager.h

@@ -33,6 +33,7 @@ NS_ASSUME_NONNULL_BEGIN
         _location = MEGAListAllNodesFilterLocationCloudDriveAndVault;
         _sensitivityFilter = MEGAListAllNodesFilterSensitivityOptionDisabled;
         _granularity = MEGAGroupNodesByDateGranularityMonth;
+        _utcOffset = nil;
     }
     return self;
 }

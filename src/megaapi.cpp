@@ -7103,7 +7103,7 @@ size_t MegaSyncStallMap::size() const
 size_t MegaSyncStallMap::getHash() const
 {
     uint64_t hash = 0;
-    const MegaHandleList* keys = getKeys();
+    std::unique_ptr<MegaHandleList> keys{getKeys()};
     for (unsigned int i = 0; i < keys->size(); ++i)
     {
         hash = hashCombine(hash, get(keys->get(i))->getHash());
@@ -7663,6 +7663,13 @@ void MegaGroupNodesByDateFilter::byGranularity(int /*granularity*/) {}
 int MegaGroupNodesByDateFilter::byGranularity() const
 {
     return MegaGroupNodesByDateFilter::SECTION_GRANULARITY_MONTH;
+}
+
+void MegaGroupNodesByDateFilter::byUtcOffset(const char* /*utcOffset*/) {}
+
+const char* MegaGroupNodesByDateFilter::byUtcOffset() const
+{
+    return "";
 }
 
 MegaDateSection::MegaDateSection() {}

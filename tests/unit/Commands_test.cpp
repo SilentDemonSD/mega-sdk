@@ -16,15 +16,17 @@
  * program.
  */
 
-#include <memory>
+#include "utils.h"
 
 #include <gtest/gtest.h>
-
+#include <mega/account.h>
 #include <mega/command.h>
 #include <mega/json.h>
 #include <mega/megaapp.h>
 #include <mega/megaclient.h>
 #include <mega/types.h>
+
+#include <memory>
 
 using namespace std;
 using namespace mega;
@@ -255,3 +257,119 @@ TEST(Commands, CommandQueryAds)
     command.procresult(r);
 }
 */
+
+namespace
+{
+
+TEST(Commands, CommandGetUserQuota_parsesPlanStartTime)
+{
+    // The uq `plans` array carries a per-plan start time in the `ts` field (plan
+    // activation), alongside `expires`. Verify readPlans captures it into AccountPlan.
+    MegaApp app;
+    auto client = mt::makeClient(app);
+
+    auto details = std::make_shared<AccountDetails>();
+
+    // storage/transfer/pro all false: this skips the storage sanity checks and the
+    // processPlans() account-status side effects, while readPlans still parses `plans`.
+    CommandGetUserQuota command(client.get(), details, false, false, false, 0);
+    command.client = client.get();
+
+    // The framework enters the reply object before calling procresult(CmdObject).
+    JSON json;
+    json.pos = R"({"plans":[{"al":1,"ts":1783500245,"expires":1815036245,"type":2,)"
+               R"("features":{"vpn":1,"pwm":1}}]})";
+    ASSERT_TRUE(json.enterobject());
+
+    command.procresult(Command::CmdObject, json);
+
+    ASSERT_EQ(1u, details->plans.size());
+    const AccountPlan& plan = details->plans[0];
+    EXPECT_EQ(1783500245, plan.startTime);
+    EXPECT_EQ(1815036245, plan.expiration);
+    EXPECT_EQ(1, plan.level);
+    EXPECT_EQ(2, plan.type);
+}
+
+// Captures the mobile offer parsed for each pricing item, to test utqa `mo` parsing.
+class MobileOfferCapturingApp: public MegaApp
+{
+public:
+    using MegaApp::enumeratequotaitems_result; // avoid hiding the other overloads
+
+    std::optional<MobileOffer> capturedOffer;
+    int errorCalls = 0;
+    error lastError = API_OK;
+
+    void enumeratequotaitems_result(const Product& product) override
+    {
+        if (product.mobileOffer)
+        {
+            capturedOffer = product.mobileOffer;
+        }
+    }
+
+    void enumeratequotaitems_result(error e) override
+    {
+        // This overload also signals successful completion (API_OK); only real
+        // errors are of interest here.
+        if (e != API_OK)
+        {
+            ++errorCalls;
+            lastError = e;
+        }
+    }
+};
+
+TEST(Commands, CommandEnumerateQuotaItems_parsesMobileOffer)
+{
+    MobileOfferCapturingApp app;
+    auto client = mt::makeClient(app);
+
+    // A utqa reply is a JSON array whose first element carries the shared
+    // currency (`l`) data, followed by one object per plan. A Product is only
+    // delivered once an item passes its sanity checks (currency set, non-zero
+    // `tc` and `mbp`, storage/transfer, store ids, ...), so the plan item here
+    // is fully formed; the mobile offer (`mo`) rides along on it.
+    JSON json;
+    json.pos = R"([{"l":{"c":"EUR","cs":"4oKs"}},)"
+               R"({"it":0,"id":"ITKCjurRtbQ","al":1,"s":3072,"t":36864,"m":12,"p":9999,"mbp":999,)"
+               R"("d":"MEGA Pro I","tc":1,"ios":"mega.new.ios.pro1.oneYear.test",)"
+               R"("google":"mega.android.pro1.oneyear.test",)"
+               R"("mo":{"id":"mega-discount","uat":0,"f":3,"l":"MEGA Discount","p":20,)"
+               R"("e":1787464050,"r":86400,)"
+               R"("ios":{"oid":"mega.new.ios.pro1.oneYear.test.promo","ki":"KYV4FR348H",)"
+               R"("n":"8c39d535-9237-4b96-888d-699296d5c877","tsm":1783997257514,)"
+               R"("s":"sig-abc+def/ghi=="},)"
+               R"("and":{"oid":"mega-discount"}}}])";
+
+    // The framework enters the reply array before calling procresult(CmdArray).
+    ASSERT_TRUE(json.enterarray());
+
+    CommandEnumerateQuotaItems command(std::nullopt, client.get());
+    command.client = client.get();
+
+    command.procresult(Command::CmdArray, json);
+
+    ASSERT_EQ(0, app.errorCalls) << "parser reported an error, code=" << app.lastError;
+    ASSERT_TRUE(app.capturedOffer.has_value());
+    const MobileOffer& mo = *app.capturedOffer;
+    EXPECT_EQ("mega-discount", mo.id);
+    EXPECT_FALSE(mo.uat);
+    EXPECT_EQ("MEGA Discount", mo.label);
+    EXPECT_EQ(20, mo.discountPercentage);
+    EXPECT_EQ(1787464050, mo.expiryTimestamp);
+    EXPECT_EQ(3u, mo.flags);
+    EXPECT_EQ(86400, mo.reshowInterval);
+
+    ASSERT_TRUE(mo.ios.has_value());
+    EXPECT_EQ("mega.new.ios.pro1.oneYear.test.promo", mo.ios->offerId);
+    EXPECT_EQ("KYV4FR348H", mo.ios->keyId);
+    EXPECT_EQ("8c39d535-9237-4b96-888d-699296d5c877", mo.ios->nonce);
+    EXPECT_EQ(1783997257514, mo.ios->timestampMs);
+    EXPECT_EQ("sig-abc+def/ghi==", mo.ios->signature);
+
+    ASSERT_TRUE(mo.android.has_value());
+    EXPECT_EQ("mega-discount", mo.android->offerId);
+}
+} // anonymous

@@ -71,3 +71,35 @@ TEST(LRUCache, addElementsExceedingSizeV2)
     ASSERT_TRUE(lru.get(1).has_value());
     ASSERT_FALSE(lru.get(2).has_value());
 }
+
+/**
+ * @brief Test container LRUCache removing an existing element.
+ */
+TEST(LRUCache, eraseExistingElement)
+{
+    LRUCache<int, std::string> lru(3);
+
+    addElementToLRU(lru, 1);
+    addElementToLRU(lru, 2);
+    addElementToLRU(lru, 3);
+
+    ASSERT_TRUE(lru.erase(2));
+    ASSERT_EQ(lru.size(), 2u);
+    ASSERT_FALSE(lru.get(2).has_value());
+    ASSERT_TRUE(lru.get(1).has_value());
+    ASSERT_TRUE(lru.get(3).has_value());
+}
+
+/**
+ * @brief Test container LRUCache removing a missing element.
+ */
+TEST(LRUCache, eraseMissingElement)
+{
+    LRUCache<int, std::string> lru(2);
+
+    addElementToLRU(lru, 1);
+
+    ASSERT_FALSE(lru.erase(2));
+    ASSERT_EQ(lru.size(), 1u);
+    ASSERT_TRUE(lru.get(1).has_value());
+}

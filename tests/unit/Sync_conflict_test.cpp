@@ -16,11 +16,12 @@
  * program.
  */
 
-#include <memory>
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-#include "megaapi_impl.h"
 #include "mega/sync.h"
+#include "megaapi_impl.h"
+
+#include <gtest/gtest.h>
+
+#include <memory>
 
 #ifdef ENABLE_SYNC
 

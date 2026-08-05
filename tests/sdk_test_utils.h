@@ -497,6 +497,9 @@ public:
     /**
      * @brief Creates and stores a tracker of type T for the given absolute path.
      *
+     * If a tracker for this path already exists, it is replaced so that at most one
+     * tracker per path is kept, and getByPath() unambiguously returns the latest one.
+     *
      * @param path Absolute filesystem path whose events should be tracked.
      * @return A shared pointer to the created tracker.
      */
@@ -504,7 +507,22 @@ public:
     {
         auto tracker = std::make_shared<T>(path);
         std::lock_guard<std::mutex> guard(mMutex);
-        mTrackers.emplace_back(tracker);
+
+        auto it = std::find_if(mTrackers.begin(),
+                               mTrackers.end(),
+                               [&](const std::shared_ptr<T>& existing)
+                               {
+                                   return existing && existing->getPath() == path;
+                               });
+        if (it != mTrackers.end())
+        {
+            *it = tracker;
+        }
+        else
+        {
+            mTrackers.emplace_back(tracker);
+        }
+
         return tracker;
     }
 
@@ -516,24 +534,19 @@ public:
      */
     std::shared_ptr<T> getByPath(const std::string& path) const
     {
-        // mMutex serializes against add()'s emplace_back: getByPath() runs on the SDK callback
+        // mMutex serializes against add()'s mutations: getByPath() runs on the SDK callback
         // thread (onSyncFileStateChanged) while the test thread registers trackers, so an
         // unlocked iteration could read a vector being reallocated -> use-after-free.
         std::lock_guard<std::mutex> guard(mMutex);
 
-        std::shared_ptr<T> result;
+        auto it = std::find_if(mTrackers.begin(),
+                               mTrackers.end(),
+                               [&](const std::shared_ptr<T>& tracker)
+                               {
+                                   return tracker && tracker->getPath() == path;
+                               });
 
-        std::for_each(mTrackers.begin(),
-                      mTrackers.end(),
-                      [&](const std::shared_ptr<T>& tracker)
-                      {
-                          if (tracker && tracker->getPath() == path)
-                          {
-                              result = tracker;
-                          }
-                      });
-
-        return result;
+        return it != mTrackers.end() ? *it : nullptr;
     }
 
 private:

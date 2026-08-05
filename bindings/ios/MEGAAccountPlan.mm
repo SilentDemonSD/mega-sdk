@@ -78,6 +78,10 @@ using namespace mega;
     return self.megaAccountPlan ? self.megaAccountPlan->getExpirationTime() : 0;
 }
 
+- (int64_t)startTime {
+    return self.megaAccountPlan ? self.megaAccountPlan->getStartTime() : 0;
+}
+
 - (int32_t)type {
     return self.megaAccountPlan ? self.megaAccountPlan->getType() : 0;
 }
