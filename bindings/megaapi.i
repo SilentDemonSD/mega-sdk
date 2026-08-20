@@ -489,6 +489,7 @@ extern "C" jint JNIEXPORT JNICALL JNI_OnLoad(JavaVM *jvm, void *reserved)
 %ignore mega::SynchronousTransferListener;
 %ignore mega::MegaUser::CHANGE_TYPE_RECENT_CLEAR_TIMESTAMP;
 
+#ifdef SWIGJAVA
 %extend mega::MegaUser {
   %proxycode %{
   /*
@@ -497,6 +498,15 @@ extern "C" jint JNIEXPORT JNICALL JNI_OnLoad(JavaVM *jvm, void *reserved)
   public final static long CHANGE_TYPE_RECENT_CLEAR_TIMESTAMP = 0x100000000L;
   %}
 }
+#elif defined(SWIGPYTHON)
+// Python ints are unbounded, so there is no uint64_t overflow to work around;
+// expose the constant directly on the proxy class.
+%extend mega::MegaUser {
+  %pythoncode %{
+    CHANGE_TYPE_RECENT_CLEAR_TIMESTAMP = 0x100000000
+  %}
+}
+#endif
 
 %newobject mega::MegaError::copy;
 %newobject mega::MegaRequest::copy;
