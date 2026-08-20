@@ -162,6 +162,11 @@ if(ENABLE_JAVA_BINDINGS)
     add_subdirectory(bindings/java)
 endif()
 
+# Load Python bindings
+if(ENABLE_PYTHON_BINDINGS)
+    add_subdirectory(bindings/python)
+endif()
+
 if(ENABLE_ISOLATED_GFX)
     add_subdirectory(tools/gfxworker)
 endif()

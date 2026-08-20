@@ -11,5 +11,4 @@
 # Building stuff
 build-*Debug
 build-*Release
-*.toml
 /CMakeUserPresets.json

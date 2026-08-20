@@ -283,6 +283,7 @@ extern "C" jint JNIEXPORT JNICALL JNI_OnLoad(JavaVM *jvm, void *reserved)
 
 #endif
 
+#ifdef SWIGJAVA
 %feature("director:before") {
     jenv->PushLocalFrame(32); // adjust number based on expected refs per callback
 }
@@ -291,6 +292,29 @@ extern "C" jint JNIEXPORT JNICALL JNI_OnLoad(JavaVM *jvm, void *reserved)
     jenv->PopLocalFrame(nullptr);
     MEGAJNI_CHECK(jenv, "director PopLocalFrame");
 }
+#elif defined(SWIGPYTHON)
+// Python GIL management for SWIG director callbacks.
+// MEGA invokes MegaListener/MegaRequestListener/etc. callbacks from its own
+// native worker threads, which do NOT hold the Python GIL. Acquire it on entry
+// to every director method and release it on exit. director:before and
+// director:after are emitted into the same director-method scope, so the
+// gstate declared in :before is in scope in :after (same pattern the Java
+// bindings use with Push/PopLocalFrame). This replaces the previous fragile
+// approach of regex-patching the generated *_wrap.cxx, which segfaulted.
+%feature("director:before") {
+    PyGILState_STATE gstate = PyGILState_Ensure();
+}
+
+%feature("director:after") {
+    PyGILState_Release(gstate);
+}
+
+%feature("director:except") {
+    if ($error != NULL) {
+        PyErr_Print();
+    }
+}
+#endif
 
 #ifdef __ANDROID__
 %feature("director:except") {
