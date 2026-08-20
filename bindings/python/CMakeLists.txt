@@ -27,7 +27,8 @@ if(USE_LIBUV)
     list(APPEND SWIG_COMPILE_OPTIONS -DHAVE_LIBUV)
 endif()
 
-set_property(SOURCE ${SWIG_INTERFACE_FILE} PROPERTY SWIG_COMPILE_OPTIONS ${SWIG_COMPILE_OPTIONS})
+# NOTE: SWIG_COMPILE_OPTIONS is applied on the TARGET below, not here on the
+# source -- CMake's UseSWIG ignores the source-level property.
 
 # Generate Python bindings
 swig_add_library(SDKPythonBindings
@@ -53,6 +54,13 @@ endif()
 if(USE_LIBUV)
     list(APPEND SDKPYTHON_SWIG_DEFINES HAVE_LIBUV)
 endif()
+
+# SWIG flags (incl. -threads) MUST be set on the TARGET. Setting SWIG_COMPILE_OPTIONS
+# on the source file (above) is silently ignored by CMake's UseSWIG, so -threads
+# never reached SWIG and directors were generated without GIL handling -> callbacks
+# from MEGA worker threads segfaulted. With -threads on the target, SWIG wraps each
+# director body in SWIG_PYTHON_THREAD_BEGIN_BLOCK/END_BLOCK (PyGILState_Ensure/Release).
+set_property(TARGET SDKPythonBindings PROPERTY SWIG_COMPILE_OPTIONS ${SWIG_COMPILE_OPTIONS})
 
 set_property(TARGET SDKPythonBindings PROPERTY SWIG_COMPILE_DEFINITIONS ${SDKPYTHON_SWIG_DEFINES})
 

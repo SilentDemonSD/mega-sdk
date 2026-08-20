@@ -293,22 +293,17 @@ extern "C" jint JNIEXPORT JNICALL JNI_OnLoad(JavaVM *jvm, void *reserved)
     MEGAJNI_CHECK(jenv, "director PopLocalFrame");
 }
 #elif defined(SWIGPYTHON)
-// Python GIL management for SWIG director callbacks.
 // MEGA invokes MegaListener/MegaRequestListener/etc. callbacks from its own
-// native worker threads, which do NOT hold the Python GIL. Acquire it on entry
-// to every director method and release it on exit. director:before and
-// director:after are emitted into the same director-method scope, so the
-// gstate declared in :before is in scope in :after (same pattern the Java
-// bindings use with Push/PopLocalFrame). This replaces the previous fragile
-// approach of regex-patching the generated *_wrap.cxx, which segfaulted.
-%feature("director:before") {
-    PyGILState_STATE gstate = PyGILState_Ensure();
-}
-
-%feature("director:after") {
-    PyGILState_Release(gstate);
-}
-
+// native worker threads, which do NOT hold the Python GIL. The GIL is acquired
+// and released around every director upcall by SWIG's own thread support:
+// building with the `-threads` flag wraps each director method body in
+// SWIG_PYTHON_THREAD_BEGIN_BLOCK/END_BLOCK (PyGILState_Ensure/Release). That
+// flag must be applied to the SWIG *target* (see bindings/python/CMakeLists.txt)
+// -- setting it on the source file has no effect. This replaces the previous
+// fragile approach (director:before/after, which SWIG ignores for Python, and a
+// regex patch of the generated *_wrap.cxx) that segfaulted.
+// director:except reports a Python-side exception instead of crashing the
+// native thread.
 %feature("director:except") {
     if ($error != NULL) {
         PyErr_Print();
